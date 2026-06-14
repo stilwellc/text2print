@@ -54,6 +54,118 @@ When designing objects that interface with real products (phones, chargers, PCBs
 
 This is especially important for: phone cases/stands, charger mounts, PCB enclosures, cable management, adapter fittings, and anything that clips onto or wraps around an existing product.
 
+## Mechanical Fit & Snap-Fit Reference
+
+Use these tables whenever designing features where two parts touch, mate, move, or snap. These values account for FDM's real-world tolerances — they replace guesswork and eliminate the most common class of reprints.
+
+### Clearance fits (sliding or rotating)
+
+| Fit type | PLA | PETG | ABS/ASA | TPU 95A |
+|----------|-----|------|---------|---------|
+| Sliding (drawer, rail) | 0.2mm/side | 0.3mm/side | 0.25mm/side | 0.15mm/side |
+| Rotating (pin in hole) | 0.25mm/side | 0.35mm/side | 0.3mm/side | 0.2mm/side |
+| Print-in-place hinge | 0.3mm/side | 0.4mm/side | 0.35mm/side | 0.25mm/side |
+| Loose / rattle-free | 0.15mm/side | 0.2mm/side | 0.2mm/side | 0.1mm/side |
+
+Clearance is **per side**. A 5mm PLA sliding pin goes in a `5.0 + 2×0.2 = 5.4mm` hole.
+
+### Press and interference fits
+
+| Fit type | PLA | PETG |
+|----------|-----|------|
+| Light press (removable by hand) | −0.1mm | −0.15mm |
+| Firm press (stays permanently) | −0.2mm | −0.25mm |
+| Interference (structural) | −0.3mm | −0.4mm |
+
+Negative = hole smaller than shaft. Interference fits in thin walls crack — wall must be ≥ 2× the interference value.
+
+### Snap-fit arm geometry
+
+Three variables drive a safe snap: arm length, root thickness, and material strain limit.
+
+```
+Max safe deflection y = (strain_limit × L²) / (1.5 × t)
+  L = arm length (mm), t = root thickness (mm)
+
+FDM strain limits (conservative — layer adhesion is the weak axis):
+  PLA     0.015   PETG    0.020   ABS/ASA  0.018
+  TPU 95A 0.150   Nylon   0.040
+```
+
+**Quick-reference arm proportions:**
+
+| Material | Arm length | Root thickness | Max deflection | Return angle |
+|----------|-----------|----------------|----------------|--------------|
+| PLA | 15mm | 1.5mm | 1.5mm | 30° |
+| PLA | 20mm | 1.5mm | 2.5mm | 35° |
+| PETG | 15mm | 1.5mm | 2.0mm | 25° |
+| PETG | 20mm | 2.0mm | 2.5mm | 30° |
+| TPU 95A | 10mm | 0.8mm | 3.0mm | 45° |
+| Nylon | 15mm | 1.2mm | 3.5mm | 40° |
+
+**Rules that must not be skipped:**
+- Orient snap arms so they deflect **perpendicular to layer lines** (sideways, not up/down) — layer-direction deflection delaminates.
+- Add 0.3mm clearance on the deflection side so the arm can actually move before engaging.
+- Taper root→tip (e.g. 1.5mm → 0.8mm) to distribute stress and soften the snap force.
+- Return angle > 45° on PLA = permanent lock. Use 25–35° for user-removable snaps.
+
+**CadQuery snippet — cantilever snap arm deflecting in Y:**
+```python
+arm_length  = 20.0   # mm
+root_thick  = 1.5    # mm
+tip_thick   = 0.8    # mm
+arm_width   = 4.0    # mm
+hook_height = 1.5    # mm — must match deflection clearance in mating part
+return_ang  = 30     # degrees
+
+arm = (
+    cq.Workplane("XZ")
+    .polyline([
+        (0, 0), (arm_length, 0),
+        (arm_length, hook_height),
+        (arm_length - hook_height / math.tan(math.radians(return_ang)), 0),
+    ])
+    .close()
+    .extrude(arm_width)
+    .faces("<Z").shell(-root_thick)  # taper via loft in practice
+)
+```
+
+### Living hinges (TPU only)
+
+| Hinge span | Thickness | Min bend radius |
+|------------|-----------|-----------------|
+| < 20mm | 0.6mm | 2mm |
+| 20–50mm | 0.8mm | 3mm |
+| > 50mm | 1.0mm | 5mm |
+
+Layer lines must run **across** the hinge (perpendicular to flex direction). Parallel layer lines delaminate immediately. Print flat.
+
+### Print-in-place joints
+
+| Joint type | Clearance | Key rule |
+|------------|-----------|----------|
+| Pin hinge PLA | 0.3mm/side | Print with pin axis parallel to bed |
+| Pin hinge PETG | 0.4mm/side | Same orientation |
+| Ball socket PLA | 0.4mm radial | Print socket open-side-up |
+| Captive M3 nut | 0.2mm/side hex | Pause print at nut layer, drop nut in |
+| Gear mesh | 0.15–0.2mm backlash | Print both gears in same plane |
+
+### Minimum feature sizes (0.4mm nozzle, 0.2mm layers)
+
+| Feature | Minimum | Notes |
+|---------|---------|-------|
+| Structural wall | 1.2mm | = 3 perimeters |
+| Decorative wall | 0.8mm | = 2 perimeters; no load |
+| Boss / pin diameter | 1.0mm | Smaller doesn't adhere reliably |
+| Slot / gap width | 0.5mm | Narrower fills with stringing |
+| Embossed text stroke | 0.5mm, 1.5mm deep | Shallower disappears |
+| Debossed text stroke | 0.6mm, 0.8mm deep | |
+| Vertical hole | 1.0mm diameter | |
+| Horizontal hole | nominal + 0.1–0.15mm | Gravity sags the top; D-shape top helps |
+
+---
+
 ## STL Reference Mode
 
 When the user provides an existing STL file — either to **modify** it or use it as **inspiration** — follow this workflow before writing any new geometry.
@@ -545,10 +657,12 @@ Even then, a 30-second search costs nothing — if you skip it, say why.
 1. **Gather requirements** (see Requirements Gathering below)
 2. **Search model repositories** (see Model Repository Search below) — find existing designs before building from scratch
 3. **Research dimensions** of any real-world products involved (see above)
-4. **Phase 1, Base shape**: Build outer shell, preview, get user feedback
-5. **Phase 2, Features**: Add functional details, preview, get user feedback
-6. **Phase 3, Final delivery**: Fillets, cleanup, final preview + STL + print recommendations
-7. **Offer parameter tweaks** after delivery
+4. **Apply mechanical fit constants** (see Mechanical Fit & Snap-Fit Reference above) — look up clearances, snap-fit proportions, and minimum features before writing any geometry
+5. **Phase 1, Base shape**: Build outer shell, preview, get user feedback
+6. **Phase 2, Features**: Add functional details, preview, get user feedback
+7. **Slicer verification** (see Slicer Verification below) — slice headlessly, check time/weight/support volume, fix before delivering
+8. **Phase 3, Final delivery**: Fillets, cleanup, final preview + slicer report + STL + print recommendations
+9. **Offer parameter tweaks** after delivery
 
 This is a **collaborative, show-as-you-go** process. Do NOT disappear and come back with a finished model. Show the user your progress at each phase and incorporate their feedback before moving on.
 
@@ -622,19 +736,133 @@ Add functional details: holes, cutouts, mounting bosses, cable slots, ventilatio
 
 ### Phase 3: Final Delivery
 
-Apply finishing touches: fillets, chamfers, edge cleanup. Do a full printability review.
+Apply finishing touches: fillets, chamfers, edge cleanup. Run slicer verification. Deliver.
 
 1. Add fillets/chamfers (largest radius first, apply after shell)
 2. Export final STL and render preview
 3. **Full self-review** using the complete checklist from `design-review.md`: visual inspection, dimensional verification, printability analysis
 4. Fix any issues found, re-export if needed
-5. **Deliver to the user**: final STL + preview image + print recommendations (orientation, supports, infill, material notes)
+5. **Run Slicer Verification** (see section below) — get ground-truth time, weight, and support volume before delivering
+6. If slicer flags issues (support volume > 25%, unexpectedly long print), fix the geometry and re-verify
+7. **Deliver to the user**: final STL + preview image + slicer report + print recommendations
 
 ---
 
 **Important:** Do NOT skip phases or combine them unless the model is very simple (e.g., a flat bracket with two holes). For anything with enclosed geometry, multiple features, or tight tolerances, follow all three phases.
 
 Read `design-review.md` for the full visual inspection checklist, dimensional verification code, and printability analysis helpers.
+
+---
+
+## Slicer Verification
+
+Run this as the final gate in Phase 3, before delivering any STL. Slicing the model headlessly gives ground-truth data — time, weight, support volume — that geometry analysis alone can't provide. Surprises caught here cost nothing. Surprises caught after the print starts waste hours of machine time.
+
+### Setup
+
+PrusaSlicer ships a full CLI inside its macOS bundle:
+
+```bash
+PSLICER="/Applications/PrusaSlicer.app/Contents/MacOS/prusa-slicer"
+$PSLICER --version   # confirm it's found
+```
+
+On Linux: `prusa-slicer` (if installed via package manager or AppImage).
+
+If PrusaSlicer is not installed, skip this section and note "slicer not available" in the delivery message. Never block delivery on it — it's a verification step, not a requirement.
+
+### Build a slice profile
+
+Generate a minimal `.ini` from the user's stated settings (material, layer height, walls, infill, supports):
+
+```python
+# write_profile.py
+import configparser
+
+def write_slice_profile(path, material="PLA", layer_h=0.2, nozzle=0.4,
+                        walls=2, infill=15, supports=False):
+    c = configparser.ConfigParser()
+    c["print"] = {
+        "layer_height":          str(layer_h),
+        "perimeters":            str(walls),
+        "fill_density":          f"{infill}%",
+        "fill_pattern":          "gyroid",
+        "support_material":      "1" if supports else "0",
+        "support_material_auto": "1" if supports else "0",
+    }
+    c["filament"] = {
+        "filament_type":  material,
+        "nozzle_diameter": str(nozzle),
+    }
+    with open(path, "w") as f:
+        c.write(f)
+
+# Call with values gathered during Requirements Gathering
+write_slice_profile("slice_profile.ini",
+    material=MATERIAL, layer_h=LAYER_H,
+    walls=WALLS, infill=INFILL, supports=SUPPORTS)
+```
+
+### Slice and parse
+
+```bash
+PSLICER="/Applications/PrusaSlicer.app/Contents/MacOS/prusa-slicer"
+$PSLICER \
+  --load slice_profile.ini \
+  --export-gcode \
+  --output model_sliced.gcode \
+  model.stl 2>&1
+```
+
+Parse the resulting gcode:
+
+```python
+import re, pathlib
+
+gcode = pathlib.Path("model_sliced.gcode").read_text(errors="ignore")
+
+def extract(pattern, text, default="unknown"):
+    m = re.search(pattern, text)
+    return m.group(1).strip() if m else default
+
+time_str    = extract(r"; estimated printing time \(normal mode\) = (.+)", gcode)
+filament_g  = extract(r"; total filament used \[g\] = ([\d.]+)", gcode)
+filament_mm = extract(r"; total filament used \[mm\] = ([\d.]+)", gcode)
+support_g   = extract(r"; total support material used \[g\] = ([\d.]+)", gcode, "0")
+layers      = len(re.findall(r"^;LAYER_CHANGE", gcode, re.MULTILINE))
+
+try:
+    support_pct = float(support_g) / float(filament_g) * 100
+except (ValueError, ZeroDivisionError):
+    support_pct = 0.0
+
+print(f"Print time:     {time_str}")
+print(f"Filament:       {filament_g}g  ({float(filament_mm)/1000:.1f}m)")
+print(f"Support:        {support_pct:.1f}% of total filament")
+print(f"Layer count:    {layers}")
+```
+
+### Interpret and act
+
+| Finding | Threshold | Action |
+|---------|-----------|--------|
+| Support volume | > 25% | Redesign orientation or add chamfers to eliminate |
+| Support volume | > 50% | Hard stop — do not deliver; redesign first |
+| Print time | > 8 hours | Flag to user; offer to split model or reduce infill |
+| Filament weight | > 200g | Note material cost; consider hollowing if appropriate |
+| Layer count | < 10 | Model may be wrong scale or too flat — verify |
+
+After fixing anything flagged, re-slice and re-parse. Only deliver once the numbers are clean.
+
+### Delivery line format
+
+Include the slicer report inline with the print settings:
+
+```
+Slicer report (PLA, 0.2mm, 2 walls, 15% infill): ~2h 15m · 18g · no supports · 112 layers.
+```
+
+---
 
 ### Print Recommendations (final delivery)
 
