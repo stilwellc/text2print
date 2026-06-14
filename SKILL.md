@@ -5,9 +5,18 @@ description: "Use this skill when the user wants to design a 3D-printable physic
 
 # Parametric 3D Printing with CadQuery
 
-## Overview
+## Mode Select
 
-This skill generates parametric 3D models using **CadQuery** (Python) and exports them as STL files ready for slicing. CadQuery is preferred because it installs via pip, has a Pythonic API, and handles complex geometry (fillets, chamfers, booleans, assemblies) better than alternatives.
+Read the user's request and pick one mode. Follow that mode linearly from start to finish.
+
+| If the user… | Use |
+|---|---|
+| Wants a new part designed from scratch | **Mode A: New Design** |
+| Provides an existing STL to modify or use as inspiration | **Mode B: STL Reference** |
+| Has an STL that fails to print due to overhangs | **Mode C: Overhang Fix** |
+| Wants an STL checked or repaired for printability | **Mode D: Printability Audit** |
+
+---
 
 ## Setup
 
@@ -16,10 +25,10 @@ This skill generates parametric 3D models using **CadQuery** (Python) and export
 python3.12 -m venv .venv && source .venv/bin/activate
 
 # Install CadQuery and preview dependencies
-pip install cadquery trimesh pyrender Pillow
+pip install cadquery trimesh pyrender Pillow manifold3d rtree
 ```
 
-CadQuery uses the OpenCASCADE kernel under the hood. trimesh, pyrender, and Pillow are used for the preview-analyze-iterate loop. No display server is needed; everything renders headlessly via pyrender's offscreen backend.
+CadQuery uses the OpenCASCADE kernel under the hood. trimesh, pyrender, and Pillow are used for the preview-analyze-iterate loop. manifold3d and rtree are required for overhang fix and mesh repair. No display server is needed; everything renders headlessly via pyrender's offscreen backend.
 
 **If CadQuery fails to install** (OCC kernel build errors), try:
 ```bash
@@ -30,38 +39,41 @@ conda install -c cadquery -c conda-forge cadquery
 pip install cadquery --find-links https://github.com/CadQuery/CadQuery/releases
 ```
 
-## Real-World Dimension Research
+**PrusaSlicer CLI check** (needed for Slicer Verification in Phase 3):
+```bash
+PSLICER="/Applications/PrusaSlicer.app/Contents/MacOS/prusa-slicer"
+$PSLICER --version   # confirm it's found
+# On Linux: prusa-slicer (package manager or AppImage)
+# If not installed, skip slicer verification and note "slicer not available" in delivery.
+```
 
-When designing objects that interface with real products (phones, chargers, PCBs, connectors, etc.), **use web search to find accurate dimensions** before writing any geometry code. Don't guess or use approximate values. Even 1-2mm off can make a part unusable.
+---
 
-**What to research:**
-- Connector/port dimensions (USB-C: 8.4 x 2.6mm opening, Lightning, barrel jacks)
-- Device dimensions (phone width/thickness, PCB footprints, charger puck diameters)
-- Mounting hole patterns and screw sizes (M2.5, M3, etc.)
-- Standard component specs (MagSafe puck: 56mm diameter, 5.6mm thick)
-- Cable bend radii and strain relief requirements
+## Design Constants Reference
 
-**How to use it:**
-1. Search for "[product] dimensions mm" or "[component] datasheet"
-2. Cross-reference at least 2 sources when precision matters
-3. Add the sourced dimensions as comments in the PARAMETERS section:
-   ```python
-   # MagSafe puck dimensions (source: Apple spec + iFixit teardown)
-   puck_diameter = 56.0    # mm
-   puck_thickness = 5.6    # mm
-   ```
-4. When in doubt, add 0.3-0.5mm clearance to external dimensions
+All lookup tables live here. When writing code, come back to this section rather than guessing values.
 
-This is especially important for: phone cases/stands, charger mounts, PCB enclosures, cable management, adapter fittings, and anything that clips onto or wraps around an existing product.
+### Material Profiles
 
-## Mechanical Fit & Snap-Fit Reference
+| Property | PLA | PETG | ABS | ASA | TPU 95A | PA-CF |
+|---|---|---|---|---|---|---|
+| Min wall structural | 1.2mm | 1.2mm | 1.5mm | 1.5mm | 1.0mm | 1.2mm |
+| Min wall decorative | 0.8mm | 0.8mm | 1.0mm | 1.0mm | 0.6mm | 0.8mm |
+| Max bridge unsupported | 20mm | 15mm | 18mm | 18mm | 10mm | 22mm |
+| Shrinkage compensation % | 0.2% | 0.3% | 0.7% | 0.6% | 0.5% | 1.2% |
+| Sliding fit clearance/side | 0.2mm | 0.3mm | 0.25mm | 0.25mm | 0.15mm | 0.2mm |
+| Press fit interference (neg = tighter) | -0.2mm | -0.25mm | -0.3mm | -0.3mm | -0.1mm | -0.2mm |
+| Horizontal hole sag correction | +0.1mm | +0.15mm | +0.1mm | +0.1mm | +0.05mm | +0.1mm |
+| Outdoor UV resistance | Poor | Fair | Fair | Excellent | Good | Good |
+| Enclosure required | No | No | Yes | No | No | No |
+| Layer adhesion strength | Good | Very good | Good | Good | Excellent | Good |
 
-Use these tables whenever designing features where two parts touch, mate, move, or snap. These values account for FDM's real-world tolerances — they replace guesswork and eliminate the most common class of reprints.
+**PA-CF shrinkage note:** PA-CF shrinks 1.2%. If a dimension must be exactly 50.0mm, model it at 50.6mm (50.0 / (1 - 0.012) ≈ 50.6mm).
 
-### Clearance fits (sliding or rotating)
+### Clearance Fits (sliding or rotating)
 
 | Fit type | PLA | PETG | ABS/ASA | TPU 95A |
-|----------|-----|------|---------|---------|
+|---|---|---|---|---|
 | Sliding (drawer, rail) | 0.2mm/side | 0.3mm/side | 0.25mm/side | 0.15mm/side |
 | Rotating (pin in hole) | 0.25mm/side | 0.35mm/side | 0.3mm/side | 0.2mm/side |
 | Print-in-place hinge | 0.3mm/side | 0.4mm/side | 0.35mm/side | 0.25mm/side |
@@ -69,17 +81,17 @@ Use these tables whenever designing features where two parts touch, mate, move, 
 
 Clearance is **per side**. A 5mm PLA sliding pin goes in a `5.0 + 2×0.2 = 5.4mm` hole.
 
-### Press and interference fits
+### Press and Interference Fits
 
 | Fit type | PLA | PETG |
-|----------|-----|------|
-| Light press (removable by hand) | −0.1mm | −0.15mm |
-| Firm press (stays permanently) | −0.2mm | −0.25mm |
-| Interference (structural) | −0.3mm | −0.4mm |
+|---|---|---|
+| Light press (removable by hand) | -0.1mm | -0.15mm |
+| Firm press (stays permanently) | -0.2mm | -0.25mm |
+| Interference (structural) | -0.3mm | -0.4mm |
 
 Negative = hole smaller than shaft. Interference fits in thin walls crack — wall must be ≥ 2× the interference value.
 
-### Snap-fit arm geometry
+### Snap-Fit Arm Geometry
 
 Three variables drive a safe snap: arm length, root thickness, and material strain limit.
 
@@ -95,7 +107,7 @@ FDM strain limits (conservative — layer adhesion is the weak axis):
 **Quick-reference arm proportions:**
 
 | Material | Arm length | Root thickness | Max deflection | Return angle |
-|----------|-----------|----------------|----------------|--------------|
+|---|---|---|---|---|
 | PLA | 15mm | 1.5mm | 1.5mm | 30° |
 | PLA | 20mm | 1.5mm | 2.5mm | 35° |
 | PETG | 15mm | 1.5mm | 2.0mm | 25° |
@@ -131,30 +143,30 @@ arm = (
 )
 ```
 
-### Living hinges (TPU only)
+### Living Hinges (TPU only)
 
 | Hinge span | Thickness | Min bend radius |
-|------------|-----------|-----------------|
+|---|---|---|
 | < 20mm | 0.6mm | 2mm |
 | 20–50mm | 0.8mm | 3mm |
 | > 50mm | 1.0mm | 5mm |
 
 Layer lines must run **across** the hinge (perpendicular to flex direction). Parallel layer lines delaminate immediately. Print flat.
 
-### Print-in-place joints
+### Print-in-Place Joints
 
 | Joint type | Clearance | Key rule |
-|------------|-----------|----------|
+|---|---|---|
 | Pin hinge PLA | 0.3mm/side | Print with pin axis parallel to bed |
 | Pin hinge PETG | 0.4mm/side | Same orientation |
 | Ball socket PLA | 0.4mm radial | Print socket open-side-up |
 | Captive M3 nut | 0.2mm/side hex | Pause print at nut layer, drop nut in |
 | Gear mesh | 0.15–0.2mm backlash | Print both gears in same plane |
 
-### Minimum feature sizes (0.4mm nozzle, 0.2mm layers)
+### Minimum Feature Sizes (0.4mm nozzle, 0.2mm layers)
 
 | Feature | Minimum | Notes |
-|---------|---------|-------|
+|---|---|---|
 | Structural wall | 1.2mm | = 3 perimeters |
 | Decorative wall | 0.8mm | = 2 perimeters; no load |
 | Boss / pin diameter | 1.0mm | Smaller doesn't adhere reliably |
@@ -164,29 +176,413 @@ Layer lines must run **across** the hinge (perpendicular to flex direction). Par
 | Vertical hole | 1.0mm diameter | |
 | Horizontal hole | nominal + 0.1–0.15mm | Gravity sags the top; D-shape top helps |
 
+### Hardware Database
+
+**Heat inserts — Ruthex brand defaults:**
+
+| Size | Hole dia | OD | Depth | Wall around |
+|---|---|---|---|---|
+| M2 | 3.2mm | 3.5mm | 3.2mm | 1.5mm |
+| M3 | 4.4mm | 4.6mm | 4.0mm | 1.8mm |
+| M4 | 5.7mm | 6.0mm | 6.0mm | 2.0mm |
+| M5 | 6.6mm | 7.0mm | 7.0mm | 2.2mm |
+
+Insert with soldering iron at ~200°C, flush with surface.
+
+**Screw clearance holes:**
+
+| Size | Through hole | Self-tap | Counterbore dia × depth |
+|---|---|---|---|
+| M2 | 2.4mm | 1.6mm | 4.4mm × 2mm |
+| M3 | 3.4mm | 2.5mm | 5.5mm × 3mm |
+| M4 | 4.5mm | 3.3mm | 7.0mm × 4mm |
+| M5 | 5.5mm | 4.2mm | 8.5mm × 5mm |
+
+**Common SBC mounting patterns:**
+
+| Board | Hole pattern | Screw | Notes |
+|---|---|---|---|
+| Raspberry Pi 4/5 | 58.0 × 49.0mm | M2.5 | 3.5mm from edges |
+| Raspberry Pi Zero 2W | 58.0 × 23.0mm | M2.5 | 3.5mm from edges |
+| Arduino Uno R3 | 68.6 × 53.3mm | M3 | Standard UNO footprint |
+| Arduino Nano | 43.2 × 17.8mm | M3 | 1.5mm from edge |
+| ESP32 DevKit | 50.8 × 25.4mm | M3 | 2mm from edge |
+
+**Always web-search SBC dimensions to confirm — board revisions change hole positions.**
+
+**Standard magnets (N35 disc, press-fit pockets):**
+
+| Magnet | Pocket dia | Pocket depth adjustment |
+|---|---|---|
+| 6mm disc N35 | nominal +0.2mm | nominal +0.1mm |
+| 8mm disc N35 | nominal +0.2mm | nominal +0.1mm |
+| 10mm disc N35 | nominal +0.2mm | nominal +0.1mm |
+
+### Seam Placement Strategy
+
+PrusaSlicer/BambuStudio default: aligned seam at the sharpest concave corner (vertical edges).
+
+1. **Rectilinear objects:** add a 0.5mm V-groove on the least-visible rear edge to pin the seam there.
+2. **Cylindrical/organic objects:** add a 0.3mm-wide × 0.3mm-deep channel to pin seam; or use "random" seam in slicer.
+3. Keep seams away from mating surfaces, bearing seats, sliding rails, and snap-fit arms — the seam adds 0.1–0.2mm of material.
+4. Choose print orientation so the seam-attracting edge faces back or bottom.
+5. Comment in code: `# seam pins to rear-left vertical edge — intentional`
+
+### Structural Rules
+
+| Situation | Rule |
+|---|---|
+| Cantilever > 25mm | Add triangular gusset at root; min gusset base = 1/3 arm length |
+| Cantilever > 40mm with load | Redesign as supported bracket or split into two parts |
+| Interior sharp corner under load | Fillet r ≥ 0.5mm |
+| Horizontal span > bridge limit (per material) | Add mid-span rib or support column |
+| Thin wall < 1.5mm carrying load | Bump to 2.0mm or add perpendicular rib |
+| Load perpendicular to layer lines | Reorient part or add ribs to align load with layers |
+| Tall narrow part H > 5× base | 5mm brim + consider internal cross-bracing |
+| Snap arm root | Wall behind arm must be ≥ 2× arm root thickness |
+
 ---
 
-## STL Reference Mode
+## Mode A: New Design
 
-When the user provides an existing STL file — either to **modify** it or use it as **inspiration** — follow this workflow before writing any new geometry.
+Follow these steps in order. Do not skip phases or combine them unless the model is very simple (a flat bracket with two holes). Show the user progress at each phase and wait for feedback before continuing.
 
-### Step 1: Identify the mode
+### Step 1: Requirements Gathering
+
+Walk through these topics conversationally. Ask the most important ones first, follow up based on answers. Use reasonable defaults when the user doesn't specify.
+
+**Reference STL? (ask first)** — Does the user have an existing STL they want to modify or use as inspiration? If yes, switch to **Mode B** before continuing here.
+
+**What is it?** — Object type, purpose, what it holds/protects/attaches to. Get a clear mental model before anything else.
+
+**Critical dimensions** — Must-fit measurements: PCB size, phone width, screw spacing, diameter of what it wraps around. These are non-negotiable and drive everything else.
+
+**Mounting & attachment** — How does it connect? Screws (what size?), snap-fit, adhesive tape, magnets, freestanding? Affects wall thickness, boss placement, and overall structure.
+
+**Printer & material** — What printer (Bambu, Prusa, Ender)? Nozzle size? Material (PLA, PETG, TPU)? Defaults: 0.4mm nozzle, PLA, 0.2mm layer height.
+
+**Functional needs** — Ventilation, water resistance, cable routing, access panels, visibility windows, stacking, weight limits. Ask only what's relevant.
+
+**Aesthetic preferences** — Rounded vs sharp edges, minimal vs industrial. Ask briefly. Most users care more about function.
+
+Start with what + dimensions, then ask about mounting and material. Only ask about aesthetics if the user seems to care or if it affects structural choices.
+
+### Step 2: Search Model Repositories
+
+Before writing any code, search the major repositories. A high-quality existing model saves time and may be better-tested. This step runs after requirements gathering (so you know what to search for) but before any design work.
+
+**Sites to search:**
+
+| Site | URL | Notes |
+|---|---|---|
+| MakerWorld | makerworld.com | Bambu Lab's community — highest quality filter, good parametric models |
+| Printables | printables.com | Prusa's community — large library, strong tagging |
+| Thingiverse | thingiverse.com | Largest archive — older models, variable quality |
+| Cults3D | cults3d.com | Curated, paid and free — good for functional parts |
+| MyMiniFactory | myminifactory.com | Community + creator marketplace |
+
+Search all five. Use `WebSearch` with targeted queries like:
+```
+site:makerworld.com <object name> <key constraint>
+site:printables.com <object name> parametric
+<object name> 3d print filetype:stl
+```
+
+**A result is worth presenting if it:**
+- Matches the core function the user described
+- Is compatible with their printer/material
+- Has a recent upload or proven remix count
+- Fits the critical dimensions, OR is parametric so dimensions can be adjusted
+
+**Report format:**
+```
+Before designing, I searched the major repositories. Here's what I found:
+
+✅ Strong match — MakerWorld: "Parametric Wall Hook" by user X
+   Fits your ~50mm mounting slot, PETG-compatible, 4.8★ with 200+ makes.
+   URL: [link]
+   → Worth downloading first. Want me to use this, modify it, or design a custom version?
+
+⚠️ Partial match — Printables: "Cable Tray v2"
+   Right function but fixed 80mm width; you need 120mm. Not parametric.
+
+❌ Nothing suitable on Thingiverse or Cults3D for this combination.
+```
+
+Then wait for the user's decision:
+- **"Use it"** → provide the download link, done
+- **"Modify it"** → switch to **Mode B** with the downloaded file
+- **"Build custom"** → proceed
+
+**When to skip the search:**
+- User explicitly says "build me a custom" or "I want it parametric from scratch"
+- User already has a reference STL they're working from
+- The object is highly specific to their exact hardware where a generic match is unlikely
+
+Even then, a 30-second search costs nothing — if you skip it, say why.
+
+### Step 3: Research Real-World Dimensions
+
+When designing objects that interface with real products (phones, chargers, PCBs, connectors), **use web search to find accurate dimensions before writing any geometry code**. Don't guess. Even 1–2mm off can make a part unusable.
+
+**What to research:**
+- Connector/port dimensions (USB-C: 8.4 × 2.6mm opening, Lightning, barrel jacks)
+- Device dimensions (phone width/thickness, PCB footprints, charger puck diameters)
+- Mounting hole patterns and screw sizes (M2.5, M3, etc.) — check Hardware Database first
+- Standard component specs (MagSafe puck: 56mm diameter, 5.6mm thick)
+- Cable bend radii and strain relief requirements
+
+Cross-reference at least 2 sources when precision matters. Add sourced dimensions as comments in the PARAMETERS section:
+```python
+# MagSafe puck dimensions (source: Apple spec + iFixit teardown)
+puck_diameter = 56.0    # mm
+puck_thickness = 5.6    # mm
+```
+
+When in doubt, add 0.3–0.5mm clearance to external dimensions.
+
+### Step 4: Design Brief
+
+After requirements, repository search, and dimension research — and before writing any code — synthesize a design brief:
+
+```
+Design brief:
+Object: [what it is and does]
+Critical constraints: [must-hit dimensions]
+Material: [material — note which profile constants apply]
+Fit tolerance: [which type, specific values from tables]
+Printer: [printer + nozzle + layer height]
+Seam: [which edge, why]
+Print orientation: [which face on bed, why no supports]
+Hardware: [heat inserts / screws / boards with exact hole sizes from Hardware Database]
+```
+
+Then ask: "Here's my design plan — does this match what you're after before I start modeling?"
+
+**Wait for confirmation before proceeding.**
+
+### Step 5: Phase 1 — Base Shape
+
+Build the basic outer form: overall dimensions, shell/walls, bottom plate. No cutouts, no fillets, no details yet. All parameters defined at the top of the script using the Script Template below.
+
+**Design principles for this phase:**
+- All dimensions go in the PARAMETERS section at the top. Use descriptive names: `screw_hole_d`, not `d1`. Add units in comments (always mm).
+- Use `centered=(True, True, False)` on `.box()` to place the bottom at Z=0.
+- Design with print orientation in mind. Flat bottom surfaces print best. Add chamfers to bottom edges instead of fillets (fillets need supports). Comment the intended print orientation in the script.
+- Apply shrinkage compensation from the Material Profiles table if the material is ABS, ASA, or PA-CF.
+
+**Steps:**
+1. Write the script with parameters and basic geometry
+2. Export STL and render preview: `python3 run_cadquery_model.py model.py --preview --strict`
+3. Self-review: Does the shape and size look right? Is the bottom flat for printing?
+4. **Show the preview to the user:** "Here's the basic shape. Does this look right before I add details?" Include key dimensions.
+5. Wait for feedback. Iterate here before moving on.
+
+### Step 6: Phase 2 — Features
+
+Add functional details: holes, cutouts, mounting bosses, cable slots, ventilation, snap-fits, internal structures.
+
+Look up all fit values from the Design Constants Reference:
+- Clearance fits from the Clearance Fits table
+- Heat insert hole diameters from the Hardware Database
+- SBC hole patterns from the Hardware Database
+- Snap-fit arm proportions from the Snap-Fit Arm Geometry table
+- Seam placement per the Seam Placement Strategy
+
+**Steps:**
+1. Add features to the script
+2. Export STL and render preview
+3. Self-review: Are all features visible? Do booleans look clean? Are holes in the right positions?
+4. **Show the preview to the user:** "I've added [list features]. Anything to change before I finalize?"
+5. Wait for feedback. Iterate if needed.
+
+### Step 7: Structural Reinforcement Pass
+
+After Phase 2 features are done, before Phase 3 finishing, run a structural analysis and reason through the Structural Rules table.
+
+```python
+import trimesh, numpy as np
+tm = trimesh.load("model.stl", force="mesh")
+hull_vol = tm.convex_hull.volume
+fill_ratio = abs(tm.volume) / hull_vol if hull_vol > 0 else 0
+dot_z = np.dot(tm.face_normals, [0, 0, 1])
+steep = (dot_z < -np.sin(np.radians(45))).sum()
+print(f"Fill ratio: {fill_ratio:.2f} ({'thin-walled' if fill_ratio < 0.25 else 'adequate'})")
+print(f"Steep overhangs >45°: {steep} faces")
+print(f"Bounding box: {tm.extents[0]:.1f}×{tm.extents[1]:.1f}×{tm.extents[2]:.1f}mm")
+```
+
+Then reason through the Structural Rules:
+- Any cantilever > 25mm? Add gusset.
+- Any sharp interior corners under load? Add fillet r ≥ 0.5mm.
+- Any wall < 1.5mm carrying load? Bump to 2.0mm or add rib.
+- Load perpendicular to layer lines? Reorient or add ribs.
+- Tall narrow part (H > 5× base)? Plan for 5mm brim.
+- Snap arm root: wall behind arm ≥ 2× arm root thickness?
+
+Fix issues, re-export, re-run the check. Only proceed to Phase 3 when the analysis is clean.
+
+### Step 8: Phase 3 — Final Delivery
+
+Apply finishing touches, run slicer verification, and deliver.
+
+1. Add fillets/chamfers (largest radius first, apply after shell, before cuts into the body)
+2. Export final STL and render preview
+3. Run the full self-review checklist (see Output Checklist at the bottom)
+4. Fix any issues found, re-export if needed
+
+**Run Slicer Verification:**
+
+Generate a slice profile:
+```python
+# write_profile.py
+import configparser
+
+def write_slice_profile(path, material="PLA", layer_h=0.2, nozzle=0.4,
+                        walls=2, infill=15, supports=False):
+    c = configparser.ConfigParser()
+    c["print"] = {
+        "layer_height":          str(layer_h),
+        "perimeters":            str(walls),
+        "fill_density":          f"{infill}%",
+        "fill_pattern":          "gyroid",
+        "support_material":      "1" if supports else "0",
+        "support_material_auto": "1" if supports else "0",
+    }
+    c["filament"] = {
+        "filament_type":  material,
+        "nozzle_diameter": str(nozzle),
+    }
+    with open(path, "w") as f:
+        c.write(f)
+
+write_slice_profile("slice_profile.ini",
+    material=MATERIAL, layer_h=LAYER_H,
+    walls=WALLS, infill=INFILL, supports=SUPPORTS)
+```
+
+Slice and parse:
+```bash
+PSLICER="/Applications/PrusaSlicer.app/Contents/MacOS/prusa-slicer"
+$PSLICER \
+  --load slice_profile.ini \
+  --export-gcode \
+  --output model_sliced.gcode \
+  model.stl 2>&1
+```
+
+```python
+import re, pathlib
+
+gcode = pathlib.Path("model_sliced.gcode").read_text(errors="ignore")
+
+def extract(pattern, text, default="unknown"):
+    m = re.search(pattern, text)
+    return m.group(1).strip() if m else default
+
+time_str    = extract(r"; estimated printing time \(normal mode\) = (.+)", gcode)
+filament_g  = extract(r"; total filament used \[g\] = ([\d.]+)", gcode)
+filament_mm = extract(r"; total filament used \[mm\] = ([\d.]+)", gcode)
+support_g   = extract(r"; total support material used \[g\] = ([\d.]+)", gcode, "0")
+layers      = len(re.findall(r"^;LAYER_CHANGE", gcode, re.MULTILINE))
+
+try:
+    support_pct = float(support_g) / float(filament_g) * 100
+except (ValueError, ZeroDivisionError):
+    support_pct = 0.0
+
+print(f"Print time:     {time_str}")
+print(f"Filament:       {filament_g}g  ({float(filament_mm)/1000:.1f}m)")
+print(f"Support:        {support_pct:.1f}% of total filament")
+print(f"Layer count:    {layers}")
+```
+
+**Interpret and act:**
+
+| Finding | Threshold | Action |
+|---|---|---|
+| Support volume | > 25% | Redesign orientation or add chamfers to eliminate |
+| Support volume | > 50% | Hard stop — do not deliver; redesign first |
+| Print time | > 8 hours | Flag to user; offer to split model or reduce infill |
+| Filament weight | > 200g | Note material cost; consider hollowing if appropriate |
+| Layer count | < 10 | Model may be wrong scale or too flat — verify |
+
+After fixing anything flagged, re-slice and re-parse. Only deliver once the numbers are clean.
+
+**Deliver the Complete Package:**
+
+1. **STL file** — named `<descriptive_name>.stl`
+2. **Preview image** — 4-view, already generated
+3. **Print settings card** — material, layer height, walls, infill, supports, brim
+
+   When to deviate from the baseline (PLA, 0.2mm, 2 walls, 15% gyroid, no supports):
+   - Load-bearing brackets/hooks/hinges: bump to 25–40% infill, 3–4 walls; consider PETG over PLA
+   - Thin decorative walls or vases: 0 infill, vase mode or 1 wall
+   - Tall narrow parts: add a brim for bed adhesion
+   - Flexible parts (gaskets, grips): TPU 95A, 0.2mm layer, slower speed, no supports
+   - Outdoor/hot environments: PETG or ASA, not PLA
+   - Food/skin contact: call out that FDM parts are not food-safe; recommend food-safe coating
+
+4. **Slicer report** — `~[time] · [weight]g · [support]% · [n] layers`
+5. **Orientation** — state explicitly which face goes on the bed and why
+6. **Assembly note** if hardware is involved (insert order, screw sizes)
+7. **Tweak note** — "Change `wall` on line N to adjust thickness"
+
+**Format:**
+```
+Print settings: PLA, 0.2mm layer, 2 walls, 15% gyroid infill, no supports.
+Orientation: place flat back side on the bed (front face up).
+Why: no overhangs above 45°; 15% infill is adequate for a protective shell.
+Slicer report (PLA, 0.2mm, 2 walls, 15% infill): ~2h 15m · 18g · no supports · 112 layers.
+```
+
+**Always present the key parameters as a summary table after delivery and offer to tweak:**
+```
+Here's your final model! Current parameters:
+
+| Parameter       | Value  |
+|----------------|--------|
+| Width          | 90 mm  |
+| Depth          | 65 mm  |
+| Height         | 30 mm  |
+| Wall thickness | 4 mm   |
+| Cable slot     | 18 mm  |
+| Corner radius  | 3 mm   |
+| Fit clearance  | 0.3 mm |
+
+Want me to adjust anything? Just say e.g. "make it 5mm taller" or "wider cable slot."
+```
+
+Only include parameters the user would plausibly want to change. Skip internal constants. Group logically: dimensions first, then structural, then tolerances.
+
+---
+
+## Mode B: STL Reference
+
+When the user provides an existing STL to **modify** or use as **inspiration**, follow this workflow before writing any new geometry.
+
+### Step 1: Identify the Mode
 
 Ask the user (or infer from context) which mode they're in:
 
-- **Modify** — "make this taller", "add a hole here", "change the wall thickness": the goal is a new part that is functionally the same shape with targeted changes.
+- **Modify** — "make this taller", "add a hole here", "change the wall thickness": goal is a new part that is functionally the same shape with targeted changes.
 - **Inspire** — "I like the general shape but want my own version", "use this as a reference for dimensions": extract what's useful, then design fresh.
 
-### Step 2: Analyze the reference STL
+When the user provides a reference STL, also add these questions to the normal requirements flow:
+- **What do you want to change?** (specific features, dimensions, functionality) — get a clear diff from the reference
+- **Is the reference the right size, or do you want to rescale?**
+- **Should the output be compatible/mate with the original, or is it a standalone redesign?**
+
+### Step 2: Analyze the Reference STL
 
 Run both the renderer and the geometry extractor:
 
 ```bash
 # Render a multi-view preview so you can visually inspect the shape
 python3 preview.py reference.stl reference_preview.png --views multi
+```
 
-# Extract geometry stats for dimension recovery
-python3 - <<'EOF'
+```python
 import trimesh, numpy as np
 
 tm = trimesh.load("reference.stl", force="mesh")
@@ -205,16 +601,15 @@ print(f"Faces: {len(tm.faces)},  Vertices: {len(tm.vertices)}")
 hull_vol = tm.convex_hull.volume
 fill_ratio = vol / hull_vol
 print(f"Fill ratio (vol/hull): {fill_ratio:.2f}  ({'thin-walled' if fill_ratio < 0.4 else 'solid'})")
-EOF
 ```
 
-**View the preview image** to understand the shape. Make note of:
-- Overall form (box, cylinder, curved shell, assembly…)
+**View the preview image** to understand the shape. Note:
+- Overall form (box, cylinder, curved shell, assembly)
 - Visible features (holes, slots, bosses, snap tabs, ribs)
 - Which face is the print bed (usually the largest flat face at Z=0)
 - Any asymmetry or chirality
 
-### Step 3: Recover parameters from geometry
+### Step 3: Recover Parameters from Geometry
 
 Use trimesh to probe specific features — don't guess:
 
@@ -248,49 +643,39 @@ height = 22.5   # mm — bounding box Z
 wall   = 2.1    # mm — estimated from fill ratio
 ```
 
-### Step 4: Branch by mode
+### Step 4: Branch by Mode
 
 **Modify mode:**
 1. Recover all key parameters from the reference (Step 3 above)
 2. Ask the user to confirm the recovered dimensions before writing code
-3. Rebuild the part in CadQuery using those parameters — do NOT try to import the STL directly; rebuild it from scratch as a parametric model
+3. Rebuild the part in CadQuery using those parameters — do NOT try to import the STL directly; rebuild from scratch as a parametric model
 4. Apply the requested changes on top of the rebuilt baseline
 5. Show a side-by-side comparison: reference_preview.png + new model preview
 
 **Inspire mode:**
-1. Extract only the dimensions and proportions that are relevant to the user's stated goal
+1. Extract only the dimensions and proportions relevant to the user's stated goal
 2. Describe what you're borrowing ("I'll use the ~62mm width and the 4-hole mounting pattern from the reference")
 3. Design the new part freely, referencing those values in PARAMETERS with attribution comments
 4. You are not obligated to replicate features the user didn't ask for
 
-### Step 5: Note what was NOT recovered
+### Step 5: Note What Was NOT Recovered
 
 STL is a surface mesh — it contains no feature history, parametric intent, internal structure, or material. Warn the user if:
 - The reference has complex organic/sculpted surfaces that are hard to reconstruct exactly
 - Wall thickness is ambiguous (open mesh, non-watertight)
 - The reference is very high-poly (>100k faces) — recovery will be approximate
 
-### Reference STL in Requirements Gathering
-
-When the user provides a reference STL, add these questions to the normal requirements flow:
-
-- **What do you want to change?** (specific features, dimensions, functionality) — get a clear diff from the reference
-- **Is the reference the right size, or do you want to rescale?**
-- **Should the output be compatible/mate with the original, or is it a standalone redesign?**
-
 ---
 
-## STL Overhang Fix Mode
+## Mode C: Overhang Fix
 
 When the user has an existing STL that **fails to print due to overhangs** and wants the geometry fixed (not replaced with slicer supports), use this workflow to surgically fill the gap between overhanging surfaces and the bed.
 
-### When to use this mode
-
-Triggers: "keeps failing at the same spot", "PETG/ASA won't bridge this", "overhang keeps drooping", "can you fill the gap under the overhang", or any request to make an existing STL print without supports.
+**Triggers:** "keeps failing at the same spot", "PETG/ASA won't bridge this", "overhang keeps drooping", "can you fill the gap under the overhang", or any request to make an existing STL print without supports.
 
 **Do NOT remove any original geometry.** Only add fill material below overhanging faces.
 
-### Step 1: Identify print orientation and bed axis
+### Step 1: Identify Print Orientation and Bed Axis
 
 ```python
 import trimesh, numpy as np
@@ -308,7 +693,7 @@ for axis, label in [([1,0,0],"+X"), ([-1,0,0],"-X"), ([0,1,0],"+Y"),
 
 Confirm with the user which face goes on the bed. The **print height axis** is perpendicular to the bed face (e.g., if mounting plate is -X face, print height = +X direction, bed = x_min).
 
-### Step 2: Map the full overhang surface with a 2D ray-cast ceiling grid
+### Step 2: Map the Full Overhang Surface with a 2D Ray-Cast Ceiling Grid
 
 Cast rays upward (in the print height direction) at a dense 2D grid across the other two axes. For each grid point, record the lowest downward-facing surface hit — this is the "ceiling" the fill must reach.
 
@@ -358,7 +743,7 @@ plt.savefig('ceiling_map.png', dpi=120, bbox_inches='tight')
 
 Show this map to the user and confirm the overhang region looks right before building fill.
 
-### Step 3: Build the fill and boolean-union it into the model
+### Step 3: Build the Fill and Boolean-Union It into the Model
 
 Use **manifold3d** to create per-cell watertight boxes (one per valid grid cell, with exact ceiling height), batch-union them into a single fill solid, then boolean-union the fill with the original mesh. This produces one merged body that every slicer unambiguously treats as solid.
 
@@ -427,7 +812,7 @@ with open(path, 'wb') as f:
 print(f"Saved {len(out_tris)} triangles → {path}")
 ```
 
-### Step 4: Preview and iterate
+### Step 4: Preview and Iterate
 
 Render a 3-view preview with original geometry faint (blue, alpha=0.06) and fill highlighted (orange, alpha=0.9). Show the user and ask:
 - Does the fill reach the full overhang area?
@@ -436,7 +821,7 @@ Render a 3-view preview with original geometry faint (blue, alpha=0.06) and fill
 
 Iterate on the `x_cap`, grid density, or which overhangs to include based on user feedback.
 
-### Key rules for overhang fix
+### Key Rules for Overhang Fix
 
 - **Always verify the output before calling it done.** After every export, run:
   ```python
@@ -458,13 +843,13 @@ Iterate on the `x_cap`, grid density, or which overhangs to include based on use
 
 ---
 
-## STL Printability Enhancement Mode
+## Mode D: Printability Audit
 
 When the user uploads an STL and asks to check or improve its printability — or as a final gate on any STL you design before delivery — run this audit pipeline.
 
 **Triggers:** "will this print?", "is this printable?", "fix this STL", "check my file", "clean up this mesh", any STL provided without a specific design request, or automatically at Phase 3 of your own designs.
 
-### Step 1: Full printability audit
+### Step 1: Full Printability Audit
 
 Run this immediately on any provided STL, before asking the user anything:
 
@@ -510,7 +895,7 @@ Then render a preview:
 python3 preview.py model.stl audit_preview.png --views multi
 ```
 
-### Step 2: Report findings to the user
+### Step 2: Report Findings to the User
 
 One line per check, with severity and proposed action:
 
@@ -529,14 +914,14 @@ Shall I proceed, or is there anything you want to keep as-is?
 
 Always show the preview image alongside the report so the user can see which region the overhangs are in.
 
-### Step 3: Auto-fix pipeline
+### Step 3: Auto-Fix Pipeline
 
 Fix issues in this order:
 
 | Issue | Severity | Auto-fix? |
-|-------|----------|-----------|
+|---|---|---|
 | Non-manifold / open mesh | High | Yes — manifold3d repair |
-| Steep overhangs > 45° | High | Yes — ray-cast fill + manifold union (see Overhang Fix Mode) |
+| Steep overhangs > 45° | High | Yes — ray-cast fill + manifold union (see Mode C) |
 | Exceeds printer build volume | High | Flag — ask user about scaling or part splitting |
 | Floating bodies at Z > 0 | Medium | Flag — likely needs support or repositioning |
 | Multiple disconnected bodies | Medium | Flag — may be intentional (assembly parts) |
@@ -553,12 +938,12 @@ repaired_m = m3d.Manifold(m3d.Mesh(
     tri_verts=np.array(tm.faces, dtype=np.int32)
 ))
 print(f"Repaired: genus={repaired_m.genus()}, status={repaired_m.status()}, vol={repaired_m.volume():.0f} mm³")
-# Then write via binary STL (same pattern as Overhang Fix Step 3)
+# Then write via binary STL (same pattern as Mode C Step 3)
 ```
 
-**Overhang fix:** run the full Overhang Fix Mode workflow — ray-cast ceiling grid → manifold3d batch union → union with original mesh → binary STL export.
+**Overhang fix:** run the full Mode C workflow — ray-cast ceiling grid → manifold3d batch union → union with original mesh → binary STL export.
 
-### Step 4: Orientation recommendation
+### Step 4: Orientation Recommendation
 
 After fixing, always suggest the optimal print orientation:
 
@@ -581,316 +966,18 @@ Best orientation: flat bottom face on bed (already correct).
 Remaining overhangs after fill: none. No slicer supports needed.
 ```
 
-### Step 5: Deliver the enhanced STL
+### Step 5: Deliver the Enhanced STL
 
 - Name it `<original_name>_printable.stl`
 - Render a before/after preview (original + fixed side by side if possible)
 - State exactly what changed ("filled 38 overhang faces, repaired 3 non-manifold edges")
-- Include print settings (see Print Recommendations section)
+- Include print settings (see Mode A Complete Delivery Package)
 
 ---
 
-## Model Repository Search
+## Code Reference
 
-Before writing any CadQuery code, search the major model repositories. A high-quality existing model saves the user time and may be better-tested than a fresh design. This step runs **after** requirements gathering (so you know what to search for) but **before** any design work.
-
-### Sites to search
-
-| Site | URL | Notes |
-|------|-----|-------|
-| MakerWorld | makerworld.com | Bambu Lab's community — highest quality filter, good parametric models |
-| Printables | printables.com | Prusa's community — large library, strong tagging |
-| Thingiverse | thingiverse.com | Largest archive — older models, variable quality |
-| Cults3D | cults3d.com | Curated, paid and free — good for functional parts |
-| MyMiniFactory | myminifactory.com | Community + creator marketplace |
-
-Search all five. Use `WebSearch` with targeted queries like:
-```
-site:makerworld.com <object name> <key constraint>
-site:printables.com <object name> parametric
-<object name> 3d print filetype:stl
-```
-
-### What to look for
-
-A result is worth presenting to the user if it meets **all** of these:
-- Matches the core function the user described
-- Is compatible with their printer/material (check the listing's print settings if shown)
-- Has a recent upload or a proven remix count (indicates it actually prints)
-- Fits the critical dimensions, OR is parametric so dimensions can be adjusted
-
-### How to report findings
-
-Present results **before** starting design. Be specific — include the model name, site, URL, and what makes it relevant or insufficient:
-
-```
-Before designing, I searched the major repositories. Here's what I found:
-
-✅ Strong match — MakerWorld: "Parametric Wall Hook" by user X
-   Fits your ~50mm mounting slot, PETG-compatible, 4.8★ with 200+ makes.
-   URL: [link]
-   → Worth downloading first. Want me to use this, modify it, or design a custom version?
-
-⚠️ Partial match — Printables: "Cable Tray v2"
-   Right function but fixed 80mm width; you need 120mm. Not parametric.
-
-❌ Nothing suitable on Thingiverse or Cults3D for this combination.
-```
-
-Then wait for the user's decision:
-- **"Use it"** → provide the download link, done
-- **"Modify it"** → switch to **STL Reference Mode** (above) with the downloaded file
-- **"Build custom"** → proceed with the normal design workflow
-
-### When to skip the search
-
-- User explicitly says "build me a custom" or "I want it parametric from scratch"
-- User already has a reference STL they're working from
-- The object is highly specific to their exact hardware (custom PCB, one-off enclosure dimensions) where a generic match is unlikely
-
-Even then, a 30-second search costs nothing — if you skip it, say why.
-
----
-
-## Core Workflow
-
-1. **Gather requirements** (see Requirements Gathering below)
-2. **Search model repositories** (see Model Repository Search below) — find existing designs before building from scratch
-3. **Research dimensions** of any real-world products involved (see above)
-4. **Apply mechanical fit constants** (see Mechanical Fit & Snap-Fit Reference above) — look up clearances, snap-fit proportions, and minimum features before writing any geometry
-5. **Phase 1, Base shape**: Build outer shell, preview, get user feedback
-6. **Phase 2, Features**: Add functional details, preview, get user feedback
-7. **Slicer verification** (see Slicer Verification below) — slice headlessly, check time/weight/support volume, fix before delivering
-8. **Phase 3, Final delivery**: Fillets, cleanup, final preview + slicer report + STL + print recommendations
-9. **Offer parameter tweaks** after delivery
-
-This is a **collaborative, show-as-you-go** process. Do NOT disappear and come back with a finished model. Show the user your progress at each phase and incorporate their feedback before moving on.
-
-## Requirements Gathering
-
-Before writing any code, walk through these topics with the user **conversationally**. Don't dump all questions at once. Ask the most important ones first, then follow up based on answers. Use reasonable defaults when the user doesn't specify.
-
-**Reference STL? (ask first)**
-Does the user have an existing STL they want to modify or use as inspiration? If yes, switch to the **STL Reference Mode** workflow above before continuing here.
-
-**What is it?**
-Object type, purpose, what it holds/protects/attaches to. Get a clear mental model of the object before anything else.
-
-**Critical dimensions**
-Must-fit measurements, like PCB size, phone width, screw spacing, diameter of the thing it wraps around, etc. These are non-negotiable and drive everything else.
-
-**Mounting & attachment**
-How does it connect to things? Screws (what size?), snap-fit, adhesive tape, magnets, freestanding on a desk? This affects wall thickness, boss placement, and overall structure.
-
-**Printer & material**
-What printer do they have? (Bambu, Prusa, Ender, etc.) Nozzle size? Material (PLA, PETG, TPU)? This directly affects tolerances, minimum feature sizes, and design constraints. Defaults: 0.4mm nozzle, PLA, 0.2mm layer height.
-
-**Functional needs**
-Ventilation/airflow, water resistance, cable routing, access panels, visibility windows, stacking, weight limits. Ask only what's relevant to the object.
-
-**Aesthetic preferences**
-Rounded vs sharp edges, minimal vs industrial look, color considerations (affects visibility of layer lines). Ask briefly. Most users care more about function than form.
-
-Start with the first two (what + dimensions), then ask about mounting and material if relevant. Only ask about aesthetics if the user seems to care or if it affects structural choices.
-
-## Progressive Preview Workflow
-
-Build the model in phases. At each phase, export an STL, render a preview, self-review it, then **show it to the user and ask for feedback** before proceeding. This catches problems early and keeps the user involved.
-
-### Preview recipe (use at every phase)
-
-**One-shot (run script + render + parse result as JSON):**
-```bash
-python3 run_cadquery_model.py model.py --preview --strict
-```
-This executes `model.py`, finds the STL it wrote, renders the multi-view preview, and emits a JSON result with `success`, `stdout`, `stderr`, `stl`, `preview`, and `watertight`. With `--strict`, a non-watertight mesh is a hard failure. Use this as the default loop: if `success` is false, read the `stderr` field to fix the CadQuery script, then re-run.
-
-**Rendering only (when the STL already exists):**
-```bash
-python3 preview.py model.stl preview.png --views multi
-```
-
-Then view the preview image, self-review it against the checklist in `design-review.md`, and fix any issues you spot **before** showing it to the user.
-
----
-
-### Phase 1: Base Shape
-
-Build the basic outer form: overall dimensions, shell/walls, bottom plate. No cutouts, no fillets, no details yet.
-
-1. Write the script with parameters and basic geometry
-2. Export STL and render preview
-3. Self-review: Does the shape and size look right? Is the bottom flat for printing?
-4. **Show the preview to the user**: "Here's the basic shape. Does this look right before I add details?" Include key dimensions.
-5. Wait for feedback. If the user wants changes, iterate here before moving on.
-
-### Phase 2: Features
-
-Add functional details: holes, cutouts, mounting bosses, cable slots, ventilation, snap-fits, internal structures.
-
-1. Add features to the script
-2. Export STL and render preview
-3. Self-review: Are all features visible? Do booleans look clean? Are holes in the right positions?
-4. **Show the preview to the user**: "I've added [list features]. Anything to change before I finalize?"
-5. Wait for feedback. Iterate if needed.
-
-### Phase 3: Final Delivery
-
-Apply finishing touches: fillets, chamfers, edge cleanup. Run slicer verification. Deliver.
-
-1. Add fillets/chamfers (largest radius first, apply after shell)
-2. Export final STL and render preview
-3. **Full self-review** using the complete checklist from `design-review.md`: visual inspection, dimensional verification, printability analysis
-4. Fix any issues found, re-export if needed
-5. **Run Slicer Verification** (see section below) — get ground-truth time, weight, and support volume before delivering
-6. If slicer flags issues (support volume > 25%, unexpectedly long print), fix the geometry and re-verify
-7. **Deliver to the user**: final STL + preview image + slicer report + print recommendations
-
----
-
-**Important:** Do NOT skip phases or combine them unless the model is very simple (e.g., a flat bracket with two holes). For anything with enclosed geometry, multiple features, or tight tolerances, follow all three phases.
-
-Read `design-review.md` for the full visual inspection checklist, dimensional verification code, and printability analysis helpers.
-
----
-
-## Slicer Verification
-
-Run this as the final gate in Phase 3, before delivering any STL. Slicing the model headlessly gives ground-truth data — time, weight, support volume — that geometry analysis alone can't provide. Surprises caught here cost nothing. Surprises caught after the print starts waste hours of machine time.
-
-### Setup
-
-PrusaSlicer ships a full CLI inside its macOS bundle:
-
-```bash
-PSLICER="/Applications/PrusaSlicer.app/Contents/MacOS/prusa-slicer"
-$PSLICER --version   # confirm it's found
-```
-
-On Linux: `prusa-slicer` (if installed via package manager or AppImage).
-
-If PrusaSlicer is not installed, skip this section and note "slicer not available" in the delivery message. Never block delivery on it — it's a verification step, not a requirement.
-
-### Build a slice profile
-
-Generate a minimal `.ini` from the user's stated settings (material, layer height, walls, infill, supports):
-
-```python
-# write_profile.py
-import configparser
-
-def write_slice_profile(path, material="PLA", layer_h=0.2, nozzle=0.4,
-                        walls=2, infill=15, supports=False):
-    c = configparser.ConfigParser()
-    c["print"] = {
-        "layer_height":          str(layer_h),
-        "perimeters":            str(walls),
-        "fill_density":          f"{infill}%",
-        "fill_pattern":          "gyroid",
-        "support_material":      "1" if supports else "0",
-        "support_material_auto": "1" if supports else "0",
-    }
-    c["filament"] = {
-        "filament_type":  material,
-        "nozzle_diameter": str(nozzle),
-    }
-    with open(path, "w") as f:
-        c.write(f)
-
-# Call with values gathered during Requirements Gathering
-write_slice_profile("slice_profile.ini",
-    material=MATERIAL, layer_h=LAYER_H,
-    walls=WALLS, infill=INFILL, supports=SUPPORTS)
-```
-
-### Slice and parse
-
-```bash
-PSLICER="/Applications/PrusaSlicer.app/Contents/MacOS/prusa-slicer"
-$PSLICER \
-  --load slice_profile.ini \
-  --export-gcode \
-  --output model_sliced.gcode \
-  model.stl 2>&1
-```
-
-Parse the resulting gcode:
-
-```python
-import re, pathlib
-
-gcode = pathlib.Path("model_sliced.gcode").read_text(errors="ignore")
-
-def extract(pattern, text, default="unknown"):
-    m = re.search(pattern, text)
-    return m.group(1).strip() if m else default
-
-time_str    = extract(r"; estimated printing time \(normal mode\) = (.+)", gcode)
-filament_g  = extract(r"; total filament used \[g\] = ([\d.]+)", gcode)
-filament_mm = extract(r"; total filament used \[mm\] = ([\d.]+)", gcode)
-support_g   = extract(r"; total support material used \[g\] = ([\d.]+)", gcode, "0")
-layers      = len(re.findall(r"^;LAYER_CHANGE", gcode, re.MULTILINE))
-
-try:
-    support_pct = float(support_g) / float(filament_g) * 100
-except (ValueError, ZeroDivisionError):
-    support_pct = 0.0
-
-print(f"Print time:     {time_str}")
-print(f"Filament:       {filament_g}g  ({float(filament_mm)/1000:.1f}m)")
-print(f"Support:        {support_pct:.1f}% of total filament")
-print(f"Layer count:    {layers}")
-```
-
-### Interpret and act
-
-| Finding | Threshold | Action |
-|---------|-----------|--------|
-| Support volume | > 25% | Redesign orientation or add chamfers to eliminate |
-| Support volume | > 50% | Hard stop — do not deliver; redesign first |
-| Print time | > 8 hours | Flag to user; offer to split model or reduce infill |
-| Filament weight | > 200g | Note material cost; consider hollowing if appropriate |
-| Layer count | < 10 | Model may be wrong scale or too flat — verify |
-
-After fixing anything flagged, re-slice and re-parse. Only deliver once the numbers are clean.
-
-### Delivery line format
-
-Include the slicer report inline with the print settings:
-
-```
-Slicer report (PLA, 0.2mm, 2 walls, 15% infill): ~2h 15m · 18g · no supports · 112 layers.
-```
-
----
-
-### Print Recommendations (final delivery)
-
-When you deliver the final STL, always include a one-line slicer recipe plus a short rationale. Bambu Studio, PrusaSlicer, and OrcaSlicer already set sensible defaults from their filament + process presets, so **do not restate every slicer option**. Only tell the user what matters for *this* model: material, layer height, walls, infill, supports, and orientation. Tweak from the baseline below only when the model needs it.
-
-**Baseline recipe (0.4mm nozzle, typical FDM):**
-> PLA, 0.2mm layer, 2 walls, 15% gyroid infill, no supports, orientation: flat side on bed.
-
-**When to deviate from the baseline:**
-- **Load-bearing brackets / hooks / hinges**: bump infill to 25-40%, 3-4 walls, consider PETG over PLA for toughness.
-- **Thin decorative walls or vases**: 0 infill, vase mode or 1 wall.
-- **Tall narrow parts**: add a brim for bed adhesion.
-- **Flexible parts (gaskets, grips)**: TPU 95A, 0.2mm layer, slower speed, no supports.
-- **Functional overhangs the geometry can't avoid**: tree supports, or call them out so the user knows.
-- **Outdoor / hot environments**: PETG or ASA, not PLA.
-- **Food / skin contact**: call out that FDM parts are not food-safe and recommend a food-safe coating.
-
-**Format at delivery time:**
-```
-Print settings: PLA, 0.2mm layer, 2 walls, 15% gyroid infill, no supports.
-Orientation: place flat back side on the bed (front face up).
-Why: the case has no overhangs above 45°, and 15% infill is plenty for a
-TPU-adjacent protective shell.
-```
-
-Keep it to ~3 lines. Never dump every slicer setting; the slicer already knows.
-
-## Script Template
+### Script Template
 
 ALWAYS structure scripts like this:
 
@@ -899,18 +986,24 @@ import cadquery as cq
 
 # ============================================================
 # PARAMETERS - Edit these to customize the model
+# All dimensions in mm. Put ALL values here — no magic numbers
+# in geometry code below.
 # ============================================================
 # Overall dimensions
 width = 60.0        # mm - outer width
-depth = 40.0        # mm - outer depth  
+depth = 40.0        # mm - outer depth
 height = 25.0       # mm - outer height
 
 # Wall and structural
 wall = 2.0          # mm - wall thickness (min 1.2 for FDM)
+floor_t = 1.6       # mm - floor thickness
 corner_r = 2.0      # mm - corner fillet radius
 
-# Tolerances
-fit_clearance = 0.3 # mm - clearance for press-fit (adjust per printer)
+# Tolerances (see Design Constants Reference for values by material)
+fit_clearance = 0.3 # mm - clearance per side for sliding fit
+
+# Print orientation: flat bottom (Z=0) on bed, open top faces up
+# Seam pins to rear-left vertical edge — intentional
 
 # ============================================================
 # MODEL
@@ -924,49 +1017,29 @@ result = (
 # ============================================================
 # EXPORT
 # ============================================================
-# Use tolerance=0.01, angularTolerance=0.1 for consistent tessellation
-# across models. Defaults give coarser, wildly variable STL sizes.
+# tolerance=0.01, angularTolerance=0.1 gives consistent tessellation.
+# Defaults produce coarser, wildly variable STL sizes.
 cq.exporters.export(result, "output.stl",
                     tolerance=0.01, angularTolerance=0.1)
 print(f"Exported: {width}x{depth}x{height}mm")
 ```
 
-## Key Rules
+### Preview Recipe
 
-### Parameters First
-- ALL dimensions go in the PARAMETERS section at the top
-- Use descriptive names: `screw_hole_d`, not `d1`
-- Add units in comments (always mm)
-- Group related parameters with blank lines and section comments
+**One-shot (run script + render + parse result as JSON):**
+```bash
+python3 run_cadquery_model.py model.py --preview --strict
+```
+This executes `model.py`, finds the STL it wrote, renders the multi-view preview, and emits a JSON result with `success`, `stdout`, `stderr`, `stl`, `preview`, and `watertight`. With `--strict`, a non-watertight mesh is a hard failure. Use this as the default loop: if `success` is false, read the `stderr` field to fix the CadQuery script, then re-run.
 
-### Print-Friendly Defaults
-Key FDM design defaults:
-
-| Property | Minimum | Recommended |
-|----------|---------|-------------|
-| Wall thickness | 1.2mm | 2.0mm |
-| Layer height | 0.08mm | 0.2mm |
-| Hole clearance | 0.2mm | 0.3mm |
-| Press-fit interference | 0.1mm | 0.15mm |
-| Min feature size | 0.4mm (nozzle) | 0.8mm |
-| Fillet radius (bottom) | 0.5mm | 1.0mm |
-| Bridge span | - | < 20mm unsupported |
-| Overhang angle | - | < 45 degrees from vertical |
-
-**Material-specific adjustments:** TPU needs larger clearances (~0.5mm) due to flex. PETG is stickier, so add +0.1mm to fit clearances. ABS shrinks ~0.5-0.7%, so scale critical dimensions up slightly. When in doubt, print a small test piece first.
-
-### Orientation Awareness
-- Design with print orientation in mind
-- Flat bottom surfaces print best
-- Avoid supports when possible by designing around overhangs
-- Add chamfers to bottom edges instead of fillets (fillets need supports)
-- Comment the intended print orientation in the script
+**Rendering only (when the STL already exists):**
+```bash
+python3 preview.py model.stl preview.png --views multi
+```
 
 ### CadQuery Patterns
 
-Common patterns to know:
-
-**Hollow enclosure (boolean subtraction, preferred):**
+**Hollow enclosure (boolean subtraction — preferred over `.shell()`):**
 ```python
 outer = (
     cq.Workplane("XY")
@@ -1006,22 +1079,20 @@ result = outer.cut(inner)
 
 Other patterns: mounting brackets, cable routing channels, text/labels (`.text()`), multi-part assemblies with alignment pins.
 
+**Multi-part models:**
+```python
+# Export each part separately
+cq.exporters.export(body, "enclosure_body.stl")
+cq.exporters.export(lid, "enclosure_lid.stl")
+```
+
+Name files descriptively so the user knows which part is which.
+
 ### Common Pitfalls
 
-- **Hollowing: prefer boolean subtraction over `.shell()`**. `.shell()` is fragile. It fails on tapered bodies, lofted shapes, unions of multiple primitives, and anything with many fillets. The reliable pattern is:
-  ```python
-  outer = cq.Workplane("XY").box(w, d, h, centered=(True, True, False)).edges("|Z").fillet(corner_r)
-  inner = (
-      cq.Workplane("XY")
-      .workplane(offset=floor_t)
-      .box(w - 2*wall, d - 2*wall, h, centered=(True, True, False))
-      .edges("|Z").fillet(max(0.1, corner_r - wall))
-  )
-  result = outer.cut(inner)
-  ```
-  Only reach for `.shell()` when the body is a single simple primitive (one `.box()` or `.cylinder()`) with a uniform wall thickness on all sides. If in doubt, use boolean subtraction.
+- **Hollowing: prefer boolean subtraction over `.shell()`**. `.shell()` is fragile. It fails on tapered bodies, lofted shapes, unions of multiple primitives, and anything with many fillets. Only reach for `.shell()` when the body is a single simple primitive (one `.box()` or `.cylinder()`) with a uniform wall thickness on all sides. If in doubt, use boolean subtraction.
 - **Build order: fillet → cut, not cut → fillet**. Apply fillets while the geometry is still a clean primitive. Once you have cut holes/slots/pockets into a body, filleting the resulting edges often fails or produces bad geometry. Same rule for chamfers.
-- **Fillet failures**: Apply fillets from largest to smallest radius. **Do not wrap fillets in `try/except` to silently shrink the radius.** A fillet failure means the geometry or the radius is wrong; find the root cause (too-large radius, wall thinner than radius, adjacent faces that the fillet would degenerate) and fix that.
+- **Fillet failures**: Apply fillets from largest to smallest radius. **Do not wrap fillets in `try/except` to silently shrink the radius.** A fillet failure means the geometry or the radius is wrong; find the root cause and fix that.
 - **Zero-thickness geometry**: Ensure boolean operations don't create infinitely thin walls. Add a small epsilon (0.01mm) when cutting bodies that are meant to pass just through a surface.
 - **Coordinate system**: CadQuery centers geometry at origin by default. Use `centered=(True, True, False)` on `.box()` to place the bottom at Z=0 so `.faces("<Z")` is always the print bed.
 - **Hole direction**: `.hole()` cuts through the entire part by default. Use `.cboreHole()` or `.cskHole()` for counterbore/countersink.
@@ -1029,7 +1100,7 @@ Other patterns: mounting brackets, cable routing channels, text/labels (`.text()
 - **Loft is fragile**: `.loft()` fails on many cross-section combinations. Prefer `.extrude(taper=angle)` when transitioning between a shape and a scaled version of itself. Only use `.loft()` when you need to transition between genuinely different profiles (e.g., circle to rectangle).
 - **Export errors / non-watertight STL**: If export fails or the preview reports a non-watertight mesh, the geometry is invalid (usually self-intersecting booleans or zero-thickness faces). Fix the cause, don't paper over it. Run `python3 preview.py model.stl --strict` to fail loudly on non-watertight output.
 
-## Export
+### Export
 
 ```python
 # STL (for slicing) - always set tolerance + angularTolerance for
@@ -1044,52 +1115,24 @@ cq.exporters.export(result, "model.step")
 
 Always export STL for printing. Optionally export STEP if the user might want to edit in Fusion 360 or similar.
 
-## Multi-Part Models
-
-For models with multiple parts (e.g., enclosure + lid):
-
-```python
-# Export each part separately
-cq.exporters.export(body, "enclosure_body.stl")
-cq.exporters.export(lid, "enclosure_lid.stl")
-```
-
-Name files descriptively so the user knows which part is which.
-
-## Parameter Adjustment Offer
-
-After delivering the final model, **always present the key parameters as a summary table** and offer to tweak them. This lets the user fine-tune without re-explaining the whole design.
-
-Example:
-```
-Here's your final model! Current parameters:
-
-| Parameter       | Value  |
-|----------------|--------|
-| Width          | 90 mm  |
-| Depth          | 65 mm  |
-| Height         | 30 mm  |
-| Wall thickness | 4 mm   |
-| Cable slot     | 18 mm  |
-| Corner radius  | 3 mm   |
-| Fit clearance  | 0.3 mm |
-
-Want me to adjust anything? Just say e.g. "make it 5mm taller" or "wider cable slot."
-```
-
-Only include parameters the user would plausibly want to change. Skip internal constants like `eps` or `nozzle_d`. Group them logically (dimensions first, then structural, then tolerances).
+---
 
 ## Output Checklist
 
-Before delivering a model, verify:
+Before delivering any model, verify:
 - [ ] All dimensions are parameterized (no magic numbers in geometry code)
-- [ ] Wall thickness >= 1.2mm
+- [ ] Wall thickness >= 1.2mm (structural), >= 0.8mm (decorative)
+- [ ] Clearances looked up from Design Constants Reference — not guessed
+- [ ] Hardware hole sizes taken from Hardware Database
+- [ ] Shrinkage compensation applied if ABS, ASA, or PA-CF
+- [ ] Seam placement commented in code
 - [ ] Designed for printability (minimal overhangs/supports)
-- [ ] Print orientation noted in comments
+- [ ] Print orientation noted in comments and stated in delivery
 - [ ] STL exported and file size is reasonable (not 0 bytes)
-- [ ] Clear parameter names with units
 - [ ] Script runs without errors
-- [ ] **Multi-view preview generated and visually inspected**
-- [ ] **Preview shows correct shape, features, and proportions**
-- [ ] **Bounding box dimensions match requirements**
+- [ ] Multi-view preview generated and visually inspected
+- [ ] Preview shows correct shape, features, and proportions
+- [ ] Bounding box dimensions match requirements
+- [ ] Structural reinforcement pass completed (fill ratio, steep overhangs checked)
+- [ ] Slicer verification run (or noted as unavailable)
 - [ ] Both STL and preview PNG delivered to user
