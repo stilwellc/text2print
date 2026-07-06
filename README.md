@@ -1,140 +1,90 @@
 # Parametric 3D Printing Skill for Claude Code
 
-A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill for generating production-ready 3D-printable models using [CadQuery](https://cadquery.readthedocs.io/). Describe a part, and Claude designs it parametrically, verifies it structurally, slices it headlessly, and delivers a print-ready STL with settings — in one shot.
+A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill that designs production-ready 3D-printable models. Describe a part; Claude researches real-world dimensions, builds it parametrically in [CadQuery](https://cadquery.readthedocs.io/) (or procedural mesh code when the geometry demands it), verifies it structurally, slices it headlessly, and delivers a print-ready STL with settings — while you watch it take shape live in your browser.
 
 <p align="center">
-  <img src="docs/magsafe_stand_preview.png" alt="MagSafe stand preview, 4 views" width="480">
-  <img src="docs/iphone13_pro_case_preview.png" alt="iPhone 13 Pro case preview, 4 views" width="480">
+  <img src="docs/live_ui.png" alt="Live design UI: Three.js viewer, phase tracker, parameters, and slicer report" width="900">
 </p>
-
-<p align="center">
-  <img src="docs/gridfinity_d110_bin_preview.png" alt="Gridfinity 3x2 bin for Orico D110 label printer" width="640">
-</p>
-
-<p align="center">
-  <img src="docs/magnet_catch_preview.png" alt="Magnetic door catch (frame side)" width="480">
-  <img src="docs/magnet_strike_preview.png" alt="Magnetic door catch (door side)" width="480">
-</p>
-
-<p align="center">
-  <img src="docs/zigzag_fabric_bowl.png" alt="Zigzag fabric bowl: perforated floor with stencil text, interior, and hero view" width="960">
-</p>
-
-More examples on [MakerWorld](https://makerworld.com/en/@sercanto).
 
 ---
 
-## What it does
+## The pipeline
 
-The skill handles four modes, selected automatically based on what you ask:
+The skill picks one of four modes from what you ask:
 
 | Mode | Trigger | What happens |
 |------|---------|--------------|
-| **A — New Design** | "Design me a…" | Full pipeline: requirements → repo search → design brief → phased build → structural check → slicer verification → delivery |
-| **B — STL Reference** | Provide an existing STL | Analyzes the file, recovers dimensions, then modifies or uses it as inspiration |
-| **C — Overhang Fix** | "This keeps failing at the overhang" | Ray-cast ceiling map + manifold3d boolean fill to eliminate overhangs without supports |
-| **D — Printability Audit** | "Will this print?" | Full mesh audit: watertight check, overhang detection, wall analysis, orientation recommendation, auto-repair |
+| **New Design** | "Design me a…" | Requirements → repo search → design brief → phased build → structural check → slicer verification → delivery |
+| **STL Reference** | Provide an existing STL | Analyzes the mesh, recovers dimensions, then modifies it or uses it as inspiration |
+| **Overhang Fix** | "This keeps failing at the overhang" | Ray-cast ceiling map + manifold3d boolean fill — overhangs removed without slicer supports |
+| **Printability Audit** | "Will this print?" | Watertight check, overhang detection, wall analysis, auto-repair, orientation recommendation |
 
-### What "one shot" means in practice
+Nothing is guessed along the way:
 
-The skill looks up tolerances, hardware dimensions, and structural rules from built-in reference tables before writing any geometry — no guessing. Before delivery, it:
+- **Reference tables built in** — material profiles (PLA/PETG/ABS/ASA/TPU/PA-CF), clearance and press fits, snap-fit arm geometry, living hinges, heat-insert and screw dimensions, SBC mounting patterns, magnet pockets
+- **Repo search first** — checks MakerWorld, Printables, Thingiverse, Cults3D, and MyMiniFactory before designing from scratch
+- **Structural pass before delivery** — fill ratio, steep overhangs, wall thickness, and cantilever rules per material
+- **Slicer verification** — slices with PrusaSlicer CLI and reports time, filament, and support volume; more than 25% support means redesign, not delivery
 
-1. Runs a **structural reinforcement pass** — checks fill ratio, steep overhangs, wall thickness, and cantilever lengths against per-material rules
-2. Searches **MakerWorld, Printables, Thingiverse, Cults3D, and MyMiniFactory** before building from scratch
-3. Writes a **design brief** for you to confirm before any code is written
-4. Slices the finished model with **PrusaSlicer CLI** and reports estimated time, filament weight, and support volume — if supports exceed 25%, it redesigns instead of delivering
+Every delivery ends with print settings, orientation and reasoning, a slicer report, and a parameter table with an offer to tweak:
+
+```
+Print settings: PETG, 0.2mm layer, 3 walls, 20% gyroid infill, no supports.
+Orientation: flat base on bed (open top faces up).
+Slicer report: ~3h 40m · 31g · no supports · 184 layers.
+```
 
 ---
 
-## Installation
+## Quick start
 
 ```bash
 mkdir -p ~/.claude/skills
 git clone https://github.com/stilwellc/parametric-3d-printing ~/.claude/skills/parametric-3d-printing
-```
 
-### Python dependencies
-
-Requires **Python 3.10–3.12** (CadQuery's OCC kernel has no 3.13+ wheels):
-
-```bash
+# Python 3.10–3.12 (CadQuery's OCC kernel has no 3.13+ wheels)
 cd ~/.claude/skills/parametric-3d-printing
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### PrusaSlicer (optional, for slicer verification)
+Optional, for slicer verification: install [PrusaSlicer](https://www.prusa3d.com/page/prusaslicer_424/) (on macOS the CLI lives at `/Applications/PrusaSlicer.app/Contents/MacOS/prusa-slicer`). Without it the skill skips verification and says so in the delivery.
 
-Download from [prusaslicer.com](https://www.prusa3d.com/page/prusaslicer_424/). On macOS the CLI is at:
-
-```bash
-/Applications/PrusaSlicer.app/Contents/MacOS/prusa-slicer --version
-```
-
-If PrusaSlicer is not installed, the skill skips slicer verification and notes it in the delivery message.
-
----
-
-## Usage
-
-Once installed, the skill activates in two ways inside Claude Code:
-
-- **Auto-trigger** — describe what you want ("design a wall mount for a Raspberry Pi 4", "I need a snap-fit lid", "this STL has terrible overhangs") and Claude picks up the skill from its trigger keywords.
-- **Explicit slash command** — type `/parametric-3d-printing` to invoke it directly.
-
-### Example interactions
+Then just ask, in Claude Code:
 
 ```
 "Design a parametric enclosure for an Arduino Uno with a snap-fit lid, PETG, Bambu X1C"
-→ Design brief + 3-phase build + structural check + slicer report + STL
-
-"Here's my STL — can you make the top 10mm taller and add a cable slot on the left side?"
-→ Analyzes geometry, recovers parameters, rebuilds in CadQuery with changes
-
+"Here's my STL — make the top 10mm taller and add a cable slot on the left side"
 "This overhang keeps failing at 15mm height even with supports"
-→ Ray-cast overhang map + filled geometry + before/after preview
-
 "Will this print? [attaches STL]"
-→ Mesh audit report + auto-repair + orientation recommendation
 ```
+
+The skill auto-triggers on requests like these, or invoke it directly with `/parametric-3d-printing`.
 
 ---
 
-## Live Design UI
+## Live design UI
 
-<p align="center">
-  <img src="docs/live_ui.png" alt="Live design UI: 3D viewer with the zigzag fabric bowl, phase tracker, parameters, and slicer report" width="960">
-</p>
-
-A companion browser UI that shows the model taking shape in real time while Claude designs it:
+Watch the build happen instead of waiting for the final STL:
 
 ```bash
-cd ~/.claude/skills/parametric-3d-printing
 source .venv/bin/activate
-python3 ui_server.py     # serves http://localhost:7384
+python3 ui_server.py     # http://localhost:7384
 ```
 
-The page polls the skill directory and updates automatically as Claude works:
-
-- **3D viewer** — the latest exported STL, rendered live in Three.js (orbit/zoom)
-- **Preview panel** — the multi-view PNG renders as they're generated
-- **Phase tracker** — where the session is in the pipeline (requirements → repo search → design brief → build phases → structural check → slicer → delivered)
-- **Parameter table** — the current values of every user-tweakable dimension
-- **Slicer report** — estimated print time, filament weight, support %, and layer count once verification runs
-
-No build step and no display server needed; it's a single-file Flask app that watches `*.stl`, `*_preview.png`, and `ui_state.json`. Older exports stay listed so you can flip back to earlier iterations.
+A single-file Flask app that watches the skill directory and streams updates to the browser as Claude works: the latest STL in an orbitable Three.js viewer, multi-view preview renders, a phase tracker for the pipeline, the current parameter values, and the slicer report. Older exports stay listed so you can flip back to earlier iterations.
 
 ---
 
-## Reusable Textures
+## Reusable textures
 
-### Printed fabric (zigzag textile) walls — `zigzag_fabric.py`
+**Printed fabric (zigzag textile) walls — `zigzag_fabric.py`**
 
 <p align="center">
-  <img src="docs/zigzag_fabric_closeup.png" alt="Printed fabric wall macro and full bowl" width="960">
+  <img src="docs/zigzag_fabric_closeup.png" alt="Printed fabric wall macro and full bowl" width="900">
 </p>
 
-Generates walls that are light, airy, and see-through: a thin shell whose contour alternates per print layer — a few zigzag layers swinging outward, a few straight layers, repeating, with alternate bands phase-shifted so the pattern crisscrosses into open diamonds. The zigzag layers bridge in mid-air; the result behaves like printed textile rather than a solid wall with a texture.
+Walls that are light, airy, and see-through: a thin shell whose contour alternates per print layer — zigzag layers swinging outward, straight layers between, alternate bands phase-shifted so they crisscross into open diamonds. The zigzag layers bridge in mid-air; the result behaves like printed textile, not a solid wall with surface relief.
 
 ```python
 from zigzag_fabric import fabric_solid
@@ -143,77 +93,48 @@ tm = fabric_solid(profile_fn, height=60.0, layer_h=0.2,
                   zigzag_layers=3, straight_layers=2)
 ```
 
-Key constraint: the slicer layer height must exactly match `layer_h` — the geometry is staircase-quantized to print layers. Print with 2 perimeters, 0% infill, no top layers, vase mode off, full cooling. See the "Printed Fabric Walls" section in `SKILL.md` for the full rules and `zigzag_bowl.py` for a complete example (fabric wall + diamond-perforated floor + stencil text cut).
+The geometry is staircase-quantized to print layers, so the slicer layer height must exactly match `layer_h`. Print with 2 perimeters, 0% infill, no top layers, vase mode off, full cooling. Full rules live in the "Printed Fabric Walls" section of `SKILL.md`; `zigzag_bowl.py` is a complete example (fabric wall + diamond-perforated floor + stencil text cut):
+
+<p align="center">
+  <img src="docs/zigzag_fabric_bowl.png" alt="Zigzag fabric bowl: perforated floor with stencil text, interior, and hero view" width="900">
+</p>
 
 ---
 
-## Design Constants Built In
+## Gallery
 
-The skill ships with reference tables Claude uses automatically — no need to look these up yourself.
+<p align="center">
+  <img src="docs/magsafe_stand_preview.png" alt="MagSafe stand, 4 views" width="440">
+  <img src="docs/iphone13_pro_case_preview.png" alt="iPhone 13 Pro case, 4 views" width="440">
+</p>
+<p align="center">
+  <img src="docs/gridfinity_d110_bin_preview.png" alt="Gridfinity 3x2 bin for Orico D110 label printer" width="440">
+  <img src="docs/magnet_catch_preview.png" alt="Magnetic door catch" width="440">
+</p>
 
-### Material profiles
-
-Covers PLA, PETG, ABS, ASA, TPU 95A, and PA-CF with:
-- Minimum wall thickness (structural and decorative)
-- Maximum unsupported bridge span
-- Shrinkage compensation percentage
-- Sliding, rotating, and press-fit clearances by material
-- Horizontal hole sag correction
-- UV resistance and enclosure requirements
-
-### Hardware database
-
-Exact dimensions for:
-- **Heat inserts** (Ruthex M2–M5): hole diameter, OD, depth, minimum surrounding wall
-- **Screw clearance holes** (M2–M5): through-hole, self-tapping, counterbore
-- **SBC mounting patterns**: Raspberry Pi 4/5, Pi Zero 2W, Arduino Uno/Nano, ESP32 DevKit
-- **Standard magnets**: N35 disc pocket clearances for 6mm, 8mm, 10mm
-
-### Mechanical fit tables
-
-- Clearance fits: sliding, rotating, print-in-place hinge, loose/rattle-free — per material
-- Snap-fit arm geometry: strain-limit formula + quick-reference proportions for PLA/PETG/TPU/Nylon
-- Living hinge dimensions (TPU): thickness and bend radius by span
-- Print-in-place joint clearances: pin hinges, ball sockets, captive nuts, gears
+More on [MakerWorld](https://makerworld.com/en/@sercanto).
 
 ---
 
-## Files
+## Repository layout
 
 | File | Purpose |
 |------|---------|
-| `SKILL.md` | Complete skill definition: 4-mode workflow, design constants, all reference tables |
-| `ui_server.py` | Live design UI: Three.js STL viewer + phase/parameter/slicer dashboard at `localhost:7384` |
-| `zigzag_fabric.py` | Reusable printed-fabric (zigzag textile) wall generator |
-| `zigzag_bowl.py` | Full fabric-technique example: 200mm bowl, perforated floor, stencil text |
-| `preview.py` | Headless STL → 4-view PNG renderer (trimesh + pyrender). `--strict` fails on non-watertight. |
-| `run_cadquery_model.py` | Runs a CadQuery script, renders preview, emits JSON result for Claude's self-correct loop |
+| `SKILL.md` | The skill itself: 4-mode workflow, design constants, all reference tables |
+| `ui_server.py` | Live design UI (Flask + Three.js) at `localhost:7384` |
+| `run_cadquery_model.py` | Runs a CadQuery script, renders preview, emits JSON for Claude's self-correct loop |
+| `preview.py` | Headless STL → multi-view PNG renderer; `--strict` fails on non-watertight meshes |
+| `zigzag_fabric.py` | Reusable printed-fabric wall generator |
+| `zigzag_bowl.py` | Fabric-technique example: 200mm bowl, perforated floor, stencil text |
 | `mesh_io.py` | STL loading with validation (no pyrender dependency) |
 | `stl_to_3mf.py` | STL → 3MF converter for Bambu Studio / PrusaSlicer |
 | `design-review.md` | Visual inspection checklist and printability analysis helpers |
-| `requirements.txt` | Pinned Python dependency versions |
-
----
-
-## Delivery format
-
-At the end of a new design session, Claude delivers:
-
-```
-Print settings: PETG, 0.2mm layer, 3 walls, 20% gyroid infill, no supports.
-Orientation: flat base on bed (open top faces up).
-Why: no overhangs above 45°; 3 walls gives adequate snap-fit arm backing.
-Slicer report (PETG, 0.2mm, 3 walls, 20% infill): ~3h 40m · 31g · no supports · 184 layers.
-```
-
-Plus a parameter summary table and offer to tweak any dimension.
+| `tests/` | Pytest suite for the mesh tooling and fabric generator |
 
 ---
 
 ## License
 
-Licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). Free to use, modify, and distribute for noncommercial purposes.
+[PolyForm Noncommercial 1.0.0](LICENSE) — free to use, modify, and distribute for noncommercial purposes.
 
----
-
-Originally created by [Nicolas Chourrout](https://github.com/nchourrout) / [Flowful.ai](https://flowlow.ai). Extended with STL analysis modes, overhang fix pipeline, slicer verification, material profiles, hardware database, structural reinforcement pass, and model repository search.
+Originally created by [Nicolas Chourrout](https://github.com/nchourrout) / [Flowful.ai](https://flowlow.ai). Extended with STL analysis modes, the overhang fix pipeline, slicer verification, material profiles, the hardware database, the structural reinforcement pass, model repository search, the live design UI, and reusable textures.
