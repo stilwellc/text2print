@@ -14,3 +14,9 @@ magsafe_stand.py
 phone_stand.py
 geometric_planter.py
 velux_wand.py
+pendant_light_mount.py
+combine_with_backplate.py
+
+# Session runtime artifacts
+ui_state.json
+zigzag_bowl_*.png

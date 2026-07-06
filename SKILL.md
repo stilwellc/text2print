@@ -1170,6 +1170,38 @@ cq.exporters.export(lid, "enclosure_lid.stl")
 
 Name files descriptively so the user knows which part is which.
 
+### Printed Fabric Walls (zigzag textile) — `zigzag_fabric.py`
+
+**Triggers:** the user wants a bowl/vase/basket/shade that is "light and airy", "fabric-like", "knit/woven/textile look", or shows a reference print where the wall is an open diamond mesh built from alternating zigzag and straight print layers.
+
+This is NOT a surface texture on a solid wall — the wall itself is the structure. A thin shell's contour alternates per print layer: M zigzag layers (triangle wave swinging outward), N straight circular layers, repeating, with each zigzag band phase-shifted half a period so the bands crisscross into diamonds. The zigzag layers print partly in mid-air (short bridges) and leave open diamond windows. Fine knurl textures on solid walls are a different technique (procedural displacement mesh); use this module when the goal is openness and drape, not relief.
+
+Do not build this in CadQuery — use the `fabric_solid()` helper, which generates the staircase mesh quantized to the print layer height:
+
+```python
+from zigzag_fabric import fabric_solid
+
+def profile(z):          # any silhouette: cylinder, barrel, flare...
+    return 78.0 + 22.0 * math.sin(z / 60.0 * math.pi)   # scalar in/out, mm
+
+tm = fabric_solid(
+    profile, height=60.0,
+    shell_t=1.0,          # 2 perimeters at ~0.5mm
+    floor_t=3.0, solid_base_z=6.0,
+    layer_h=0.2,          # MUST equal the slicer layer height
+    zigzags_around=90,    # keep half-period (pi*D/zigzags/2) under bridge limit
+    zigzag_depth=2.0,     # outward swing = window size
+    zigzag_layers=3, straight_layers=2)
+tm.export("fabric_part.stl")
+```
+
+**Rules that must not be skipped:**
+- `layer_h` must exactly match the slicer layer height, or the zigzag/straight alternation smears across layers. State this in the delivery message.
+- Vase/spiral mode OFF (contours alternate per layer), 2 perimeters, 0% infill, 0 top layers, fan 100%, outer wall ≤60mm/s, no supports.
+- Keep the unsupported half-period (`pi * diameter / zigzags_around / 2`) comfortably under the material's bridge limit — ~3-4mm is safe for PLA.
+- Boolean floor cutouts (diamond rings, stencil text) go through the solid floor with manifold3d. Any through-cut word/logo needs stencil bridges for enclosed counters, and after cutting always verify `len(tm.split(only_watertight=False)) == 1` — extra bodies are loose islands that fall out of the print.
+- Reference example: `zigzag_bowl.py` (200mm catch-all bowl: fabric wall + diamond-perforated floor + stencil text). Tests: `tests/test_zigzag_fabric.py`.
+
 ### Common Pitfalls
 
 - **Hollowing: prefer boolean subtraction over `.shell()`**. `.shell()` is fragile. It fails on tapered bodies, lofted shapes, unions of multiple primitives, and anything with many fillets. Only reach for `.shell()` when the body is a single simple primitive (one `.box()` or `.cylinder()`) with a uniform wall thickness on all sides. If in doubt, use boolean subtraction.

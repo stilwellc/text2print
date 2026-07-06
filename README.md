@@ -16,6 +16,10 @@ A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill for genera
   <img src="docs/magnet_strike_preview.png" alt="Magnetic door catch (door side)" width="480">
 </p>
 
+<p align="center">
+  <img src="docs/zigzag_fabric_bowl.png" alt="Zigzag fabric bowl: perforated floor with stencil text, interior, and hero view" width="960">
+</p>
+
 More examples on [MakerWorld](https://makerworld.com/en/@sercanto).
 
 ---
@@ -96,6 +100,49 @@ Once installed, the skill activates in two ways inside Claude Code:
 
 ---
 
+## Live Design UI
+
+A companion browser UI that shows the model taking shape in real time while Claude designs it:
+
+```bash
+cd ~/.claude/skills/parametric-3d-printing
+source .venv/bin/activate
+python3 ui_server.py     # serves http://localhost:7384
+```
+
+The page polls the skill directory and updates automatically as Claude works:
+
+- **3D viewer** — the latest exported STL, rendered live in Three.js (orbit/zoom)
+- **Preview panel** — the multi-view PNG renders as they're generated
+- **Phase tracker** — where the session is in the pipeline (requirements → repo search → design brief → build phases → structural check → slicer → delivered)
+- **Parameter table** — the current values of every user-tweakable dimension
+- **Slicer report** — estimated print time, filament weight, support %, and layer count once verification runs
+
+No build step and no display server needed; it's a single-file Flask app that watches `*.stl`, `*_preview.png`, and `ui_state.json`. Older exports stay listed so you can flip back to earlier iterations.
+
+---
+
+## Reusable Textures
+
+### Printed fabric (zigzag textile) walls — `zigzag_fabric.py`
+
+<p align="center">
+  <img src="docs/zigzag_fabric_closeup.png" alt="Printed fabric wall macro and full bowl" width="960">
+</p>
+
+Generates walls that are light, airy, and see-through: a thin shell whose contour alternates per print layer — a few zigzag layers swinging outward, a few straight layers, repeating, with alternate bands phase-shifted so the pattern crisscrosses into open diamonds. The zigzag layers bridge in mid-air; the result behaves like printed textile rather than a solid wall with a texture.
+
+```python
+from zigzag_fabric import fabric_solid
+tm = fabric_solid(profile_fn, height=60.0, layer_h=0.2,
+                  zigzags_around=90, zigzag_depth=2.0,
+                  zigzag_layers=3, straight_layers=2)
+```
+
+Key constraint: the slicer layer height must exactly match `layer_h` — the geometry is staircase-quantized to print layers. Print with 2 perimeters, 0% infill, no top layers, vase mode off, full cooling. See the "Printed Fabric Walls" section in `SKILL.md` for the full rules and `zigzag_bowl.py` for a complete example (fabric wall + diamond-perforated floor + stencil text cut).
+
+---
+
 ## Design Constants Built In
 
 The skill ships with reference tables Claude uses automatically — no need to look these up yourself.
@@ -132,6 +179,9 @@ Exact dimensions for:
 | File | Purpose |
 |------|---------|
 | `SKILL.md` | Complete skill definition: 4-mode workflow, design constants, all reference tables |
+| `ui_server.py` | Live design UI: Three.js STL viewer + phase/parameter/slicer dashboard at `localhost:7384` |
+| `zigzag_fabric.py` | Reusable printed-fabric (zigzag textile) wall generator |
+| `zigzag_bowl.py` | Full fabric-technique example: 200mm bowl, perforated floor, stencil text |
 | `preview.py` | Headless STL → 4-view PNG renderer (trimesh + pyrender). `--strict` fails on non-watertight. |
 | `run_cadquery_model.py` | Runs a CadQuery script, renders preview, emits JSON result for Claude's self-correct loop |
 | `mesh_io.py` | STL loading with validation (no pyrender dependency) |
