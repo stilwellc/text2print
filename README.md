@@ -137,4 +137,4 @@ More on [MakerWorld](https://makerworld.com/en/@sercanto).
 
 [PolyForm Noncommercial 1.0.0](LICENSE) — free to use, modify, and distribute for noncommercial purposes.
 
-Originally created by [Nicolas Chourrout](https://github.com/nchourrout) / [Flowful.ai](https://flowlow.ai). Extended with STL analysis modes, the overhang fix pipeline, slicer verification, material profiles, the hardware database, the structural reinforcement pass, model repository search, the live design UI, and reusable textures.
+Built on [cad-skill](https://github.com/flowful-ai/cad-skill) by [Nicolas Chourrout](https://github.com/nchourrout).
