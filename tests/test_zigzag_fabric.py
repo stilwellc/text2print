@@ -80,6 +80,21 @@ def test_wave_stitch_mirrored_sines_watertight():
     assert tm.extents[0] > 51.0
 
 
+def test_callable_stitch_watertight():
+    def stitch(u, layer_in_band, band_layers, band, z_frac):
+        env = np.sin(np.pi * (layer_in_band + 0.5) / band_layers)
+        return 1.0 * env * np.sin(np.pi * np.mod(u, 1.0)) ** 2 * z_frac
+
+    tm = fabric_solid(
+        lambda z: 25.0, 16.0,
+        shell_t=0.5, floor_t=1.6, solid_base_z=2.0, layer_h=0.2,
+        zigzags_around=26, zigzag_depth=1.0,
+        zigzag_layers=4, straight_layers=0, samples_per_zigzag=8,
+        stitch=stitch)
+    assert tm.is_watertight
+    assert len(tm.split(only_watertight=False)) == 1
+
+
 def test_solid_base_band_stays_smooth():
     tm = small_fabric()
     # below solid_base_z no vertex may swing past the profile radius

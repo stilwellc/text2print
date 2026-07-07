@@ -81,6 +81,12 @@ def fabric_solid(profile_r, height, *,
                    cross at the wave zeros and open eye-shaped windows
                    between crossings. zigzag_depth is the peak-to-peak
                    swing.
+                   Or a CALLABLE for custom/combined stitches:
+                   f(u, layer_in_band, band_layers, band, z_frac) -> mm
+                   displacement array over theta. u is the stitch
+                   coordinate (1.0 per stitch, half-period phase shift
+                   already applied on odd bands), z_frac is 0..1 height.
+                   The module adds the anti-pinch standoff itself.
     rim_loop_h     height (mm) of a loop-edge band at the very top: one
                    continuous deep zigzag, like a crochet cast-off row.
                    0 disables.
@@ -143,6 +149,11 @@ def fabric_solid(profile_r, height, *,
         # so adjacent bands (straight_layers=0) never share a vertex.
         # Invisible to the slicer.
         standoff = 0.02 * (1 + band % 2)
+        if callable(stitch):
+            d = stitch(u=u, layer_in_band=pk % cycle,
+                       band_layers=zigzag_layers, band=band,
+                       z_frac=(k + 0.5) * layer_h / height)
+            return base_r + standoff + 0.001 * (pk % cycle) + d
         if stitch == "domes":
             # bell envelope across the band's layers x smooth theta bump
             # -> rounded stitch domes instead of constant-depth fins.
