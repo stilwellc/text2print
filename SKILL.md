@@ -1200,6 +1200,7 @@ Preset scale ladder (zigzag diamond width): 0.2mm nozzle → 3.6mm lace · 0.4 �
 
 **Rules that must not be skipped:**
 - `layer_h` must exactly match the slicer layer height, or the zigzag/straight alternation smears across layers. State this in the delivery message.
+- **Band height makes or breaks every stitch.** Too tall reads as stacked slabs; too short collapses the pattern (wave mirrored every layer degenerates into vertical ribs). Keep zigzag and wave bands at ~0.15x the stitch/wavelength width (3-5 layers); domes are the exception at ~0.8x so they come out round. The presets encode these ratios — deviate deliberately, and re-render a macro view when you do.
 - Vase/spiral mode OFF (contours alternate per layer), 2 perimeters, 0% infill, 0 top layers, fan 100%, outer wall ≤60mm/s, no supports.
 - Keep the unsupported half-period (`pi * diameter / zigzags_around / 2`) comfortably under the material's bridge limit — ~3-4mm is safe for PLA.
 - For decorative through-cuts in the solid floor, use the `textures/floor_cuts.py` helpers — never hand-roll them:

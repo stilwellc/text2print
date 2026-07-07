@@ -56,7 +56,9 @@ def fabric_solid(profile_r, height, *,
                    half-period (pi*D/zigzags/2) under the material's
                    bridge limit; ~3-4mm is comfortable for PLA.
     zigzag_depth   outward swing of zigzag layers, mm (opening size).
-    zigzag_layers  print layers per zigzag band.
+    zigzag_layers  print layers per pattern band. Band height is the
+                   single strongest lever on how the fabric reads —
+                   see "Band height" below.
     straight_layers print layers per straight band.
     band_quantize  sample the silhouette once per band instead of per
                    layer in the pattern region. Identical consecutive
@@ -86,6 +88,15 @@ def fabric_solid(profile_r, height, *,
                    zigzag_depth).
     rim_loop_period width of each rim loop as a multiple of the stitch
                    width.
+
+    Band height (applies to every stitch): too-tall bands read as
+    stacked slabs, not fabric; too-short bands collapse the pattern
+    (wave mirrored every layer degenerates into vertical ribs).
+    Proven proportions, relative to the stitch/wavelength width:
+      zigzag ~0.15-0.2x width (3-4 layers) + 1-2 straight layers
+      wave   ~0.15x width (~4-5 layers), no straight layers
+      domes  the exception: ~0.8x width so domes come out round
+    The presets in textures/presets.py encode these; start there.
 
     Returns a trimesh.Trimesh. Callers should verify `is_watertight`
     and, after any boolean floor cuts, `len(tm.split()) == 1`.
