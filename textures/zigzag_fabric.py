@@ -38,7 +38,11 @@ def fabric_solid(profile_r, height, *,
                  zigzag_layers=3,
                  straight_layers=2,
                  samples_per_zigzag=6,
-                 band_quantize=False):
+                 band_quantize=False,
+                 stitch="zigzag",
+                 rim_loop_h=0.0,
+                 rim_loop_depth=None,
+                 rim_loop_period=2.0):
     """Closed, watertight fabric-walled solid of revolution.
 
     profile_r      callable z (scalar mm) -> outer wall radius (mm);
@@ -62,6 +66,21 @@ def fabric_solid(profile_r, height, *,
                    rings can exceed 100MB of STL. Adds at most
                    band_height * profile slope (<~0.3mm) of radial
                    stepping, invisible inside the fabric texture.
+    stitch         "zigzag" — constant-depth triangle-wave fins that
+                   crisscross into open diamonds (the original fabric).
+                   "knit" — smooth raised-cosine bumps with a bell
+                   amplitude envelope across each band: rounded stitch
+                   domes in half-offset rows, like stockinette knit.
+                   Knit wants taller bands (band height ~ stitch width,
+                   e.g. zigzag_layers=14 at 0.1mm for 1.6mm stitches)
+                   and straight_layers 0-1 so rows sit snugly.
+    rim_loop_h     height (mm) of a loop-edge band at the very top: one
+                   continuous deep zigzag, like a crochet cast-off row.
+                   0 disables.
+    rim_loop_depth outward swing of the rim loops (default 2x
+                   zigzag_depth).
+    rim_loop_period width of each rim loop as a multiple of the stitch
+                   width.
 
     Returns a trimesh.Trimesh. Callers should verify `is_watertight`
     and, after any boolean floor cuts, `len(tm.split()) == 1`.
@@ -88,15 +107,37 @@ def fabric_solid(profile_r, height, *,
         base_r = float(profile_r(min(z_mid, height)))
         if (k + 0.5) * layer_h < solid_base_z:
             return np.full(n_theta, base_r)
+        # loop-edge band: one continuous deep zigzag at the very top,
+        # like a crochet cast-off row
+        if rim_loop_h > 0 and (k + 0.5) * layer_h > height - rim_loop_h:
+            depth = rim_loop_depth if rim_loop_depth is not None \
+                else 2.0 * zigzag_depth
+            u = (zigzags_around / rim_loop_period) * theta / (2 * np.pi)
+            # smooth sine, not triangle: the loops read as a rounded
+            # serpentine coil, like a crochet cast-off row
+            return base_r + 0.02 + depth * 0.5 * (1 + np.sin(2 * np.pi * u))
         if pk % cycle >= zigzag_layers:        # straight band
             return np.full(n_theta, base_r)
         band = pk // cycle
         phase = 0.5 * (band % 2)               # crisscross: half-period shift
         u = zigzags_around * theta / (2 * np.pi) + phase
-        # 0.02mm standoff keeps zigzag valleys from exactly coinciding
-        # with straight rings — merged duplicate vertices would pinch
-        # the mesh non-manifold. Invisible to the slicer.
-        return base_r + 0.02 + zigzag_depth * tri01(u)
+        # Small standoff keeps pattern layers from exactly coinciding
+        # with straight rings or each other — merged duplicate vertices
+        # would pinch the mesh non-manifold. Alternates by band parity
+        # so adjacent bands (straight_layers=0) never share a vertex.
+        # Invisible to the slicer.
+        standoff = 0.02 * (1 + band % 2)
+        if stitch == "knit":
+            # bell envelope across the band's layers x smooth theta bump
+            # -> rounded stitch domes instead of constant-depth fins.
+            # The 1um-per-layer term keeps the bump zeros of adjacent
+            # layers within a band from sharing vertices (same pinch
+            # risk as the band standoff, one level down).
+            env = np.sin(np.pi * ((pk % cycle) + 0.5) / zigzag_layers)
+            bump = np.sin(np.pi * np.mod(u, 1.0)) ** 2
+            return (base_r + standoff + 0.001 * (pk % cycle)
+                    + zigzag_depth * env * bump)
+        return base_r + standoff + zigzag_depth * tri01(u)
 
     # staircase rings: outer up, rim, inner down, floor. Coincident
     # consecutive rings (constant-radius profiles) are skipped — their
