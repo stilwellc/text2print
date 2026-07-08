@@ -1,0 +1,20 @@
+.claude/
+.venv/
+__pycache__/
+*.pyc
+
+# Model outputs and session renders (docs images are tracked)
+*.stl
+*.3mf
+*.png
+!docs/*.png
+
+# Local example models — not part of the skill
+examples/
+
+# Runtime state
+ui_state.json
+ui_approval.json
+archive/
+press/
+nohup.out
