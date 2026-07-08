@@ -52,6 +52,38 @@ def diamond_cutters(rings, diag=5.0, depth=5.0, z0=-1.0):
     return cutters
 
 
+def lens_cutters(rings, length=12.0, width=4.5, depth=5.0, z0=-1.0):
+    """Eye/lens-shaped cutters (vesica of two circles) in concentric
+    rings, long axis tangential, alternate rings offset half a step.
+
+    The lens is the negative shape of the wave stitch's eye windows —
+    use it for floors that speak the same language as a wave wall.
+    rings is a list of (radius mm, hole count), like diamond_cutters.
+    """
+    from shapely.geometry import Point
+
+    a, b = length / 2, width / 2
+    R = (a * a + b * b) / (2 * b)          # vesica circle radius
+    d = R - b                              # circle center offset
+    lens = Point(0, -d).buffer(R, quad_segs=48).intersection(
+        Point(0, d).buffer(R, quad_segs=48))
+
+    cutters = []
+    for ring_i, (ring_r, count) in enumerate(rings):
+        offset = (np.pi / count) * (ring_i % 2)
+        for h in range(count):
+            ang = 2 * np.pi * h / count + offset
+            prism = trimesh.creation.extrude_polygon(lens, height=depth)
+            prism.apply_translation([0, 0, z0])
+            # long axis (x) -> tangential at ring position
+            prism.apply_transform(trimesh.transformations.rotation_matrix(
+                ang + np.pi / 2, [0, 0, 1]))
+            prism.apply_translation(
+                [ring_r * np.cos(ang), ring_r * np.sin(ang), 0])
+            cutters.append(_to_manifold(prism))
+    return cutters
+
+
 def text_region(text, width, font="Arial Rounded MT Bold", bridge_w=1.0):
     """A word as 2D cut polygons (shapely), stencil-bridged.
 

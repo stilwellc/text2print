@@ -54,3 +54,13 @@ def test_cut_floor_refuses_loose_islands():
     from textures.floor_cuts import _to_manifold
     with pytest.raises(ValueError, match="loose island"):
         cut_floor(disk, [_to_manifold(prism)])
+
+
+def test_lens_cutters_watertight_and_counted():
+    from textures.floor_cuts import lens_cutters
+    disk = solid_disk()
+    cutters = lens_cutters([(15.0, 5), (26.0, 9)], length=10.0, width=4.0,
+                           depth=5.0)
+    result = cut_floor(disk, cutters)
+    assert result.is_watertight
+    assert result.euler_number == 2 - 2 * 14   # one genus per lens
