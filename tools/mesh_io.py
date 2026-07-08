@@ -1,29 +1,23 @@
-"""Pure trimesh STL loading with validation guards.
+"""Validated STL loading for text2print.
 
-Kept separate from preview.py so consumers that only need mesh loading
-(stl_to_3mf.py, run_cadquery_model.py's --strict watertight check) don't
-pay the pyrender + PyOpenGL import cost. Only depends on trimesh + numpy.
+Deliberately import-light: trimesh only, never pyrender, so headless
+tools (the 3MF converter, strict checks, CI) can load meshes without
+dragging in an OpenGL stack.
 """
-import numpy as np
 import trimesh
 
 
 def load_mesh(path):
-    """Load an STL file via trimesh.
+    """Load *path* as a single triangle mesh.
 
-    Raises ValueError if the file cannot be parsed, contains no geometry,
-    has zero faces, or has non-finite vertex coordinates. Callers handle
-    the failure in-process instead of being killed by sys.exit, and silent
-    garbage (zero-face or NaN meshes) is stopped before it reaches pyrender.
+    Returns a trimesh.Trimesh. Raises ValueError for anything that
+    cannot become one: missing file, unparseable data, or a file with
+    no triangles.
     """
     try:
-        tm = trimesh.load(path, force="mesh")
-    except Exception as e:
-        raise ValueError(f"Failed to load STL: {e}") from e
-    if not hasattr(tm, "vertices") or len(tm.vertices) == 0:
-        raise ValueError("STL file contains no vertices")
-    if not hasattr(tm, "faces") or len(tm.faces) == 0:
-        raise ValueError("STL file contains no triangles")
-    if not np.isfinite(tm.vertices).all():
-        raise ValueError("STL file has non-finite vertex coordinates (NaN or inf)")
-    return tm
+        mesh = trimesh.load(str(path), force="mesh")
+    except Exception as exc:
+        raise ValueError(f"could not read STL {path!r}: {exc}") from exc
+    if not isinstance(mesh, trimesh.Trimesh) or len(mesh.faces) == 0:
+        raise ValueError(f"could not read STL {path!r}: no triangles found")
+    return mesh

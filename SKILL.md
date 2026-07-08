@@ -1,6 +1,6 @@
 ---
 name: parametric-3d-printing
-description: "Use this skill when the user wants to design a 3D-printable physical object they intend to manufacture. Triggers: any mention of '3D print', 'STL', 'parametric model', 'enclosure', 'bracket', 'mount', 'case', 'housing', 'CadQuery', 'OpenSCAD', or a specific FDM printer (Bambu Lab, Prusa, Ender); questions about print-friendly design, snap-fits, tolerances, or wall thickness; requests for functional parts like Arduino enclosures, cable organizers, wall mounts, adapters, or mechanical components; providing an existing STL file as a reference, for modification, or for inspiration. Also fires when the user describes a real physical object to make, provided the goal is to manufacture it. Do NOT use for: 3D rendering, animation, game assets, digital-only art, photogrammetry, sculpting, or any 3D work that is not heading toward a printer."
+description: "Design physical objects headed for an FDM printer. Fires on: '3D print', 'STL', 'parametric', 'enclosure', 'bracket', 'mount', 'case', 'housing', 'CadQuery', 'OpenSCAD', or a named printer (Bambu Lab, Prusa, Ender); print-fit questions (snap-fits, tolerances, wall thickness, overhangs); requests for functional parts (device enclosures, organizers, wall mounts, adapters, mechanical components); or a provided STL to audit, repair, modify, or draw from. Also fires when someone describes a real object they want fabricated. Not for: renders, animation, game assets, digital-only art, photogrammetry, or sculpting — anything that never reaches a printer."
 ---
 
 # text2print — Parametric 3D Printing with CadQuery
@@ -21,7 +21,7 @@ Read the user's request and pick one mode. Follow that mode linearly from start 
 ## Setup
 
 ```bash
-# CadQuery requires Python 3.10-3.12 (OCC kernel lacks 3.13+ wheels)
+# CadQuery needs Python 3.10-3.12 — no OCC wheels exist for 3.13+
 python3.12 -m venv .venv && source .venv/bin/activate
 
 # Install ALL dependencies from the pinned list — do not hand-pick
@@ -31,12 +31,10 @@ pip install -r requirements.txt
 
 CadQuery uses the OpenCASCADE kernel under the hood. trimesh, pyrender, and Pillow drive the preview-analyze-iterate loop; manifold3d and rtree the overhang fix and mesh repair; flask the live design UI; shapely, matplotlib, and mapbox_earcut the 2D outline work (stencil text cuts, ceiling maps). No display server is needed; everything renders headlessly via pyrender's offscreen backend.
 
-**If CadQuery fails to install** (OCC kernel build errors), try:
+**CadQuery install trouble** (OCC kernel build errors): fall back to conda, the channel the CadQuery project itself recommends, or to their prebuilt wheels:
 ```bash
-# Option 1: Use conda (CadQuery's officially recommended method)
 conda install -c cadquery -c conda-forge cadquery
-
-# Option 2: Use the pre-built wheels
+# or
 pip install cadquery --find-links https://github.com/CadQuery/CadQuery/releases
 ```
 
@@ -1097,49 +1095,36 @@ Remaining overhangs after fill: none. No slicer supports needed.
 
 ### Script Template
 
-ALWAYS structure scripts like this:
+Every model script follows this shape:
 
 ```python
 import cadquery as cq
 
-# ============================================================
-# PARAMETERS - Edit these to customize the model
-# All dimensions in mm. Put ALL values here — no magic numbers
-# in geometry code below.
-# ============================================================
-# Overall dimensions
-width = 60.0        # mm - outer width
-depth = 40.0        # mm - outer depth
-height = 25.0       # mm - outer height
+# ── PARAMETERS ── all dimensions in mm; every value lives up here,
+# never inline in the geometry ──────────────────────────────────────
+box_w     = 90.0   # outer width
+box_d     = 50.0   # outer depth
+box_h     = 32.0   # outer height
+wall      = 2.4    # wall thickness (>= 1.2 structural)
+floor_t   = 2.0    # floor slab
+edge_r    = 2.5    # vertical-edge fillet
+slide_gap = 0.3    # per-side clearance, sliding fit (see fit tables)
 
-# Wall and structural
-wall = 2.0          # mm - wall thickness (min 1.2 for FDM)
-floor_t = 1.6       # mm - floor thickness
-corner_r = 2.0      # mm - corner fillet radius
+# print orientation: bottom face on the bed at Z=0, opening up
+# seam: pinned to the rear-left vertical edge on purpose
 
-# Tolerances (see Design Constants Reference for values by material)
-fit_clearance = 0.3 # mm - clearance per side for sliding fit
-
-# Print orientation: flat bottom (Z=0) on bed, open top faces up
-# Seam pins to rear-left vertical edge — intentional
-
-# ============================================================
-# MODEL
-# ============================================================
-result = (
+# ── MODEL ───────────────────────────────────────────────────────────
+part = (
     cq.Workplane("XY")
-    .box(width, depth, height, centered=(True, True, False))
-    # ... build geometry using parameters above (bottom at Z=0)
+    .box(box_w, box_d, box_h, centered=(True, True, False))
+    # geometry grows from the parameters above; faces("<Z") is the bed
 )
 
-# ============================================================
-# EXPORT
-# ============================================================
-# tolerance=0.01, angularTolerance=0.1 gives consistent tessellation.
-# Defaults produce coarser, wildly variable STL sizes.
-cq.exporters.export(result, "output.stl",
-                    tolerance=0.01, angularTolerance=0.1)
-print(f"Exported: {width}x{depth}x{height}mm")
+# ── EXPORT ──────────────────────────────────────────────────────────
+# pin the tessellation — default tolerances give unpredictable STL
+# size and mangle small text features
+cq.exporters.export(part, "part.stl", tolerance=0.01, angularTolerance=0.1)
+print(f"exported part.stl ({box_w} x {box_d} x {box_h} mm)")
 ```
 
 ### Preview Recipe
@@ -1159,43 +1144,42 @@ python3 tools/preview.py model.stl preview.png --views multi
 
 **Hollow enclosure (boolean subtraction — preferred over `.shell()`):**
 ```python
-outer = (
-    cq.Workplane("XY")
-    .box(width, depth, height, centered=(True, True, False))
-    .edges("|Z").fillet(corner_r)
-)
-inner = (
-    cq.Workplane("XY")
-    .workplane(offset=floor_t)
-    .box(width - 2*wall, depth - 2*wall, height, centered=(True, True, False))
-    .edges("|Z").fillet(max(0.1, corner_r - wall))
-)
-result = outer.cut(inner)
+shell = (cq.Workplane("XY")
+         .box(box_w, box_d, box_h, centered=(True, True, False))
+         .edges("|Z").fillet(edge_r))
+cavity = (cq.Workplane("XY", origin=(0, 0, floor_t))
+          .box(box_w - 2 * wall, box_d - 2 * wall, box_h,
+               centered=(True, True, False))
+          .edges("|Z").fillet(max(edge_r - wall, 0.1)))
+part = shell.cut(cavity)
 ```
 
 **Screw boss:**
 ```python
-.pushPoints([(x, y)])
-.circle(boss_od / 2).extrude(boss_h)
-.pushPoints([(x, y)])
-.hole(screw_d + fit_clearance)
+part = (part.faces(">Z").workplane()
+        .pushPoints(boss_centers)
+        .circle(boss_od / 2).extrude(boss_h)
+        .pushPoints(boss_centers)
+        .hole(screw_d + slide_gap))
 ```
 
 **Snap-fit clip:**
 ```python
-# Cantilever beam with overhang hook
-.workplane(offset=wall)
-.moveTo(x, y).rect(clip_w, clip_l).extrude(clip_h)
-# Add hook at tip with a small overhang (< 45 deg)
+# cantilever arm; keep the hook ramp under 45 deg so it prints flat
+arm = (cq.Workplane("XZ", origin=(arm_x, arm_y, wall))
+       .rect(arm_len, arm_root_t, centered=False)
+       .extrude(arm_w))
+# hook geometry per the Snap-Fit Arm Geometry table above
 ```
 
 **Ventilation grid:**
 ```python
-.pushPoints(vent_positions)
-.slot2D(slot_l, slot_w).cutThruAll()
+part = (part.faces(">Y").workplane()
+        .pushPoints(vent_centers)
+        .slot2D(vent_len, vent_w).cutThruAll())
 ```
 
-Other patterns: mounting brackets, cable routing channels, text/labels (`.text()`), multi-part assemblies with alignment pins.
+Beyond these: brackets, cable channels, embossed labels via `.text()`, and multi-part assemblies keyed with alignment pins.
 
 **Multi-part models:**
 ```python
@@ -1254,48 +1238,45 @@ tm = cut_floor(tm, cutters)   # raises if any piece would fall out of the print
 ### Common Pitfalls
 
 - **Hollowing: prefer boolean subtraction over `.shell()`**. `.shell()` is fragile. It fails on tapered bodies, lofted shapes, unions of multiple primitives, and anything with many fillets. Only reach for `.shell()` when the body is a single simple primitive (one `.box()` or `.cylinder()`) with a uniform wall thickness on all sides. If in doubt, use boolean subtraction.
-- **Build order: fillet → cut, not cut → fillet**. Apply fillets while the geometry is still a clean primitive. Once you have cut holes/slots/pockets into a body, filleting the resulting edges often fails or produces bad geometry. Same rule for chamfers.
+- **Fillet first, cut second.** Fillets (and chamfers) want clean primitive edges; once holes, slots, or pockets exist, the edge topology is messy and the fillet kernel fails or produces garbage.
 - **Fillet failures**: Apply fillets from largest to smallest radius. **Do not wrap fillets in `try/except` to silently shrink the radius.** A fillet failure means the geometry or the radius is wrong; find the root cause and fix that.
-- **Zero-thickness geometry**: Ensure boolean operations don't create infinitely thin walls. Add a small epsilon (0.01mm) when cutting bodies that are meant to pass just through a surface.
-- **Coordinate system**: CadQuery centers geometry at origin by default. Use `centered=(True, True, False)` on `.box()` to place the bottom at Z=0 so `.faces("<Z")` is always the print bed.
-- **Hole direction**: `.hole()` cuts through the entire part by default. Use `.cboreHole()` or `.cskHole()` for counterbore/countersink.
-- **Taper direction**: In `.extrude(taper=angle)`, a **positive** taper angle narrows the shape (draft inward), **negative** flares it outward. This is opposite to what many people expect.
-- **Loft is fragile**: `.loft()` fails on many cross-section combinations. Prefer `.extrude(taper=angle)` when transitioning between a shape and a scaled version of itself. Only use `.loft()` when you need to transition between genuinely different profiles (e.g., circle to rectangle).
+- **No zero-thickness walls.** A cutter that ends exactly at a surface leaves an infinitely thin skin. Overshoot every through-cut by a small epsilon (0.01mm+) past the face it exits.
+- **Put the bed at Z=0.** CadQuery centers solids on the origin by default; pass `centered=(True, True, False)` to `.box()` so the part sits on Z=0 and `.faces("<Z")` reliably selects the bed face.
+- **`.hole()` goes all the way through** unless told otherwise; reach for `.cboreHole()` / `.cskHole()` when a counterbore or countersink is wanted.
+- **Taper sign is backwards from intuition**: positive `taper` in `.extrude()` drafts inward (narrows), negative flares outward.
+- **Treat `.loft()` as a last resort.** It chokes on many profile pairs; a tapered extrude covers the shape-to-scaled-shape case, so save lofting for genuinely different cross-sections (circle to rectangle and the like).
 - **Export errors / non-watertight STL**: If export fails or the preview reports a non-watertight mesh, the geometry is invalid (usually self-intersecting booleans or zero-thickness faces). Fix the cause, don't paper over it. Run `python3 tools/preview.py model.stl --strict` to fail loudly on non-watertight output.
 
 ### Export
 
 ```python
-# STL (for slicing) - always set tolerance + angularTolerance for
-# consistent tessellation. Defaults produce variable file sizes and
-# over-tessellated glyphs on text features.
-cq.exporters.export(result, "model.stl",
-                    tolerance=0.01, angularTolerance=0.1)
+# STL for the slicer — tessellation pinned for repeatable output
+cq.exporters.export(part, "part.stl", tolerance=0.01, angularTolerance=0.1)
 
-# STEP (for further CAD editing)
-cq.exporters.export(result, "model.step")
+# STEP when downstream CAD editing (Fusion, FreeCAD) is plausible
+cq.exporters.export(part, "part.step")
 ```
 
-Always export STL for printing. Optionally export STEP if the user might want to edit in Fusion 360 or similar.
+STL always ships; add STEP whenever the user might keep editing in real CAD.
 
 ---
 
 ## Output Checklist
 
 Before delivering any model, verify:
-- [ ] All dimensions are parameterized (no magic numbers in geometry code)
+- [ ] Every dimension is a named parameter — the geometry code contains no literals
 - [ ] Wall thickness >= 1.2mm (structural), >= 0.8mm (decorative)
 - [ ] Clearances looked up from Design Constants Reference — not guessed
 - [ ] Hardware hole sizes taken from Hardware Database
 - [ ] Shrinkage compensation applied if ABS, ASA, or PA-CF
 - [ ] Seam placement commented in code
-- [ ] Designed for printability (minimal overhangs/supports)
+- [ ] Printable as oriented: overhangs within limits, no supports unless agreed
 - [ ] Print orientation noted in comments and stated in delivery
-- [ ] STL exported and file size is reasonable (not 0 bytes)
-- [ ] Script runs without errors
+- [ ] STL on disk with a sane size — not empty, not accidentally gigantic
+- [ ] The model script runs clean, end to end
 - [ ] Multi-view preview generated and visually inspected
 - [ ] Preview shows correct shape, features, and proportions
 - [ ] Bounding box dimensions match requirements
 - [ ] Structural reinforcement pass completed (fill ratio, steep overhangs checked)
 - [ ] Slicer verification run (or noted as unavailable)
-- [ ] Both STL and preview PNG delivered to user
+- [ ] The user got both the STL and a rendered preview

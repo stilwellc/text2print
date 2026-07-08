@@ -1,71 +1,41 @@
-#!/usr/bin/env python3
-"""
-Convert STL files to 3MF via trimesh (Bambu Studio / Orca / PrusaSlicer
-prefer 3MF).
-
-WARNING: trimesh's 3MF writer mangles internal cavities. If the input STL
-was generated from a CadQuery solid with a cut() cavity (magnet pockets,
-enclosed voids, etc.), the cavity's normals get flipped on export and the
-slicer will see the cavity as filled. For parametric CadQuery parts,
-export 3MF directly from the CadQuery script via
-    cq.exporters.export(result, "name.3mf")
-which uses CadQuery's native ThreeMFWriter and preserves cavities. This
-script is only safe for solid meshes with no enclosed voids.
+"""STL -> 3MF conversion for Bambu Studio / PrusaSlicer.
 
 Usage:
-    python3 stl_to_3mf.py model.stl                      # -> model.3mf
-    python3 stl_to_3mf.py a.stl b.stl c.stl              # multi-file
-    python3 stl_to_3mf.py --out other.3mf model.stl      # explicit output
+    python3 tools/stl_to_3mf.py model.stl [model.3mf]
 
-Requires trimesh + lxml (lxml is needed for the 3MF writer).
+Headless-safe: mesh loading is deferred to mesh_io (trimesh only),
+so importing or running this never touches pyrender / OpenGL.
 """
 import argparse
-import os
+import pathlib
 import sys
 
 
 def convert(stl_path, out_path=None):
-    # Lazy import of mesh_io (trimesh + numpy only, no pyrender) keeps
-    # `import stl_to_3mf` cheap and keeps this CLI headless-safe: the tool
-    # promises "trimesh + lxml" and must not pull in pyrender / PyOpenGL.
-    import mesh_io
+    """Convert one STL to 3MF; returns the output path."""
+    import mesh_io   # deferred: keeps module import cheap
 
-    if out_path is None:
-        out_path = os.path.splitext(stl_path)[0] + ".3mf"
+    stl_path = pathlib.Path(stl_path)
+    out = pathlib.Path(out_path) if out_path else stl_path.with_suffix(".3mf")
     mesh = mesh_io.load_mesh(stl_path)
-    mesh.export(out_path)
-    return out_path
+    mesh.export(str(out))
+    return out
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description="Convert one or more STL files to 3MF",
-        epilog="Exit codes: 0 success, 1 load/export failure, 2 bad arguments.",
-    )
-    parser.add_argument("stl_files", nargs="+", help="Path(s) to STL file(s)")
-    parser.add_argument("--out", default=None,
-                        help="Output 3MF path (only valid with a single input; "
-                             "multi-file runs write each STL to its sibling .3mf)")
-    args = parser.parse_args()
-
-    if args.out and len(args.stl_files) > 1:
-        print("ERROR: --out only works with a single input STL", file=sys.stderr)
-        sys.exit(2)
-
-    for stl in args.stl_files:
-        if not os.path.exists(stl):
-            print(f"ERROR: {stl} not found", file=sys.stderr)
-            sys.exit(1)
-        try:
-            out = convert(stl, args.out)
-        except ValueError as e:
-            print(f"ERROR: {stl}: {e}", file=sys.stderr)
-            sys.exit(1)
-        except Exception as e:
-            print(f"ERROR: failed to write 3MF for {stl}: {e}", file=sys.stderr)
-            sys.exit(1)
-        print(f"{stl} -> {out}")
+def main(argv=None):
+    parser = argparse.ArgumentParser(description="Convert an STL to 3MF.")
+    parser.add_argument("stl", help="input .stl file")
+    parser.add_argument("out", nargs="?", default=None,
+                        help="output .3mf path (default: alongside input)")
+    args = parser.parse_args(argv)
+    try:
+        out = convert(args.stl, args.out)
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print(f"wrote {out}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

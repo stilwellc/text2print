@@ -3,7 +3,7 @@
 <p align="center"><em>Describe a thing. Get a print-ready STL.</em></p>
 
 <p align="center">
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-PolyForm%20Noncommercial-8a7248" alt="License"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8a7248" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/python-3.10–3.12-e8a33d" alt="Python 3.10–3.12">
   <img src="https://img.shields.io/badge/Claude%20Code-skill-d9a05b" alt="Claude Code skill">
 </p>
@@ -163,6 +163,4 @@ Everything geometric ships watertight and single-body, or it doesn't ship: the g
 
 ## License
 
-[PolyForm Noncommercial 1.0.0](LICENSE) — free to use, modify, and distribute for noncommercial purposes.
-
-Built on [cad-skill](https://github.com/flowful-ai/cad-skill) by [Nicolas Chourrout](https://github.com/nchourrout).
+[MIT](LICENSE).
