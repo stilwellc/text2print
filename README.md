@@ -1,6 +1,6 @@
-# Parametric 3D Printing Skill for Claude Code
+# text2print
 
-A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill that designs production-ready 3D-printable models. Describe a part; Claude researches real-world dimensions, builds it parametrically in [CadQuery](https://cadquery.readthedocs.io/) (or procedural mesh code when the geometry demands it), verifies it structurally, slices it headlessly, and delivers a print-ready STL with settings — while you watch it take shape live in your browser.
+Describe a thing; get a print-ready STL. A [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skill: Claude researches real-world dimensions, builds the part parametrically in [CadQuery](https://cadquery.readthedocs.io/) (or procedural mesh code when the geometry demands it), verifies it structurally, slices it headlessly, and delivers a print-ready STL with settings — while you watch it take shape live in your browser and approve each phase before it proceeds.
 
 <p align="center">
   <img src="docs/live_ui.png" alt="Live design UI: Three.js viewer, phase tracker, parameters, and slicer report" width="900">
@@ -40,7 +40,7 @@ Slicer report: ~3h 40m · 31g · no supports · 184 layers.
 
 ```bash
 mkdir -p ~/.claude/skills
-git clone https://github.com/stilwellc/parametric-3d-printing ~/.claude/skills/parametric-3d-printing
+git clone https://github.com/stilwellc/text2print ~/.claude/skills/parametric-3d-printing
 
 # Python 3.10–3.12 (CadQuery's OCC kernel has no 3.13+ wheels)
 cd ~/.claude/skills/parametric-3d-printing
@@ -65,14 +65,14 @@ The skill auto-triggers on requests like these, or invoke it directly with `/par
 
 ## Live design UI
 
-Watch the build happen instead of waiting for the final STL:
+Watch the build happen instead of waiting for the final STL — and approve each design phase right in the browser:
 
 ```bash
 source .venv/bin/activate
 python3 tools/ui_server.py     # http://localhost:7384
 ```
 
-A single-file Flask app that watches the skill directory and streams updates to the browser as Claude works: the latest STL in an orbitable Three.js viewer, multi-view preview renders, a phase tracker for the pipeline, the current parameter values, and the slicer report. Older exports stay listed so you can flip back to earlier iterations.
+A single-file Flask app that watches the skill directory and streams updates to the browser as Claude works: the latest STL on a print plate in an orbitable Three.js viewer (auto-rotate, wireframe, live dimensions), a render gallery, the phase pipeline, parameters, and the slicer report. At each verification gate — design brief, base shape, features, final review — the UI raises an **Approve / Request changes** banner; your decision is written to `ui_approval.json`, which Claude reads before proceeding. Older exports stay listed so you can flip back to earlier iterations.
 
 ---
 

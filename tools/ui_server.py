@@ -1,24 +1,27 @@
 """
-ui_server.py — Parametric 3D Printing Companion UI Server
-==========================================================
+ui_server.py — text2print live design UI
+=========================================
 
-A Flask-based companion server that provides a real-time browser UI while
-Claude is designing a 3D-printable object via the parametric-3d-printing skill.
+A Flask companion server providing a real-time browser UI while Claude
+designs a 3D-printable object via the text2print skill.
 
 Usage
 -----
-    python3 ui_server.py                          # port 7384, current directory
-    python3 ui_server.py --port 8080              # custom port
-    python3 ui_server.py --dir /path/to/project   # custom working directory
-    python3 ui_server.py --no-browser             # skip auto-opening browser
+    python3 tools/ui_server.py                    # port 7384, current directory
+    python3 tools/ui_server.py --port 8080        # custom port
+    python3 tools/ui_server.py --dir /path        # custom working directory
+    python3 tools/ui_server.py --no-browser       # skip auto-opening browser
 
 How it works
 ------------
-1. On startup the server begins watching the working directory for changes to
-   *.stl, *_preview.png, and ui_state.json every 400 ms.
-2. Changes are broadcast to all connected browser clients via Server-Sent Events.
-3. The browser renders the latest STL in a Three.js 3D viewer, displays preview
-   images, and shows Claude's current phase / parameters / slicer stats.
+1. On startup the server watches the working directory for changes to
+   *.stl, *.png, ui_state.json, and ui_approval.json every 400 ms.
+2. Changes are broadcast to connected browsers via Server-Sent Events.
+3. The browser renders the latest STL in a Three.js viewer, shows render
+   images, phase progress, parameters, and the slicer report.
+4. VERIFICATION GATES: when ui_state.json contains an "awaiting" object,
+   the UI shows an approval banner. The user's decision is written to
+   ui_approval.json for Claude to read before proceeding.
 
 ui_state.json schema (written by Claude)
 -----------------------------------------
@@ -29,10 +32,17 @@ ui_state.json schema (written by Claude)
   "material": "PETG",
   "printer": "Bambu X1C",
   "message": "Adding M3 heat insert holes on the base corners...",
-  "parameters": { "width": 80.0, "depth": 65.0, "height": 30.0, "wall": 2.0 },
+  "parameters": { "width": 80.0, "depth": 65.0 },
   "slicer_report": { "time": "3h 40m", "filament_g": "31",
-                     "support_pct": 0.0, "layers": 184 }
+                     "support_pct": 0.0, "layers": 184 },
+  "awaiting": { "gate": "design-brief",
+                "question": "Does this brief match what you want?" }
 }
+
+ui_approval.json (written by this server when the user responds)
+-----------------------------------------------------------------
+{ "gate": "design-brief", "decision": "approve" | "changes",
+  "note": "make it 10mm taller", "ts": 1730000000.0 }
 """
 
 from __future__ import annotations
@@ -46,7 +56,8 @@ import webbrowser
 from pathlib import Path
 from typing import Dict, List
 
-from flask import Flask, Response, jsonify, render_template_string, send_from_directory
+from flask import (Flask, Response, jsonify, render_template_string,
+                   request, send_from_directory)
 
 # ---------------------------------------------------------------------------
 # Embedded single-page application
@@ -57,233 +68,236 @@ HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>3D Design — Live Preview</title>
+<title>text2print — live design</title>
 
-<!-- Three.js r128 (global build) -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
 
 <style>
-/* ── Reset & base ─────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --bg:        #0d0d14;
-  --bg2:       #13131f;
-  --bg3:       #1a1a2a;
-  --border:    #252538;
-  --accent:    #3d8ef8;
-  --accent2:   #6ab0ff;
-  --text:      #e4e4f0;
-  --text-dim:  #7878a0;
-  --text-dimmer: #44445a;
-  --green:     #2ecc71;
-  --amber:     #f39c12;
-  --red:       #e74c3c;
-  --sidebar-w: 260px;
-  --header-h:  48px;
+  --bg:         #100e0b;
+  --bg2:        #171410;
+  --glass:      rgba(255, 244, 224, 0.045);
+  --glass2:     rgba(255, 244, 224, 0.08);
+  --border:     rgba(255, 220, 170, 0.12);
+  --border2:    rgba(255, 220, 170, 0.25);
+  --amber:      #e8a33d;
+  --amber2:     #f5c069;
+  --amber-dim:  rgba(232, 163, 61, 0.15);
+  --text:       #f2e9dc;
+  --text-dim:   #a89a84;
+  --text-dimmer:#5d5344;
+  --green:      #7fc97f;
+  --red:        #e07a5f;
+  --sidebar-w:  272px;
+  --header-h:   52px;
 }
-html, body { height: 100%; overflow: hidden; font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); font-size: 13px; }
-
-/* ── Scrollbar ────────────────────────────────────────────────────────── */
+html, body { height: 100%; overflow: hidden;
+  font-family: 'Avenir Next', 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg); color: var(--text); font-size: 13px; }
+body::before {   /* golden-hour wash */
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(1200px 500px at 85% -10%, rgba(232,163,61,0.10), transparent 60%),
+    radial-gradient(900px 500px at -10% 110%, rgba(232,120,61,0.06), transparent 60%);
+}
 ::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: var(--bg2); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
 
-/* ── Layout ───────────────────────────────────────────────────────────── */
-#app { display: flex; flex-direction: column; height: 100vh; }
+#app { display: flex; flex-direction: column; height: 100vh; position: relative; z-index: 1; }
 
-/* ── Header ───────────────────────────────────────────────────────────── */
+/* ── Header ─────────────────────────────────────────────────────────── */
 #header {
-  height: var(--header-h);
-  min-height: var(--header-h);
-  background: var(--bg2);
+  height: var(--header-h); min-height: var(--header-h);
+  display: flex; align-items: center; gap: 14px; padding: 0 18px;
   border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 16px;
-  overflow: hidden;
+  background: linear-gradient(180deg, rgba(255,244,224,0.03), transparent);
+  backdrop-filter: blur(10px);
 }
-#logo { display: flex; align-items: baseline; gap: 0; font-size: 16px; font-weight: 700; letter-spacing: -0.3px; flex-shrink: 0; }
-#logo .logo-3d { color: #fff; }
-#logo .logo-design { color: var(--accent); }
-#header-sep { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; }
-#obj-name { font-size: 13px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 240px; }
+#logo { font-size: 17px; font-weight: 700; letter-spacing: -0.4px; flex-shrink: 0; }
+#logo .t2p-text { color: var(--text); }
+#logo .t2p-2 { color: var(--amber); font-weight: 800; }
+#logo .t2p-print { background: linear-gradient(90deg, var(--amber2), var(--amber));
+  -webkit-background-clip: text; background-clip: text; color: transparent; }
+#header-sep { width: 1px; height: 22px; background: var(--border); flex-shrink: 0; }
+#obj-name { font-size: 13.5px; color: var(--text); white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; max-width: 300px; }
 #header-chips { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
-.chip {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 2px 8px; border-radius: 12px;
-  font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
-  border: 1px solid var(--border);
-  background: var(--bg3); color: var(--text-dim);
-  transition: background 0.2s, color 0.2s, border-color 0.2s;
-}
-.chip.active { background: rgba(61,142,248,0.15); color: var(--accent2); border-color: rgba(61,142,248,0.4); }
-#status-dot {
-  width: 10px; height: 10px; border-radius: 50%;
-  background: #555; flex-shrink: 0;
-  transition: background 0.4s;
-  margin-left: auto;
-}
-#status-dot.connected { background: var(--green); box-shadow: 0 0 6px var(--green); }
-#status-dot.working {
-  background: var(--amber);
-  animation: pulse-dot 1.4s ease-in-out infinite;
-}
+.chip { display: inline-flex; align-items: center; padding: 3px 10px;
+  border-radius: 20px; font-size: 11px; font-weight: 600; letter-spacing: 0.3px;
+  border: 1px solid var(--border); background: var(--glass); color: var(--text-dim); }
+.chip.active { background: var(--amber-dim); color: var(--amber2); border-color: var(--border2); }
+#status-dot { width: 10px; height: 10px; border-radius: 50%; background: #4a4238;
+  flex-shrink: 0; margin-left: auto; transition: background 0.4s; }
+#status-dot.connected { background: var(--green); box-shadow: 0 0 8px rgba(127,201,127,0.6); }
+#status-dot.working { background: var(--amber);
+  animation: pulse-dot 1.4s ease-in-out infinite; }
 @keyframes pulse-dot {
   0%, 100% { box-shadow: 0 0 4px var(--amber); }
-  50% { box-shadow: 0 0 12px var(--amber), 0 0 20px rgba(243,156,18,0.4); }
-}
+  50% { box-shadow: 0 0 14px var(--amber), 0 0 26px rgba(232,163,61,0.4); } }
 
-/* ── Body row ─────────────────────────────────────────────────────────── */
+/* ── Body ───────────────────────────────────────────────────────────── */
 #body-row { display: flex; flex: 1; overflow: hidden; }
+#sidebar { width: var(--sidebar-w); min-width: var(--sidebar-w);
+  border-right: 1px solid var(--border); background: var(--glass);
+  display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden; }
+.sb-section { padding: 14px 16px; border-bottom: 1px solid var(--border); }
+.sb-title { font-size: 10px; font-weight: 700; letter-spacing: 1.4px;
+  text-transform: uppercase; color: var(--text-dimmer); margin-bottom: 10px; }
 
-/* ── Sidebar ──────────────────────────────────────────────────────────── */
-#sidebar {
-  width: var(--sidebar-w);
-  min-width: var(--sidebar-w);
-  background: var(--bg2);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-  overflow-x: hidden;
-}
-.sb-section { padding: 12px 14px; border-bottom: 1px solid var(--border); }
-.sb-title { font-size: 10px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 10px; }
-
-/* Progress steps */
-#steps-list { display: flex; flex-direction: column; gap: 4px; }
-.step { display: flex; align-items: center; gap: 8px; padding: 3px 0; }
-.step-circle {
-  width: 20px; height: 20px; border-radius: 50%;
-  border: 2px solid var(--border);
+/* Phase timeline */
+#steps-list { display: flex; flex-direction: column; }
+.step { display: flex; align-items: center; gap: 10px; padding: 3.5px 0; position: relative; }
+.step-circle { width: 20px; height: 20px; border-radius: 50%;
+  border: 1.5px solid var(--border2);
   display: flex; align-items: center; justify-content: center;
   font-size: 9px; font-weight: 700; color: var(--text-dimmer);
-  flex-shrink: 0; transition: all 0.3s;
-}
-.step.done .step-circle {
-  background: var(--accent); border-color: var(--accent); color: #fff;
-}
-.step.active .step-circle {
-  border-color: var(--accent); color: var(--accent);
-  box-shadow: 0 0 8px rgba(61,142,248,0.5);
-}
+  flex-shrink: 0; transition: all 0.3s; background: var(--bg); z-index: 1; }
+.step:not(:last-child)::after { content: ''; position: absolute; left: 9.5px;
+  top: 24px; bottom: -8px; width: 1px; background: var(--border); }
+.step.done .step-circle { background: var(--amber); border-color: var(--amber); color: #1a1408; }
+.step.done:not(:last-child)::after { background: var(--amber); opacity: 0.4; }
+.step.active .step-circle { border-color: var(--amber); color: var(--amber);
+  box-shadow: 0 0 10px rgba(232,163,61,0.45); }
 .step-label { font-size: 11.5px; color: var(--text-dim); transition: color 0.3s; }
 .step.done .step-label { color: var(--text); }
-.step.active .step-label { color: var(--accent2); font-weight: 600; }
+.step.active .step-label { color: var(--amber2); font-weight: 600; }
 
 /* Parameters */
-#params-table { font-family: 'Cascadia Code', 'Fira Code', 'Courier New', monospace; font-size: 11px; width: 100%; }
-#params-table td { padding: 1px 0; }
-#params-table td:first-child { color: var(--text-dim); padding-right: 8px; white-space: nowrap; }
-#params-table td:last-child { color: var(--accent); text-align: right; }
-#params-empty { color: var(--text-dimmer); font-size: 11px; font-style: italic; }
+#params-table { font-family: ui-monospace, 'Cascadia Code', monospace;
+  font-size: 11px; width: 100%; border-collapse: collapse; }
+#params-table td { padding: 2.5px 0; border-bottom: 1px dotted rgba(255,220,170,0.07); }
+#params-table td:first-child { color: var(--text-dim); padding-right: 10px; white-space: nowrap; }
+#params-table td:last-child { color: var(--amber2); text-align: right; }
+#params-empty, #slicer-empty { color: var(--text-dimmer); font-size: 11px; font-style: italic; }
 
-/* Slicer report */
+/* Slicer */
 #slicer-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.slicer-card {
-  background: var(--bg3); border: 1px solid var(--border);
-  border-radius: 6px; padding: 6px 8px;
-}
-.slicer-label { font-size: 10px; color: var(--text-dimmer); margin-bottom: 2px; }
+.slicer-card { background: var(--glass); border: 1px solid var(--border);
+  border-radius: 8px; padding: 7px 9px; }
+.slicer-label { font-size: 9.5px; color: var(--text-dimmer);
+  text-transform: uppercase; letter-spacing: 0.6px; margin-bottom: 2px; }
 .slicer-value { font-size: 13px; font-weight: 600; color: var(--text); }
 .slicer-value.green { color: var(--green); }
-.slicer-value.amber { color: var(--amber); }
 .slicer-value.red { color: var(--red); }
-#slicer-empty { color: var(--text-dimmer); font-size: 11px; font-style: italic; }
 
-/* Status message */
-#status-msg { font-size: 11.5px; font-style: italic; color: var(--text-dim); line-height: 1.5; }
+/* Status log */
+#status-log { display: flex; flex-direction: column; gap: 6px; }
+.log-line { font-size: 11.5px; line-height: 1.45; color: var(--text-dim);
+  padding-left: 10px; border-left: 2px solid var(--border); }
+.log-line.latest { color: var(--text); border-left-color: var(--amber); }
 
-/* ── Main ─────────────────────────────────────────────────────────────── */
+/* ── Verification banner ────────────────────────────────────────────── */
+#verify-banner { display: none; margin: 14px 16px 0; padding: 14px 16px;
+  border-radius: 12px; border: 1px solid var(--border2);
+  background: linear-gradient(135deg, rgba(232,163,61,0.13), rgba(232,163,61,0.05));
+  box-shadow: 0 0 30px rgba(232,163,61,0.12), inset 0 1px 0 rgba(255,244,224,0.06);
+  flex-shrink: 0; }
+#verify-banner.show { display: block; animation: verify-in 0.3s ease; }
+@keyframes verify-in { from { opacity: 0; transform: translateY(-6px); } }
+#verify-gate { font-size: 10px; font-weight: 700; letter-spacing: 1.4px;
+  text-transform: uppercase; color: var(--amber); margin-bottom: 5px; }
+#verify-q { font-size: 13.5px; line-height: 1.5; color: var(--text); margin-bottom: 12px; }
+#verify-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.v-btn { border: none; border-radius: 8px; padding: 8px 18px; font-size: 12.5px;
+  font-weight: 700; cursor: pointer; font-family: inherit; transition: all 0.15s; }
+#v-approve { background: var(--amber); color: #1a1408; }
+#v-approve:hover { background: var(--amber2); box-shadow: 0 2px 14px rgba(232,163,61,0.45); }
+#v-changes { background: transparent; color: var(--text-dim); border: 1px solid var(--border2); }
+#v-changes:hover { color: var(--text); background: var(--glass2); }
+#v-note { display: none; width: 100%; margin-top: 10px; background: var(--bg2);
+  border: 1px solid var(--border2); border-radius: 8px; color: var(--text);
+  font-family: inherit; font-size: 12.5px; padding: 9px 11px; resize: vertical;
+  min-height: 58px; }
+#v-note:focus { outline: none; border-color: var(--amber); }
+#v-send { display: none; margin-top: 8px; background: var(--glass2);
+  color: var(--amber2); border: 1px solid var(--border2); }
+#v-send:hover { background: var(--amber-dim); }
+#verify-done { display: none; font-size: 12.5px; color: var(--green); }
+#verify-done.changes { color: var(--amber2); }
+
+/* ── Main / tabs ────────────────────────────────────────────────────── */
 #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
-
-/* ── Tabs ─────────────────────────────────────────────────────────────── */
-#tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; }
-.tab-btn {
-  padding: 0 20px; height: 38px; line-height: 38px;
-  font-size: 12.5px; font-weight: 600; color: var(--text-dim);
-  cursor: pointer; border: none; background: none;
-  border-bottom: 2px solid transparent;
-  transition: color 0.2s, border-color 0.2s;
-}
+#tabs { display: flex; border-bottom: 1px solid var(--border); flex-shrink: 0; padding: 0 6px; }
+.tab-btn { padding: 0 18px; height: 40px; font-size: 12.5px; font-weight: 600;
+  color: var(--text-dim); cursor: pointer; border: none; background: none;
+  border-bottom: 2px solid transparent; font-family: inherit;
+  transition: color 0.2s, border-color 0.2s; }
 .tab-btn:hover { color: var(--text); }
-.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
-
+.tab-btn.active { color: var(--amber2); border-bottom-color: var(--amber); }
 #tab-panels { flex: 1; position: relative; overflow: hidden; }
 .tab-panel { position: absolute; inset: 0; display: none; }
 .tab-panel.active { display: flex; flex-direction: column; }
 
-/* ── 3D viewer ────────────────────────────────────────────────────────── */
-#viewer-wrap { flex: 1; position: relative; background: #0a0a0f; overflow: hidden; }
+/* ── Viewer ─────────────────────────────────────────────────────────── */
+#viewer-wrap { flex: 1; position: relative; background: #0b0a08; overflow: hidden; }
 #three-canvas { display: block; width: 100% !important; height: 100% !important; }
-#viewer-hint {
-  position: absolute; bottom: 10px; left: 12px;
-  font-size: 11px; color: var(--text-dimmer); pointer-events: none;
-  font-family: 'Cascadia Code', 'Fira Code', monospace;
-}
-#viewer-controls {
-  position: absolute; bottom: 10px; right: 12px;
-  display: flex; gap: 6px;
-}
-.viewer-btn {
-  background: rgba(19,19,31,0.85); border: 1px solid var(--border);
-  color: var(--text-dim); font-size: 11px; padding: 4px 10px;
-  border-radius: 5px; cursor: pointer; transition: background 0.2s, color 0.2s;
-}
-.viewer-btn:hover { background: var(--bg3); color: var(--text); }
-.viewer-btn.active { background: rgba(61,142,248,0.2); color: var(--accent); border-color: var(--accent); }
-#stl-filename {
-  position: absolute; top: 10px; left: 12px;
-  font-size: 11px; font-family: 'Cascadia Code', 'Fira Code', monospace;
-  color: var(--text-dim); pointer-events: none;
-  background: rgba(13,13,20,0.7); padding: 2px 6px; border-radius: 4px;
-}
-#viewer-placeholder {
-  position: absolute; inset: 0; display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 12px;
-  color: var(--text-dimmer);
-}
-#viewer-placeholder svg { opacity: 0.3; }
-#viewer-placeholder p { font-size: 13px; }
+.hud { position: absolute; font-size: 11px;
+  font-family: ui-monospace, 'Cascadia Code', monospace;
+  background: rgba(16,14,11,0.72); border: 1px solid var(--border);
+  padding: 4px 9px; border-radius: 7px; backdrop-filter: blur(6px); }
+#stl-filename { top: 12px; left: 14px; color: var(--amber2); display: none; }
+#dims-chip { top: 12px; right: 14px; color: var(--text-dim); display: none; }
+#viewer-hint { position: absolute; bottom: 12px; left: 14px; font-size: 11px;
+  color: var(--text-dimmer); pointer-events: none; }
+#viewer-controls { position: absolute; bottom: 12px; right: 14px; display: flex; gap: 6px; }
+.viewer-btn { background: rgba(23,20,16,0.85); border: 1px solid var(--border);
+  color: var(--text-dim); font-size: 11px; padding: 5px 12px; border-radius: 7px;
+  cursor: pointer; font-family: inherit; transition: all 0.15s; }
+.viewer-btn:hover { color: var(--text); border-color: var(--border2); }
+.viewer-btn.active { background: var(--amber-dim); color: var(--amber2); border-color: var(--border2); }
+#viewer-placeholder { position: absolute; inset: 0; display: flex;
+  flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; color: var(--text-dimmer); }
+#viewer-placeholder svg { opacity: 0.35; }
 
-/* ── Preview tab ──────────────────────────────────────────────────────── */
-#preview-panel { overflow-y: auto; padding: 16px; gap: 20px; flex-direction: column; }
-.preview-item { display: flex; flex-direction: column; gap: 6px; }
-.preview-label { font-size: 11px; color: var(--text-dim); font-family: monospace; }
-.preview-img {
-  max-width: 100%; border-radius: 6px;
-  border: 1px solid var(--border);
-}
-#preview-empty { color: var(--text-dimmer); font-size: 13px; font-style: italic; margin: auto; }
+/* ── Gallery ────────────────────────────────────────────────────────── */
+#gallery-panel { overflow-y: auto; padding: 16px; display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 14px; align-content: start; }
+#gallery-panel:not(.active) { display: none !important; }
+.gal-card { border: 1px solid var(--border); border-radius: 12px;
+  overflow: hidden; background: var(--glass); cursor: zoom-in;
+  transition: border-color 0.2s, transform 0.15s; }
+.gal-card:hover { border-color: var(--border2); transform: translateY(-1px); }
+.gal-card img { width: 100%; display: block; background: #0b0a08; }
+.gal-label { font-size: 11px; padding: 7px 11px; color: var(--text-dim);
+  font-family: ui-monospace, monospace; display: flex; justify-content: space-between; }
+#gallery-empty { color: var(--text-dimmer); font-style: italic; grid-column: 1/-1; margin: auto; }
+#lightbox { display: none; position: fixed; inset: 0; z-index: 50;
+  background: rgba(8,7,5,0.92); cursor: zoom-out;
+  align-items: center; justify-content: center; padding: 30px; }
+#lightbox.show { display: flex; }
+#lightbox img { max-width: 100%; max-height: 100%; border-radius: 8px; }
 
-/* ── Files tab ────────────────────────────────────────────────────────── */
-#files-panel { overflow-y: auto; padding: 12px; flex-direction: column; gap: 4px; }
-.file-row {
-  display: flex; align-items: center; gap: 8px;
-  padding: 7px 10px; border-radius: 6px; cursor: pointer;
-  border: 1px solid transparent;
-  transition: background 0.15s, border-color 0.15s;
-}
-.file-row:hover { background: var(--bg3); border-color: var(--border); }
-.file-hex { flex-shrink: 0; }
-.file-name { font-family: monospace; font-size: 12px; color: var(--text); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.badge-latest {
-  background: rgba(61,142,248,0.2); color: var(--accent);
-  font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 10px;
-  border: 1px solid rgba(61,142,248,0.4); flex-shrink: 0;
-}
-#files-empty { color: var(--text-dimmer); font-size: 13px; font-style: italic; margin: auto; }
+/* ── Files ──────────────────────────────────────────────────────────── */
+#files-panel { overflow-y: auto; padding: 14px; flex-direction: column; gap: 5px; }
+.file-row { display: flex; align-items: center; gap: 10px; padding: 9px 13px;
+  border-radius: 10px; cursor: pointer; border: 1px solid transparent;
+  transition: all 0.15s; }
+.file-row:hover { background: var(--glass); border-color: var(--border); }
+.file-name { font-family: ui-monospace, monospace; font-size: 12px; color: var(--text);
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.file-meta { font-size: 10.5px; color: var(--text-dimmer);
+  font-family: ui-monospace, monospace; flex-shrink: 0; }
+.badge-latest { background: var(--amber-dim); color: var(--amber2); font-size: 10px;
+  font-weight: 700; padding: 2px 8px; border-radius: 12px;
+  border: 1px solid var(--border2); flex-shrink: 0; }
+.file-dl { color: var(--text-dimmer); text-decoration: none; font-size: 14px;
+  padding: 2px 6px; border-radius: 6px; flex-shrink: 0; }
+.file-dl:hover { color: var(--amber2); background: var(--glass2); }
+#files-empty, #gallery-empty { font-size: 13px; }
+#files-empty { color: var(--text-dimmer); font-style: italic; margin: auto; }
 </style>
 </head>
 <body>
 <div id="app">
 
-  <!-- Header -->
   <header id="header">
-    <div id="logo"><span class="logo-3d">3D</span><span class="logo-design">Design</span></div>
+    <div id="logo"><span class="t2p-text">text</span><span class="t2p-2">2</span><span class="t2p-print">print</span></div>
     <div id="header-sep"></div>
     <div id="obj-name">—</div>
     <div id="header-chips">
@@ -295,103 +309,103 @@ html, body { height: 100%; overflow: hidden; font-family: 'Segoe UI', system-ui,
 
   <div id="body-row">
 
-    <!-- Sidebar -->
     <aside id="sidebar">
-      <!-- Progress -->
       <div class="sb-section">
-        <div class="sb-title">Progress</div>
+        <div class="sb-title">Pipeline</div>
         <div id="steps-list"></div>
       </div>
-      <!-- Parameters -->
       <div class="sb-section">
         <div class="sb-title">Parameters</div>
         <table id="params-table"><tbody></tbody></table>
         <div id="params-empty" style="display:none">No parameters yet</div>
       </div>
-      <!-- Slicer Report -->
       <div class="sb-section">
         <div class="sb-title">Slicer Report</div>
         <div id="slicer-grid" style="display:none"></div>
         <div id="slicer-empty">Not yet run</div>
       </div>
-      <!-- Status -->
       <div class="sb-section" style="border-bottom:none">
-        <div class="sb-title">Status</div>
-        <div id="status-msg">Waiting for Claude…</div>
+        <div class="sb-title">Activity</div>
+        <div id="status-log"><div class="log-line latest">Waiting for Claude…</div></div>
       </div>
     </aside>
 
-    <!-- Main -->
     <main id="main">
+
+      <!-- Verification gate banner -->
+      <div id="verify-banner">
+        <div id="verify-gate">Verification needed</div>
+        <div id="verify-q"></div>
+        <div id="verify-actions">
+          <button class="v-btn" id="v-approve">Approve — continue</button>
+          <button class="v-btn" id="v-changes">Request changes…</button>
+          <span id="verify-done"></span>
+        </div>
+        <textarea id="v-note" placeholder="What should change?"></textarea>
+        <button class="v-btn" id="v-send">Send to Claude</button>
+      </div>
+
       <div id="tabs">
-        <button class="tab-btn active" data-tab="viewer">3D Model</button>
-        <button class="tab-btn" data-tab="preview">Preview</button>
+        <button class="tab-btn active" data-tab="viewer">Model</button>
+        <button class="tab-btn" data-tab="gallery">Renders</button>
         <button class="tab-btn" data-tab="files">Files</button>
       </div>
       <div id="tab-panels">
 
-        <!-- 3D viewer -->
         <div id="panel-viewer" class="tab-panel active">
           <div id="viewer-wrap">
             <canvas id="three-canvas"></canvas>
             <div id="viewer-placeholder">
-              <svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M32 4L60 20V44L32 60L4 44V20L32 4Z" stroke="#7878a0" stroke-width="2" fill="none"/>
-                <path d="M32 4L32 60" stroke="#7878a0" stroke-width="1.5" stroke-dasharray="4 3"/>
-                <path d="M4 20L60 20" stroke="#7878a0" stroke-width="1.5" stroke-dasharray="4 3"/>
-                <path d="M4 44L60 44" stroke="#7878a0" stroke-width="1.5" stroke-dasharray="4 3"/>
+              <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+                <path d="M32 4L60 20V44L32 60L4 44V20L32 4Z" stroke="#a89a84" stroke-width="2"/>
+                <path d="M32 4L32 60M4 20L60 20M4 44L60 44" stroke="#a89a84" stroke-width="1.2" stroke-dasharray="4 3"/>
               </svg>
               <p>Waiting for first STL export…</p>
             </div>
-            <div id="stl-filename" style="display:none"></div>
+            <div class="hud" id="stl-filename"></div>
+            <div class="hud" id="dims-chip"></div>
             <div id="viewer-hint">Drag to rotate · Scroll to zoom · Right-drag to pan</div>
             <div id="viewer-controls">
-              <button class="viewer-btn" id="btn-reset">Reset view</button>
+              <button class="viewer-btn" id="btn-spin">Spin</button>
               <button class="viewer-btn" id="btn-wire">Wireframe</button>
+              <button class="viewer-btn" id="btn-reset">Reset view</button>
             </div>
           </div>
         </div>
 
-        <!-- Preview -->
-        <div id="panel-preview" class="tab-panel">
-          <div id="preview-panel" class="tab-panel active" style="display:flex">
-            <div id="preview-empty">No preview yet</div>
+        <div id="panel-gallery" class="tab-panel">
+          <div id="gallery-panel" class="active">
+            <div id="gallery-empty">No renders yet</div>
           </div>
         </div>
 
-        <!-- Files -->
         <div id="panel-files" class="tab-panel">
           <div id="files-panel" class="tab-panel active" style="display:flex">
             <div id="files-empty">No STL files yet</div>
           </div>
         </div>
 
-      </div><!-- /#tab-panels -->
+      </div>
     </main>
+  </div>
+</div>
 
-  </div><!-- /#body-row -->
-</div><!-- /#app -->
+<div id="lightbox"><img id="lightbox-img" alt=""/></div>
 
 <script>
-// ═══════════════════════════════════════════════════════════════════════════
-// Tab switching
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══ Tabs ═══════════════════════════════════════════════════════════════
 const tabBtns = document.querySelectorAll('.tab-btn');
-const panels = { viewer: 'panel-viewer', preview: 'panel-preview', files: 'panel-files' };
-
+const panels = { viewer: 'panel-viewer', gallery: 'panel-gallery', files: 'panel-files' };
 function switchTab(name) {
   tabBtns.forEach(b => b.classList.toggle('active', b.dataset.tab === name));
-  Object.entries(panels).forEach(([k, id]) => {
-    document.getElementById(id).classList.toggle('active', k === name);
-  });
+  Object.entries(panels).forEach(([k, id]) =>
+    document.getElementById(id).classList.toggle('active', k === name));
+  document.getElementById('gallery-panel').classList.toggle('active', name === 'gallery');
   if (name === 'viewer') resizeRenderer();
 }
-
 tabBtns.forEach(btn => btn.addEventListener('click', () => switchTab(btn.dataset.tab)));
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Phase steps definition
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══ Phases ═════════════════════════════════════════════════════════════
 const PHASES = [
   { id: 'requirements', label: 'Requirements' },
   { id: 'search',       label: 'Repo Search' },
@@ -405,17 +419,14 @@ const PHASES = [
   { id: 'delivered',    label: 'Delivered' },
 ];
 const PHASE_ORDER = PHASES.map(p => p.id);
-
-// Build steps HTML
 const stepsList = document.getElementById('steps-list');
 PHASES.forEach((p, i) => {
   const div = document.createElement('div');
-  div.className = 'step';
-  div.id = 'step-' + p.id;
-  div.innerHTML = `<div class="step-circle" id="circle-${p.id}">${i + 1}</div><div class="step-label">${p.label}</div>`;
+  div.className = 'step'; div.id = 'step-' + p.id;
+  div.innerHTML = `<div class="step-circle" id="circle-${p.id}">${i + 1}</div>
+                   <div class="step-label">${p.label}</div>`;
   stepsList.appendChild(div);
 });
-
 function updateSteps(phaseId) {
   const activeIdx = PHASE_ORDER.indexOf(phaseId);
   PHASES.forEach((p, i) => {
@@ -423,58 +434,84 @@ function updateSteps(phaseId) {
     const circle = document.getElementById('circle-' + p.id);
     step.classList.remove('done', 'active');
     if (activeIdx < 0) return;
-    if (i < activeIdx) {
-      step.classList.add('done');
-      circle.innerHTML = '✓';
+    if (i < activeIdx || (i === activeIdx && phaseId === 'delivered')) {
+      step.classList.add('done'); circle.innerHTML = '✓';
     } else if (i === activeIdx) {
-      step.classList.add('active');
-      circle.innerHTML = i + 1;
-    } else {
-      circle.innerHTML = i + 1;
-    }
+      step.classList.add('active'); circle.innerHTML = i + 1;
+    } else circle.innerHTML = i + 1;
   });
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Header helpers
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══ Header ═════════════════════════════════════════════════════════════
 const dot = document.getElementById('status-dot');
-
 function setDot(state) {
-  // state: 'disconnected' | 'connected' | 'working'
   dot.className = '';
   if (state === 'connected') dot.classList.add('connected');
   else if (state === 'working') dot.classList.add('working');
 }
-
 function updateHeader(state) {
   document.getElementById('obj-name').textContent = state.object || '—';
-  const matChip = document.getElementById('chip-material');
-  const prtChip = document.getElementById('chip-printer');
-  matChip.textContent = state.material || 'Material';
-  matChip.classList.toggle('active', !!state.material);
-  prtChip.textContent = state.printer || 'Printer';
-  prtChip.classList.toggle('active', !!state.printer);
-
-  const phaseId = state.phase_id || '';
-  const isWorking = phaseId && phaseId !== 'delivered';
-  setDot(isWorking ? 'working' : 'connected');
+  const mat = document.getElementById('chip-material');
+  const prt = document.getElementById('chip-printer');
+  mat.textContent = state.material || 'Material';
+  mat.classList.toggle('active', !!state.material);
+  prt.textContent = state.printer || 'Printer';
+  prt.classList.toggle('active', !!state.printer);
+  const working = state.phase_id && state.phase_id !== 'delivered';
+  setDot(working ? 'working' : 'connected');
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Parameters
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══ Verification gate ══════════════════════════════════════════════════
+let currentGate = null;
+let respondedGate = null;
+const banner = document.getElementById('verify-banner');
+const noteBox = document.getElementById('v-note');
+const sendBtn = document.getElementById('v-send');
+const doneMsg = document.getElementById('verify-done');
+
+function updateVerify(state) {
+  const awaiting = state.awaiting || null;
+  const approval = state._approval || null;
+  if (!awaiting) { banner.classList.remove('show'); currentGate = null; return; }
+  currentGate = awaiting.gate || 'gate';
+  document.getElementById('verify-gate').textContent =
+    'Verification needed — ' + currentGate.replace(/-/g, ' ');
+  document.getElementById('verify-q').textContent =
+    awaiting.question || 'Does this look right?';
+  const answered = approval && approval.gate === currentGate;
+  document.getElementById('v-approve').style.display = answered ? 'none' : '';
+  document.getElementById('v-changes').style.display = answered ? 'none' : '';
+  noteBox.style.display = 'none'; sendBtn.style.display = 'none';
+  if (answered) {
+    doneMsg.style.display = '';
+    doneMsg.className = approval.decision === 'approve' ? '' : 'changes';
+    doneMsg.textContent = approval.decision === 'approve'
+      ? '✓ Approved — Claude will continue'
+      : '✎ Change request sent — Claude will pick it up';
+  } else doneMsg.style.display = 'none';
+  banner.classList.add('show');
+}
+function sendVerify(decision, note) {
+  fetch('/verify', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ gate: currentGate, decision, note: note || '' }),
+  }).catch(console.error);
+}
+document.getElementById('v-approve').addEventListener('click', () => sendVerify('approve'));
+document.getElementById('v-changes').addEventListener('click', () => {
+  noteBox.style.display = 'block'; sendBtn.style.display = 'inline-block'; noteBox.focus();
+});
+sendBtn.addEventListener('click', () => sendVerify('changes', noteBox.value.trim()));
+
+// ═══ Parameters / slicer ════════════════════════════════════════════════
 function updateParams(params) {
   const tbody = document.querySelector('#params-table tbody');
   const empty = document.getElementById('params-empty');
   tbody.innerHTML = '';
-  if (!params || Object.keys(params).length === 0) {
-    document.getElementById('params-table').style.display = 'none';
-    empty.style.display = '';
-    return;
-  }
-  document.getElementById('params-table').style.display = '';
-  empty.style.display = 'none';
+  const has = params && Object.keys(params).length;
+  document.getElementById('params-table').style.display = has ? '' : 'none';
+  empty.style.display = has ? 'none' : '';
+  if (!has) return;
   for (const [k, v] of Object.entries(params)) {
     const tr = document.createElement('tr');
     const val = typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(2)) : v;
@@ -482,338 +519,245 @@ function updateParams(params) {
     tbody.appendChild(tr);
   }
 }
-
-// ═══════════════════════════════════════════════════════════════════════════
-// Slicer report
-// ═══════════════════════════════════════════════════════════════════════════
-function supportColor(pct) {
-  if (pct === null || pct === undefined) return '';
-  if (pct === 0) return 'green';
-  if (pct < 25) return 'green';
-  if (pct < 50) return 'amber';
-  return 'red';
-}
-
 function updateSlicer(report) {
   const grid = document.getElementById('slicer-grid');
   const empty = document.getElementById('slicer-empty');
-  if (!report) {
-    grid.style.display = 'none';
-    empty.style.display = '';
-    return;
-  }
-  grid.style.display = 'grid';
-  empty.style.display = 'none';
-  const supPct = report.support_pct;
-  const supColor = supportColor(supPct);
-  const supText = supPct !== null && supPct !== undefined ? supPct + '%' : '—';
+  if (!report) { grid.style.display = 'none'; empty.style.display = ''; return; }
+  grid.style.display = 'grid'; empty.style.display = 'none';
+  const sup = report.support_pct;
+  const supColor = sup === 0 || sup < 25 ? 'green' : 'red';
   grid.innerHTML = `
-    <div class="slicer-card">
-      <div class="slicer-label">Print time</div>
-      <div class="slicer-value">${report.time || '—'}</div>
-    </div>
-    <div class="slicer-card">
-      <div class="slicer-label">Filament (g)</div>
-      <div class="slicer-value">${report.filament_g || '—'}</div>
-    </div>
-    <div class="slicer-card">
-      <div class="slicer-label">Supports</div>
-      <div class="slicer-value ${supColor}">${supText}</div>
-    </div>
-    <div class="slicer-card">
-      <div class="slicer-label">Layers</div>
-      <div class="slicer-value">${report.layers || '—'}</div>
-    </div>
-  `;
+    <div class="slicer-card"><div class="slicer-label">Print time</div>
+      <div class="slicer-value">${report.time || '—'}</div></div>
+    <div class="slicer-card"><div class="slicer-label">Filament</div>
+      <div class="slicer-value">${report.filament_g || '—'}g</div></div>
+    <div class="slicer-card"><div class="slicer-label">Supports</div>
+      <div class="slicer-value ${supColor}">${sup != null ? sup + '%' : '—'}</div></div>
+    <div class="slicer-card"><div class="slicer-label">Layers</div>
+      <div class="slicer-value">${report.layers || '—'}</div></div>`;
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Preview panel
-// ═══════════════════════════════════════════════════════════════════════════
-function updatePreviews(files) {
-  const panel = document.getElementById('preview-panel');
-  const empty = document.getElementById('preview-empty');
-  panel.querySelectorAll('.preview-item').forEach(el => el.remove());
-  if (!files || files.length === 0) {
-    empty.style.display = '';
-    return;
-  }
-  empty.style.display = 'none';
+// ═══ Activity log ═══════════════════════════════════════════════════════
+const logEl = document.getElementById('status-log');
+let lastMsg = null;
+function pushLog(msg) {
+  if (!msg || msg === lastMsg) return;
+  lastMsg = msg;
+  logEl.querySelectorAll('.log-line').forEach(l => l.classList.remove('latest'));
+  const div = document.createElement('div');
+  div.className = 'log-line latest'; div.textContent = msg;
+  logEl.prepend(div);
+  while (logEl.children.length > 6) logEl.lastChild.remove();
+}
+
+// ═══ Gallery ════════════════════════════════════════════════════════════
+const lightbox = document.getElementById('lightbox');
+lightbox.addEventListener('click', () => lightbox.classList.remove('show'));
+function updateGallery(files) {
+  const panel = document.getElementById('gallery-panel');
+  const empty = document.getElementById('gallery-empty');
+  panel.querySelectorAll('.gal-card').forEach(el => el.remove());
+  empty.style.display = files && files.length ? 'none' : '';
+  if (!files) return;
   const ts = Date.now();
-  files.forEach(fname => {
-    const item = document.createElement('div');
-    item.className = 'preview-item';
-    item.innerHTML = `
-      <div class="preview-label">${fname}</div>
-      <img class="preview-img" src="/file/${encodeURIComponent(fname)}?t=${ts}" alt="${fname}" />
-    `;
-    panel.appendChild(item);
+  files.forEach(f => {
+    const card = document.createElement('div');
+    card.className = 'gal-card';
+    card.innerHTML = `<img src="/file/${encodeURIComponent(f.name)}?t=${ts}" alt="${f.name}" loading="lazy"/>
+      <div class="gal-label"><span>${f.name}</span><span>${f.when}</span></div>`;
+    card.addEventListener('click', () => {
+      document.getElementById('lightbox-img').src = '/file/' + encodeURIComponent(f.name) + '?t=' + ts;
+      lightbox.classList.add('show');
+    });
+    panel.appendChild(card);
   });
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Files panel
-// ═══════════════════════════════════════════════════════════════════════════
-function updateFiles(stlFiles) {
+// ═══ Files ══════════════════════════════════════════════════════════════
+function updateFiles(stls) {
   const panel = document.getElementById('files-panel');
   const empty = document.getElementById('files-empty');
   panel.querySelectorAll('.file-row').forEach(el => el.remove());
-  if (!stlFiles || stlFiles.length === 0) {
-    empty.style.display = '';
-    return;
-  }
-  empty.style.display = 'none';
-  stlFiles.forEach((fname, idx) => {
+  empty.style.display = stls && stls.length ? 'none' : '';
+  if (!stls) return;
+  stls.forEach((f, idx) => {
     const row = document.createElement('div');
     row.className = 'file-row';
     row.innerHTML = `
-      <svg class="file-hex" width="18" height="18" viewBox="0 0 18 18" fill="none">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
         <path d="M9 1.5L15.5 5.25V12.75L9 16.5L2.5 12.75V5.25L9 1.5Z"
-              fill="rgba(61,142,248,0.15)" stroke="#3d8ef8" stroke-width="1.2"/>
-        <path d="M9 5L12 7V11L9 13L6 11V7L9 5Z" fill="#3d8ef8" opacity="0.5"/>
+              fill="rgba(232,163,61,0.15)" stroke="#e8a33d" stroke-width="1.2"/>
       </svg>
-      <span class="file-name">${fname}</span>
+      <span class="file-name">${f.name}</span>
+      <span class="file-meta">${f.size} · ${f.when}</span>
       ${idx === 0 ? '<span class="badge-latest">latest</span>' : ''}
-    `;
-    row.addEventListener('click', () => {
-      loadSTL(fname);
-      switchTab('viewer');
+      <a class="file-dl" href="/file/${encodeURIComponent(f.name)}" download title="Download">⬇</a>`;
+    row.addEventListener('click', (e) => {
+      if (e.target.closest('.file-dl')) return;
+      loadSTL(f.name); switchTab('viewer');
     });
     panel.appendChild(row);
   });
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Three.js 3D viewer
-// ═══════════════════════════════════════════════════════════════════════════
-let scene, camera, renderer, controls, model, grid, axes;
-let isWireframe = false;
-let currentSTLFile = null;
-let defaultCameraPos = null;
+// ═══ Three.js viewer ════════════════════════════════════════════════════
+let scene, camera, renderer, controls, model;
+let isWireframe = false, currentSTLFile = null;
 
 function initThree() {
   const canvas = document.getElementById('three-canvas');
   const wrap = document.getElementById('viewer-wrap');
-
-  // Scene
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0a0a0f);
+  scene.background = new THREE.Color(0x0b0a08);
+  scene.fog = new THREE.Fog(0x0b0a08, 700, 1600);
 
-  // Camera
   camera = new THREE.PerspectiveCamera(45, wrap.clientWidth / wrap.clientHeight, 0.1, 10000);
   camera.position.set(150, 120, 180);
 
-  // Renderer
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(wrap.clientWidth, wrap.clientHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
-  // Controls
   controls = new THREE.OrbitControls(camera, renderer.domElement);
-  controls.enableDamping = true;
-  controls.dampingFactor = 0.08;
-  controls.screenSpacePanning = true;
-  controls.mouseButtons = {
-    LEFT: THREE.MOUSE.ROTATE,
-    MIDDLE: THREE.MOUSE.DOLLY,
-    RIGHT: THREE.MOUSE.PAN
-  };
+  controls.enableDamping = true; controls.dampingFactor = 0.08;
+  controls.autoRotateSpeed = 1.1;
+  controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
 
-  // Lighting
-  const ambient = new THREE.AmbientLight(0xb0c8ff, 0.35);
-  scene.add(ambient);
-
-  const key = new THREE.DirectionalLight(0xffffff, 1.2);
-  key.position.set(80, 160, 100);
-  key.castShadow = true;
-  key.shadow.mapSize.set(1024, 1024);
+  // golden-hour studio lighting
+  scene.add(new THREE.AmbientLight(0xffe8c8, 0.35));
+  const key = new THREE.DirectionalLight(0xfff1dc, 1.25);
+  key.position.set(90, 170, 110); key.castShadow = true;
+  key.shadow.mapSize.set(2048, 2048);
+  const s = 220;
+  key.shadow.camera.left = -s; key.shadow.camera.right = s;
+  key.shadow.camera.top = s; key.shadow.camera.bottom = -s;
   scene.add(key);
+  const fill = new THREE.DirectionalLight(0x8a97c8, 0.35);
+  fill.position.set(-120, 50, -90); scene.add(fill);
+  const rim = new THREE.DirectionalLight(0xe8a33d, 0.45);
+  rim.position.set(0, 30, -160); scene.add(rim);
 
-  const fill = new THREE.DirectionalLight(0x5060ff, 0.4);
-  fill.position.set(-100, 40, -80);
-  scene.add(fill);
-
-  const rim = new THREE.DirectionalLight(0xffaa44, 0.3);
-  rim.position.set(0, -60, -120);
-  scene.add(rim);
-
-  // Grid
-  grid = new THREE.GridHelper(400, 40, 0x1a1a2a, 0x1a1a2a);
-  grid.material.opacity = 0.7;
-  grid.material.transparent = true;
+  // print bed: 256mm Bambu plate
+  const bed = new THREE.Mesh(
+    new THREE.PlaneGeometry(256, 256),
+    new THREE.MeshStandardMaterial({ color: 0x161310, roughness: 0.95, metalness: 0 }));
+  bed.rotation.x = -Math.PI / 2; bed.position.y = -0.15; bed.receiveShadow = true;
+  scene.add(bed);
+  const grid = new THREE.GridHelper(256, 16, 0x37301f, 0x241f15);
+  grid.material.opacity = 0.85; grid.material.transparent = true;
   scene.add(grid);
+  const edge = new THREE.LineSegments(
+    new THREE.EdgesGeometry(new THREE.PlaneGeometry(256, 256).rotateX(-Math.PI / 2)),
+    new THREE.LineBasicMaterial({ color: 0xe8a33d, transparent: true, opacity: 0.35 }));
+  scene.add(edge);
 
-  // Axes
-  axes = new THREE.AxesHelper(20);
-  axes.position.y = 0.1;
-  scene.add(axes);
-
-  // Animate
   (function animate() {
     requestAnimationFrame(animate);
     controls.update();
     renderer.render(scene, camera);
   })();
-
-  // Resize
   window.addEventListener('resize', resizeRenderer);
 }
-
 function resizeRenderer() {
   const wrap = document.getElementById('viewer-wrap');
   if (!wrap || !renderer) return;
   const w = wrap.clientWidth, h = wrap.clientHeight;
-  if (w === 0 || h === 0) return;
-  camera.aspect = w / h;
-  camera.updateProjectionMatrix();
+  if (!w || !h) return;
+  camera.aspect = w / h; camera.updateProjectionMatrix();
   renderer.setSize(w, h);
 }
-
 function frameModel(mesh) {
   const box = new THREE.Box3().setFromObject(mesh);
   const size = box.getSize(new THREE.Vector3());
   const center = box.getCenter(new THREE.Vector3());
   const maxDim = Math.max(size.x, size.y, size.z);
   const fov = camera.fov * (Math.PI / 180);
-  let dist = Math.abs(maxDim / Math.sin(fov / 2)) * 0.7;
-  dist = Math.max(dist, maxDim * 1.5);
-  camera.position.set(
-    center.x + dist * 0.6,
-    center.y + dist * 0.5,
-    center.z + dist * 0.8
-  );
-  controls.target.copy(center);
-  controls.update();
-  defaultCameraPos = camera.position.clone();
+  let dist = Math.max(Math.abs(maxDim / Math.sin(fov / 2)) * 0.7, maxDim * 1.5);
+  camera.position.set(center.x + dist * 0.6, center.y + dist * 0.5, center.z + dist * 0.8);
+  controls.target.copy(center); controls.update();
 }
-
 function loadSTL(filename) {
   const placeholder = document.getElementById('viewer-placeholder');
   const fnLabel = document.getElementById('stl-filename');
-
+  const dims = document.getElementById('dims-chip');
   if (model) {
     scene.remove(model);
-    model.geometry.dispose();
-    model.material.dispose();
-    model = null;
+    model.geometry.dispose(); model.material.dispose(); model = null;
   }
-
   currentSTLFile = filename;
-  fnLabel.textContent = filename;
-  fnLabel.style.display = '';
-
+  fnLabel.textContent = filename; fnLabel.style.display = '';
   const loader = new THREE.STLLoader();
-  loader.load(
-    '/file/' + encodeURIComponent(filename),
-    (geometry) => {
-      geometry.computeVertexNormals();
-
-      // Center on XZ, base at y=0
-      geometry.computeBoundingBox();
-      const box = geometry.boundingBox;
-      const cx = (box.min.x + box.max.x) / 2;
-      const cy = box.min.y;
-      const cz = (box.min.z + box.max.z) / 2;
-      geometry.translate(-cx, -cy, -cz);
-
-      const mat = new THREE.MeshPhysicalMaterial({
-        color: 0x3d8ef8,
-        roughness: 0.4,
-        metalness: 0.05,
-        wireframe: isWireframe,
-      });
-
-      model = new THREE.Mesh(geometry, mat);
-      model.castShadow = true;
-      model.receiveShadow = true;
-      scene.add(model);
-
-      placeholder.style.display = 'none';
-      frameModel(model);
-    },
-    undefined,
-    (err) => {
-      console.error('STL load error:', err);
-    }
-  );
+  loader.load('/file/' + encodeURIComponent(filename), (geometry) => {
+    geometry.computeVertexNormals();
+    geometry.computeBoundingBox();
+    const b = geometry.boundingBox;
+    const sx = b.max.x - b.min.x, sy = b.max.y - b.min.y, sz = b.max.z - b.min.z;
+    const tris = geometry.attributes.position.count / 3;
+    const trisTxt = tris > 1e6 ? (tris / 1e6).toFixed(1) + 'M' : Math.round(tris / 1e3) + 'k';
+    dims.textContent = `${sx.toFixed(0)} × ${sy.toFixed(0)} × ${sz.toFixed(0)} mm · ${trisTxt} tris`;
+    dims.style.display = '';
+    // STL is Z-up; scene is Y-up: rotate, center on plate, base at y=0
+    geometry.rotateX(-Math.PI / 2);
+    geometry.computeBoundingBox();
+    const bb = geometry.boundingBox;
+    geometry.translate(-(bb.min.x + bb.max.x) / 2, -bb.min.y, -(bb.min.z + bb.max.z) / 2);
+    const mat = new THREE.MeshPhysicalMaterial({
+      color: 0xd9a05b, roughness: 0.42, metalness: 0.08,
+      clearcoat: 0.25, clearcoatRoughness: 0.6, wireframe: isWireframe });
+    model = new THREE.Mesh(geometry, mat);
+    model.castShadow = true; model.receiveShadow = true;
+    scene.add(model);
+    placeholder.style.display = 'none';
+    frameModel(model);
+  }, undefined, (err) => console.error('STL load error:', err));
 }
-
-// Viewer buttons
-document.getElementById('btn-reset').addEventListener('click', () => {
-  if (!model) return;
-  frameModel(model);
-});
-
+document.getElementById('btn-reset').addEventListener('click', () => model && frameModel(model));
 document.getElementById('btn-wire').addEventListener('click', () => {
   isWireframe = !isWireframe;
   document.getElementById('btn-wire').classList.toggle('active', isWireframe);
   if (model) model.material.wireframe = isWireframe;
 });
+document.getElementById('btn-spin').addEventListener('click', () => {
+  controls.autoRotate = !controls.autoRotate;
+  document.getElementById('btn-spin').classList.toggle('active', controls.autoRotate);
+});
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Main render function
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══ State render ═══════════════════════════════════════════════════════
 function renderState(state) {
   updateHeader(state);
   updateSteps(state.phase_id || '');
   updateParams(state.parameters || null);
   updateSlicer(state.slicer_report || null);
-  document.getElementById('status-msg').textContent = state.message || 'Waiting for Claude…';
-
-  const stlFiles = state._stl_files || [];
-  const previewFiles = state._preview_files || [];
-
-  // Auto-load new STL
-  if (stlFiles.length > 0 && stlFiles[0] !== currentSTLFile) {
-    loadSTL(stlFiles[0]);
-    switchTab('viewer');
-  }
-
-  updatePreviews(previewFiles);
-  updateFiles(stlFiles);
+  updateVerify(state);
+  pushLog(state.message);
+  const stls = state._stl_files || [];
+  if (stls.length && stls[0].name !== currentSTLFile) loadSTL(stls[0].name);
+  updateGallery(state._preview_files || []);
+  updateFiles(stls);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// SSE connection
-// ═══════════════════════════════════════════════════════════════════════════
+// ═══ SSE ════════════════════════════════════════════════════════════════
 let evtSource = null;
-
 function connectSSE() {
   if (evtSource) { evtSource.close(); evtSource = null; }
-
   evtSource = new EventSource('/events');
-
   evtSource.addEventListener('open', () => {
     setDot('connected');
-    // Fetch initial state
-    fetch('/state')
-      .then(r => r.json())
-      .then(renderState)
-      .catch(console.error);
+    fetch('/state').then(r => r.json()).then(renderState).catch(console.error);
   });
-
   evtSource.addEventListener('update', (e) => {
-    try {
-      const state = JSON.parse(e.data);
-      renderState(state);
-    } catch (err) {
-      console.error('SSE parse error:', err);
-    }
+    try { renderState(JSON.parse(e.data)); }
+    catch (err) { console.error('SSE parse error:', err); }
   });
-
   evtSource.addEventListener('error', () => {
     setDot('disconnected');
-    evtSource.close();
-    evtSource = null;
+    evtSource.close(); evtSource = null;
     setTimeout(connectSSE, 2000);
   });
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// Init
-// ═══════════════════════════════════════════════════════════════════════════
 initThree();
 connectSSE();
 </script>
@@ -827,71 +771,88 @@ connectSSE();
 
 app = Flask(__name__)
 
-# Global state (protected by _lock where applicable)
 _lock = threading.Lock()
 _subscribers: List[queue.Queue] = []
 _last_mtimes: Dict[str, float] = {}
 _work_dir: Path = Path.cwd()
 
-# ---------------------------------------------------------------------------
-# Watcher thread
-# ---------------------------------------------------------------------------
+_WATCH_SUFFIXES = (".stl", ".png")
+_WATCH_NAMES = ("ui_state.json", "ui_approval.json")
+
+
+def _human_size(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.0f}{unit}" if unit == "B" else f"{n:.1f}{unit}"
+        n /= 1024
+    return f"{n:.1f}TB"
+
+
+def _human_when(mtime: float) -> str:
+    delta = time.time() - mtime
+    if delta < 60:
+        return "just now"
+    if delta < 3600:
+        return f"{int(delta // 60)}m ago"
+    if delta < 86400:
+        return f"{int(delta // 3600)}h ago"
+    return f"{int(delta // 86400)}d ago"
 
 
 def _scan_state(work_dir: Path) -> dict:
-    """Read ui_state.json and augment with file listings from work_dir.
-
-    Returns a dict ready to serialise as the current state.
-    Handles missing files and JSON parse errors gracefully.
-    """
+    """Read ui_state.json + ui_approval.json and augment with file lists."""
     state: dict = {}
-
     state_file = work_dir / "ui_state.json"
     if state_file.exists():
         try:
-            raw = state_file.read_text(encoding="utf-8")
-            state = json.loads(raw)
-        except (FileNotFoundError, json.JSONDecodeError):
+            state = json.loads(state_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
             state = {}
 
-    # STL files sorted by mtime descending
-    stl_files: List[tuple] = []
-    preview_files: List[tuple] = []
+    approval_file = work_dir / "ui_approval.json"
+    if approval_file.exists():
+        try:
+            state["_approval"] = json.loads(approval_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    stls: List[tuple] = []
+    previews: List[tuple] = []
     try:
         for entry in work_dir.iterdir():
             if not entry.is_file():
                 continue
             try:
-                mtime = entry.stat().st_mtime
+                st = entry.stat()
             except OSError:
                 continue
-            name = entry.name
-            if name.endswith(".stl"):
-                stl_files.append((mtime, name))
-            elif name.endswith("_preview.png") or name == "ceiling_map.png":
-                preview_files.append((mtime, name))
+            if entry.name.endswith(".stl"):
+                stls.append((st.st_mtime, entry.name, st.st_size))
+            elif entry.name.endswith(".png"):
+                previews.append((st.st_mtime, entry.name))
     except FileNotFoundError:
         pass
 
-    stl_files.sort(key=lambda x: x[0], reverse=True)
-    preview_files.sort(key=lambda x: x[0], reverse=True)
-
-    state["_stl_files"] = [n for _, n in stl_files]
-    state["_preview_files"] = [n for _, n in preview_files]
-
+    stls.sort(key=lambda x: x[0], reverse=True)
+    previews.sort(key=lambda x: x[0], reverse=True)
+    state["_stl_files"] = [
+        {"name": n, "size": _human_size(s), "when": _human_when(m)}
+        for m, n, s in stls
+    ]
+    state["_preview_files"] = [
+        {"name": n, "when": _human_when(m)} for m, n in previews
+    ]
     return state
 
 
 def _get_watched_mtimes(work_dir: Path) -> Dict[str, float]:
-    """Return a dict of {filename: mtime} for all watched files."""
     mtimes: Dict[str, float] = {}
-    patterns = (".stl", "_preview.png", "ceiling_map.png", "ui_state.json")
     try:
         for entry in work_dir.iterdir():
             if not entry.is_file():
                 continue
             name = entry.name
-            if any(name.endswith(pat) or name == pat for pat in patterns):
+            if name.endswith(_WATCH_SUFFIXES) or name in _WATCH_NAMES:
                 try:
                     mtimes[name] = entry.stat().st_mtime
                 except OSError:
@@ -902,7 +863,6 @@ def _get_watched_mtimes(work_dir: Path) -> Dict[str, float]:
 
 
 def _broadcast(state: dict) -> None:
-    """Push a state update to all SSE subscribers."""
     payload = json.dumps(state, ensure_ascii=False)
     msg = f"event: update\ndata: {payload}\n\n"
     dead: List[queue.Queue] = []
@@ -917,43 +877,29 @@ def _broadcast(state: dict) -> None:
 
 
 def _watcher_loop(work_dir: Path, interval: float = 0.4) -> None:
-    """Background thread: poll for file changes and broadcast state via SSE.
-
-    Also emits an SSE heartbeat comment every 15 seconds to keep HTTP
-    connections alive through proxies and load balancers.
-    """
     last_heartbeat = time.monotonic()
-
     while True:
         time.sleep(interval)
         now = time.monotonic()
-
-        # Check for file changes
         try:
             current = _get_watched_mtimes(work_dir)
         except Exception:
             current = {}
-
         changed = False
         with _lock:
             if current != _last_mtimes:
                 _last_mtimes.clear()
                 _last_mtimes.update(current)
                 changed = True
-
         if changed:
-            state = _scan_state(work_dir)
-            _broadcast(state)
-
-        # Heartbeat
+            _broadcast(_scan_state(work_dir))
         if now - last_heartbeat >= 15.0:
             last_heartbeat = now
-            heartbeat = ": heartbeat\n\n"
             with _lock:
                 dead = []
                 for q in _subscribers:
                     try:
-                        q.put_nowait(heartbeat)
+                        q.put_nowait(": heartbeat\n\n")
                     except queue.Full:
                         dead.append(q)
                 for q in dead:
@@ -961,47 +907,58 @@ def _watcher_loop(work_dir: Path, interval: float = 0.4) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Flask routes
+# Routes
 # ---------------------------------------------------------------------------
 
 
 @app.route("/")
 def index():
-    """Serve the embedded single-page application."""
     return render_template_string(HTML)
 
 
 @app.route("/state")
 def state():
-    """Return current state as JSON (used for initial page load)."""
-    current_state = _scan_state(_work_dir)
-    return jsonify(current_state)
+    return jsonify(_scan_state(_work_dir))
+
+
+@app.route("/verify", methods=["POST"])
+def verify():
+    """Record the user's verification decision for Claude to read.
+
+    Writes ui_approval.json: {gate, decision, note, ts}. Claude checks
+    this file at each verification gate before proceeding.
+    """
+    data = request.get_json(silent=True) or {}
+    decision = data.get("decision")
+    if decision not in ("approve", "changes"):
+        return jsonify({"error": "decision must be approve|changes"}), 400
+    record = {
+        "gate": str(data.get("gate", ""))[:200],
+        "decision": decision,
+        "note": str(data.get("note", ""))[:2000],
+        "ts": time.time(),
+    }
+    (_work_dir / "ui_approval.json").write_text(
+        json.dumps(record, indent=2), encoding="utf-8")
+    _broadcast(_scan_state(_work_dir))
+    return jsonify({"ok": True})
 
 
 @app.route("/events")
 def events():
-    """Server-Sent Events endpoint.
-
-    Each subscriber gets a ``queue.Queue``; the watcher thread puts messages
-    into every queue and this generator yields them to the HTTP response.
-    """
     sub_q: queue.Queue = queue.Queue(maxsize=10)
     with _lock:
         _subscribers.append(sub_q)
 
-    # Send the current state immediately so the client doesn't wait
-    initial = _scan_state(_work_dir)
-    payload = json.dumps(initial, ensure_ascii=False)
-    first_msg = f"event: update\ndata: {payload}\n\n"
+    initial = json.dumps(_scan_state(_work_dir), ensure_ascii=False)
+    first_msg = f"event: update\ndata: {initial}\n\n"
 
     def generate():
         yield first_msg
         while True:
             try:
-                msg = sub_q.get(timeout=20)
-                yield msg
+                yield sub_q.get(timeout=20)
             except queue.Empty:
-                # Send a comment to keep the connection alive
                 yield ": keepalive\n\n"
 
     def cleanup(q):
@@ -1014,131 +971,79 @@ def events():
     response = Response(
         generate(),
         content_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-            "Connection": "keep-alive",
-        },
+        headers={"Cache-Control": "no-cache",
+                 "X-Accel-Buffering": "no",
+                 "Connection": "keep-alive"},
     )
-    # Register cleanup when the client disconnects
     response.call_on_close(lambda: cleanup(sub_q))
     return response
 
 
 @app.route("/file/<path:filename>")
 def serve_file(filename: str):
-    """Serve an STL or PNG file from the working directory.
-
-    Only plain filenames (no path traversal) are allowed.
-    Returns 404 if the file does not exist or the name is unsafe.
-    """
-    # Safety: reject any path that contains directory separators
     if "/" in filename or "\\" in filename or ".." in filename:
         return ("Not found", 404)
-
     try:
-        return send_from_directory(
-            str(_work_dir),
-            filename,
-            as_attachment=False,
-        )
+        return send_from_directory(str(_work_dir), filename, as_attachment=False)
     except FileNotFoundError:
         return ("Not found", 404)
 
 
 # ---------------------------------------------------------------------------
-# CLI entry point
+# CLI
 # ---------------------------------------------------------------------------
 
 
 def parse_args() -> argparse.Namespace:
-    """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
         description=(
-            "Parametric 3D Printing companion UI server.\n\n"
-            "Starts a local Flask server that watches the working directory for\n"
-            "*.stl, *_preview.png, and ui_state.json changes and streams updates\n"
-            "to a browser-based 3D viewer via Server-Sent Events."
+            "text2print live design UI server.\n\n"
+            "Watches the working directory for *.stl, *.png, ui_state.json,\n"
+            "and ui_approval.json changes and streams updates to a browser\n"
+            "3D viewer via Server-Sent Events. Verification-gate decisions\n"
+            "made in the browser are written to ui_approval.json."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=7384,
-        help="TCP port to listen on (default: 7384)",
-    )
-    parser.add_argument(
-        "--dir",
-        type=str,
-        default=None,
-        metavar="PATH",
-        help="Working directory to watch (default: current directory)",
-    )
-    parser.add_argument(
-        "--no-browser",
-        action="store_true",
-        default=False,
-        help="Do not automatically open the browser on startup",
-    )
+    parser.add_argument("--port", type=int, default=7384,
+                        help="TCP port to listen on (default: 7384)")
+    parser.add_argument("--dir", type=str, default=None, metavar="PATH",
+                        help="Working directory to watch (default: cwd)")
+    parser.add_argument("--no-browser", action="store_true", default=False,
+                        help="Do not automatically open the browser")
     return parser.parse_args()
 
 
 def _open_browser(url: str, delay: float = 0.5) -> None:
-    """Open *url* in the default browser after *delay* seconds."""
     def _open():
         time.sleep(delay)
         webbrowser.open(url)
-
-    t = threading.Thread(target=_open, daemon=True)
-    t.start()
+    threading.Thread(target=_open, daemon=True).start()
 
 
 def main() -> None:
-    """Configure and start the UI server."""
     global _work_dir
-
     args = parse_args()
-
-    # Resolve working directory
-    if args.dir:
-        _work_dir = Path(args.dir).resolve()
-    else:
-        _work_dir = Path.cwd()
-
+    _work_dir = Path(args.dir).resolve() if args.dir else Path.cwd()
     if not _work_dir.is_dir():
-        print(f"[ui_server] ERROR: directory does not exist: {_work_dir}")
+        print(f"[text2print] ERROR: directory does not exist: {_work_dir}")
         raise SystemExit(1)
 
     url = f"http://127.0.0.1:{args.port}"
-    print(f"[ui_server] Watching : {_work_dir}")
-    print(f"[ui_server] Serving  : {url}")
+    print(f"[text2print] Watching : {_work_dir}")
+    print(f"[text2print] Serving  : {url}")
 
-    # Seed mtime cache
     with _lock:
         _last_mtimes.update(_get_watched_mtimes(_work_dir))
 
-    # Start background watcher
-    watcher = threading.Thread(
-        target=_watcher_loop,
-        args=(_work_dir,),
-        daemon=True,
-        name="ui-watcher",
-    )
-    watcher.start()
+    threading.Thread(target=_watcher_loop, args=(_work_dir,),
+                     daemon=True, name="ui-watcher").start()
 
-    # Auto-open browser (after 500 ms so Flask is ready)
     if not args.no_browser:
         _open_browser(url, delay=0.5)
 
-    # Start Flask (suppress the default reloader so we don't double-spawn)
-    app.run(
-        host="127.0.0.1",
-        port=args.port,
-        debug=False,
-        use_reloader=False,
-        threaded=True,
-    )
+    app.run(host="127.0.0.1", port=args.port, debug=False,
+            use_reloader=False, threaded=True)
 
 
 if __name__ == "__main__":

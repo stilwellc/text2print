@@ -2,33 +2,18 @@
 .venv/
 __pycache__/
 *.pyc
+
+# Model outputs and session renders (docs images are tracked)
 *.stl
 *.3mf
-*_preview.png
-!docs/*
-press/
+*.png
+!docs/*.png
 
-# Example models (not part of the skill)
-iphone12_case.py
-magsafe_stand.py
-phone_stand.py
-geometric_planter.py
-velux_wand.py
-pendant_light_mount.py
-combine_with_backplate.py
+# Local example models — not part of the skill
+examples/
 
-# Session runtime artifacts
+# Runtime state
 ui_state.json
-zigzag_bowl_*.png
-zigzag_bowl.py
-lace_bowl.py
-lace_bowl_*.png
-lace_cup.py
-lace_cup_*.png
-wave_cup.py
-wave_cup_*.png
-chunky_bowl.py
-chunky_*.png
-chunky_bowl_zigzag.py
-tide_bowl.py
-tide_bowl_*.png
+ui_approval.json
+archive/
+press/

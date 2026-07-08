@@ -3,7 +3,7 @@ name: parametric-3d-printing
 description: "Use this skill when the user wants to design a 3D-printable physical object they intend to manufacture. Triggers: any mention of '3D print', 'STL', 'parametric model', 'enclosure', 'bracket', 'mount', 'case', 'housing', 'CadQuery', 'OpenSCAD', or a specific FDM printer (Bambu Lab, Prusa, Ender); questions about print-friendly design, snap-fits, tolerances, or wall thickness; requests for functional parts like Arduino enclosures, cable organizers, wall mounts, adapters, or mechanical components; providing an existing STL file as a reference, for modification, or for inspiration. Also fires when the user describes a real physical object to make, provided the goal is to manufacture it. Do NOT use for: 3D rendering, animation, game assets, digital-only art, photogrammetry, sculpting, or any 3D work that is not heading toward a printer."
 ---
 
-# Parametric 3D Printing with CadQuery
+# text2print — Parametric 3D Printing with CadQuery
 
 ## Mode Select
 
@@ -50,21 +50,25 @@ $PSLICER --version   # confirm it's found
 
 ### Live Design UI
 
-A companion browser UI shows the model building in real time. Start it once per session before Phase 1:
+A companion browser UI (text2print) shows the model building in real time and collects the user's verification decisions. **Launch it yourself, in the background, at the start of every design session — do not wait to be asked:**
 
 ```bash
-python3 tools/ui_server.py   # opens http://localhost:7384 automatically
+curl -s -o /dev/null localhost:7384 || nohup .venv/bin/python tools/ui_server.py &
+# serves + auto-opens http://localhost:7384
+# if tools/ui_server.py changed since the server started, kill and relaunch:
+#   lsof -ti :7384 | xargs kill
 ```
 
-The UI shows: live 3D model (Three.js STL viewer), multi-view preview images, phase progress, parameter table, and slicer report. It updates automatically whenever you export a new STL or PNG.
+The UI shows: live 3D model on a print plate (Three.js), render gallery, phase pipeline, parameter table, slicer report, activity log — and the verification banner. It updates automatically whenever you export an STL/PNG or write `ui_state.json`.
 
-**Write `ui_state.json` at every phase transition** so the UI stays in sync. Use this schema:
+**Write `ui_state.json` at every phase transition** so the UI stays in sync:
 
 ```python
 import json, pathlib
 
 def update_ui(phase_id, phase_label, message, parameters=None,
-              object_name="", material="", printer="", slicer_report=None):
+              object_name="", material="", printer="", slicer_report=None,
+              awaiting=None):
     state = {
         "phase":         phase_label,
         "phase_id":      phase_id,       # see phase IDs below
@@ -75,6 +79,8 @@ def update_ui(phase_id, phase_label, message, parameters=None,
         "parameters":    parameters or {},
         "slicer_report": slicer_report,  # dict or None
     }
+    if awaiting:
+        state["awaiting"] = awaiting     # {"gate": "...", "question": "..."}
     pathlib.Path("ui_state.json").write_text(json.dumps(state, indent=2))
 ```
 
@@ -86,7 +92,28 @@ def update_ui(phase_id, phase_label, message, parameters=None,
 slicer_report = {"time": "2h 15m", "filament_g": "18", "support_pct": 0.0, "layers": 112}
 ```
 
-If the user hasn't started `ui_server.py`, skip the `update_ui` calls silently — they are optional and must never block the design workflow.
+If the UI cannot start (port busy, no flask), continue without the `update_ui` calls — but the verification gates below still apply via chat.
+
+### Verification Gates
+
+The user must verify at these four points. **Never proceed past a gate without explicit approval** — from the UI or from chat.
+
+| Gate id | When |
+|---|---|
+| `design-brief` | After presenting the design brief, before any geometry |
+| `phase-1-base` | After the Phase 1 base-shape preview |
+| `phase-2-features` | After the Phase 2 features preview |
+| `final-review` | After Phase 3 finishing + slicer check, before delivery |
+
+At each gate:
+
+1. `rm -f ui_approval.json` — clear any stale answer
+2. Write `ui_state.json` with `awaiting={"gate": "<gate-id>", "question": "<one-line question>"}` — the UI shows an Approve / Request-changes banner
+3. Ask the same question in chat, then **end your turn and wait**
+4. On the next turn, **check `ui_approval.json` first** (the user may have clicked instead of typing):
+   - `"decision": "approve"` → delete the file, clear `awaiting` from the state, proceed
+   - `"decision": "changes"` → treat the `note` as feedback, iterate, then re-gate
+   - a chat reply overrides the file if both exist; always delete the file after consuming it
 
 ---
 
@@ -288,7 +315,7 @@ PrusaSlicer/BambuStudio default: aligned seam at the sharpest concave corner (ve
 
 Follow these steps in order. Do not skip phases or combine them unless the model is very simple (a flat bracket with two holes). Show the user progress at each phase and wait for feedback before continuing.
 
-**UI:** Start `python3 tools/ui_server.py` now if not already running. Call `update_ui()` at every step below.
+**UI:** Ensure the live UI is running now (see Live Design UI — launch it yourself as a background task). Call `update_ui()` at every step below.
 
 ### Step 1: Requirements Gathering
 
@@ -414,7 +441,7 @@ Hardware: [heat inserts / screws / boards with exact hole sizes from Hardware Da
 
 Then ask: "Here's my design plan — does this match what you're after before I start modeling?"
 
-**Wait for confirmation before proceeding.**
+**Wait for confirmation before proceeding — verification gate `design-brief`.**
 
 ```python
 update_ui("brief", "Design Brief", "Waiting for brief confirmation...", object_name=OBJECT, material=MATERIAL, printer=PRINTER, parameters=PARAMS)
@@ -437,7 +464,7 @@ Build the basic outer form: overall dimensions, shell/walls, bottom plate. No cu
 4. Self-review: Does the shape and size look right? Is the bottom flat for printing?
 5. `update_ui("phase1", "Phase 1 — Base Shape", "Base shape complete — waiting for feedback", parameters=PARAMS, ...)`
 6. **Show the preview to the user:** "Here's the basic shape. Does this look right before I add details?" Include key dimensions.
-7. Wait for feedback. Iterate here before moving on.
+7. Wait for feedback — verification gate `phase-1-base`. Iterate here before moving on.
 
 ### Step 6: Phase 2 — Features
 
@@ -457,7 +484,7 @@ Look up all fit values from the Design Constants Reference:
 4. Self-review: Are all features visible? Do booleans look clean? Are holes in the right positions?
 5. `update_ui("phase2", "Phase 2 — Features", "Features complete — waiting for feedback", parameters=PARAMS, ...)`
 6. **Show the preview to the user:** "I've added [list features]. Anything to change before I finalize?"
-7. Wait for feedback. Iterate if needed.
+7. Wait for feedback — verification gate `phase-2-features`. Iterate if needed.
 
 ### Step 7: Structural Reinforcement Pass
 
@@ -499,7 +526,7 @@ Apply finishing touches, run slicer verification, and deliver.
 
 1. Add fillets/chamfers (largest radius first, apply after shell, before cuts into the body)
 2. Export final STL and render preview
-3. Run the full self-review checklist (see Output Checklist at the bottom)
+3. Run the full self-review checklist (see Output Checklist at the bottom) — then verification gate `final-review` before delivering
 4. Fix any issues found, re-export if needed
 
 ```python
