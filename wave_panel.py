@@ -12,7 +12,7 @@ slat_root   = 6.4     # slat ROOT thickness (0.8 multiples)
 root_fillet = 2.0     # concave fillet where each slat meets the plate (prints face-up, no overhang)
 slat_pitch  = tile_w / 12  # 12 slats per tile (≈18.75mm at 90%), continuous across joints
 h_min       = 6.0     # trough slat height
-h_max       = 60.0    # crest slat height (≈2.4 in; deeper in proportion than the reference)
+h_max       = 50.0    # crest slat height (2 in; peaks add on top)
 sample_step = 2.5     # Y sampling of the front edge
 crest_power = 1.4     # >1 sharpens crests, widens troughs
 
@@ -40,8 +40,8 @@ DESIGN_W, DESIGN_D = 1250.0, 500.0                    # the field is authored at
 # the flanks, the peaks live there, and an envelope calms the centre (which also saves filament).
 WAVES, PH1, PH2 = 1.75, 0.30, 2.10     # main ridge 1.75 waves; counter ridge runs at W2 so they cross several times
 W2, W3, PH3 = 2.25, 2.75, 1.0          # counter-ridge and third (fine) ridge frequencies
-peaks       = [(0.10, 20.0, 90.0), (0.22, 28.0, 80.0), (0.78, 26.0, 80.0), (0.91, 18.0, 90.0)]   # (u, extra mm, radius mm)
-eddies      = [(0.30, 95.0, 26.0, 105.0), (0.70, 405.0, 22.0, 100.0), (0.36, 380.0, 20.0, 90.0), (0.64, 120.0, 20.0, 90.0)]   # free peaks (u, y, extra mm, radius)
+peaks       = [(0.10, 16.7, 90.0), (0.22, 23.3, 80.0), (0.78, 21.7, 80.0), (0.91, 15.0, 90.0)]   # (u, extra mm, radius mm)
+eddies      = [(0.30, 95.0, 21.7, 105.0), (0.70, 405.0, 18.3, 100.0), (0.36, 380.0, 16.7, 90.0), (0.64, 120.0, 16.7, 90.0)]   # free peaks (u, y, extra mm, radius)
 end_taper   = 230.0   # mm: the left and right ends fade toward the wall over this distance
 end_floor   = 3.0     # slat height at the very ends (a lip, not a cliff)
 centre_dip  = 0.35    # centre height factor = 1 - centre_dip·exp(-((u-0.5)/0.16)²)  → ~55% behind the monitor
