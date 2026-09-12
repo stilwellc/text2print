@@ -155,12 +155,13 @@ def tile(r, c):
     # no screw holes: the tiles are glued to the wall (adhesive or mounting tape); dowels align them
     # filament dowel sockets in the plate edges: left/right (along X), bottom/top (along Y)
     zc = plate_t / 2
+    # dowel sockets only on SHARED edges — the outer edges of the run stay clean
     for y in pin_y:
-        plate = plate.cut(cq.Workplane().add(cq.Solid.makeCylinder(pin_d / 2, pin_depth + 0.01, cq.Vector(-0.01, y, zc), cq.Vector(1, 0, 0))))
-        plate = plate.cut(cq.Workplane().add(cq.Solid.makeCylinder(pin_d / 2, pin_depth + 0.01, cq.Vector(tile_w + 0.01, y, zc), cq.Vector(-1, 0, 0))))
+        if c > 0:        plate = plate.cut(cq.Workplane().add(cq.Solid.makeCylinder(pin_d / 2, pin_depth + 0.01, cq.Vector(-0.01, y, zc), cq.Vector(1, 0, 0))))
+        if c < cols - 1: plate = plate.cut(cq.Workplane().add(cq.Solid.makeCylinder(pin_d / 2, pin_depth + 0.01, cq.Vector(tile_w + 0.01, y, zc), cq.Vector(-1, 0, 0))))
     for x in pin_x:
-        plate = plate.cut(cq.Workplane().add(cq.Solid.makeCylinder(pin_d / 2, pin_depth + 0.01, cq.Vector(x, -0.01, zc), cq.Vector(0, 1, 0))))
-        plate = plate.cut(cq.Workplane().add(cq.Solid.makeCylinder(pin_d / 2, pin_depth + 0.01, cq.Vector(x, tile_d + 0.01, zc), cq.Vector(0, -1, 0))))
+        if r > 0:        plate = plate.cut(cq.Workplane().add(cq.Solid.makeCylinder(pin_d / 2, pin_depth + 0.01, cq.Vector(x, -0.01, zc), cq.Vector(0, 1, 0))))
+        if r < rows - 1: plate = plate.cut(cq.Workplane().add(cq.Solid.makeCylinder(pin_d / 2, pin_depth + 0.01, cq.Vector(x, tile_d + 0.01, zc), cq.Vector(0, -1, 0))))
     body = plate
     n = slats_per
     for i in range(n):
