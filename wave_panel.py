@@ -6,14 +6,14 @@ tile_w      = 250.0   # tile width  (X, along the run)
 tile_d      = 250.0   # tile depth  (Y, up the wall)
 cols, rows  = 5, 2    # 5 wide × 2 high → 1250 × 500 run
 plate_t     = 4.0     # back plate (4mm so the edge dowel holes keep 1mm walls)
-slat_t      = 2.4     # slat thickness at the TIP (X) — the fine edge you see
-slat_root   = 3.6     # slat thickness at the ROOT — tapers up to slat_t
-root_fillet = 1.5     # concave fillet where each slat meets the plate (prints face-up, no overhang)
-slat_pitch  = 12.5    # 20 slats per tile, pitch continuous across joints
+slat_t      = 4.5     # slat thickness at the TIP (X) — chunky, slicer prints 2 walls + infill
+slat_root   = 6.0     # slat thickness at the ROOT — tapers up to slat_t
+root_fillet = 2.0     # concave fillet where each slat meets the plate (prints face-up, no overhang)
+slat_pitch  = 250.0 / 14   # 14 slats per tile (≈17.9mm, near the reference's spacing), continuous across joints
 h_min       = 8.0     # trough slat height
 h_max       = 76.0    # crest slat height (≈3 in)
 sample_step = 2.5     # Y sampling of the front edge
-crest_power = 1.35    # >1 sharpens crests, widens troughs
+crest_power = 2.0     # >1 sharpens crests, widens troughs (2.0 = most of the field sits low)
 
 # ── Phase 2: mounting + alignment (all in the plate, all hidden between slats) ──
 pin_d       = 2.0     # 1.75mm filament dowel + 0.25 (horizontal hole, sag allowance)
@@ -21,6 +21,11 @@ pin_depth   = 12.0    # per side → 22mm pins
 pin_y       = [40.0, 210.0]      # on the left/right edges
 pin_x       = [62.5, 187.5]      # on the top/bottom edges (gap centres)
 bed_chamfer = 0.6     # Phase 3: chamfer on the plate's bed edges (elephant foot, clean tile joints)
+# lattice back: windows through the plate between slats; ribs stay under every slat
+rib_w       = 11.0    # rib under each slat (slat root 6.0 + fillets 2×2.0 = 10.0, +0.5 each side)
+border      = 14.0    # solid border all round (dowel sockets live in it)
+cross_y     = [125.0] # cross ribs (Y) that tie the slat ribs together
+cross_w     = 8.0
 
 # print orientation: plate face down on the bed, slats extrude +Z. No overhangs.
 # seam: the slicer will pin it on a slat's back vertical edge — hidden in the gap.
@@ -62,6 +67,20 @@ def tile(r, c):
     x0, y0 = c * tile_w, r * tile_d
     plate = (cq.Workplane("XY").box(tile_w, tile_d, plate_t, centered=(False, False, False))
              .edges("<Z").chamfer(bed_chamfer))     # elephant-foot relief on the bed perimeter
+    # lattice back: cut windows between the slat ribs (glue lands on ribs + border)
+    n = int(round(tile_w / slat_pitch))
+    xcs = [(i + 0.5) * slat_pitch for i in range(n)]
+    ybands, y_edges = [], [border] + sorted(cross_y) + [tile_d - border]
+    for k in range(0, len(y_edges) - 1):
+        ya = y_edges[k] + (cross_w / 2 if k > 0 else 0); yb = y_edges[k + 1] - (cross_w / 2 if k + 1 < len(y_edges) - 1 else 0)
+        ybands.append((ya, yb))
+    xr = [border] + [v for xc in xcs for v in (xc - rib_w / 2, xc + rib_w / 2)] + [tile_w - border]
+    for j in range(0, len(xr) - 1, 2):
+        xa, xb = xr[j], xr[j + 1]
+        if xb - xa < 3.0: continue
+        for (ya, yb) in ybands:
+            win = cq.Workplane("XY", origin=(xa, ya, -1.0)).box(xb - xa, yb - ya, plate_t + 2.0, centered=(False, False, False))
+            plate = plate.cut(win)
     # no screw holes: the tiles are glued to the wall (adhesive or mounting tape); dowels align them
     # filament dowel sockets in the plate edges: left/right (along X), bottom/top (along Y)
     zc = plate_t / 2
