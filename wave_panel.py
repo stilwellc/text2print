@@ -146,6 +146,9 @@ def slat(x_local, x_global, y0_global):
         for side in (+1, -1):
             x0 = x_local - side * (slat_root / 2 + 1.0)
             lowered = [(0.0, 0.0)] + [(y, max(0.0, field(x_global, y0_global + y) - slat_root / 2 - 1.0)) for y in ys] + [(tile_d, 0.0)]
+            lowered = [pt for i, pt in enumerate(lowered) if i == 0 or (abs(pt[0] - lowered[i-1][0]) > 1e-6 or abs(pt[1] - lowered[i-1][1]) > 1e-6)]
+            if len(lowered) < 3 or max(z for _, z in lowered) <= 0.0:
+                continue                     # crest lower than the chamfer depth here: nothing to cut
             wire = cq.Workplane("YZ", origin=(x0, 0, 0)).polyline(lowered).close().val()
             roof = cq.Solid.extrudeLinear(cq.Face.makeFromWires(wire), cq.Vector(side * L, 0, L))
             slat_solid = slat_solid.intersect(cq.Workplane().add(roof))
