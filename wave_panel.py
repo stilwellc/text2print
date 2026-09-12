@@ -2,15 +2,19 @@ import math, sys
 import cadquery as cq
 
 # ── PARAMETERS ── all mm ─────────────────────────────────────────────
-SCALE       = 0.90    # whole design scaled to 90% (tiles were too big for the bed)
-tile_w      = 250.0 * SCALE   # tile width  (X, along the run) → 225
-tile_d      = 250.0 * SCALE   # tile depth  (Y, up the wall)  → 225
-cols, rows  = 5, 2    # 5 wide × 2 high → 1250 × 500 run
+RUN_IN_W, RUN_IN_D = 48.0, 14.0          # the wall opening, inches
+cols, rows  = 6, 2                       # 6 wide × 2 high (203 × 178 mm tiles sit easily on the 256 bed)
+tile_w      = RUN_IN_W * 25.4 / cols     # 203.2 mm
+tile_d      = RUN_IN_D * 25.4 / rows     # 177.8 mm
+SCALE_X     = (RUN_IN_W * 25.4) / 1250.0 # the field is authored at 1250 × 500 and stretched to fit
+SCALE_Y     = (RUN_IN_D * 25.4) / 500.0
+SCALE       = SCALE_X                    # kept for older references
 plate_t     = 4.0     # back plate (4mm so the edge dowel holes keep 1mm walls)
 slat_t      = 4.8     # slat TIP thickness: 0.8 nozzle → one 0.8 wall each side + 3.2 core (multiples of the line)
 slat_root   = 6.4     # slat ROOT thickness (0.8 multiples)
 root_fillet = 2.0     # concave fillet where each slat meets the plate (prints face-up, no overhang)
-slat_pitch  = tile_w / 12  # 12 slats per tile (≈18.75mm at 90%), continuous across joints
+slats_per   = 9
+slat_pitch  = tile_w / slats_per   # 9 slats per tile ≈ 22.6 mm pitch (the reference's spacing), continuous across joints
 h_min       = 6.0     # trough slat height
 h_max       = 50.0    # crest slat height (2 in; peaks add on top)
 sample_step = 2.5     # Y sampling of the front edge
@@ -19,19 +23,19 @@ crest_power = 1.4     # >1 sharpens crests, widens troughs
 # ── Phase 2: mounting + alignment (all in the plate, all hidden between slats) ──
 pin_d       = 2.2     # 1.75mm filament dowel + 0.45 (horizontal hole, 0.8-nozzle sag allowance)
 pin_depth   = 12.0    # per side → 22mm pins
-pin_y       = [40.0, 210.0]      # on the left/right edges
-pin_x       = [2.5 * tile_w / 12, 9.5 * tile_w / 12]   # on the top/bottom edges, on slat ribs 2 and 9
+pin_y       = [tile_d * 0.2, tile_d * 0.8]      # on the left/right edges
+pin_x       = [1.5 * tile_w / 9, 7.5 * tile_w / 9]   # on the top/bottom edges, on slat ribs 1 and 7
 bed_chamfer = 0.8     # Phase 3: chamfer on the plate's bed edges (one 0.8 line; elephant foot, clean joints)
 # lattice back: windows through the plate between slats; ribs stay under every slat
 rib_w       = 11.4    # rib under each slat (root 6.4 + fillets 2×2.0 = 10.4, +0.5 each side)
 border      = 14.0    # solid border all round (dowel sockets live in it)
-cross_y     = [125.0] # cross ribs (Y) that tie the slat ribs together
+cross_y     = [tile_d / 2] # cross ribs (Y) that tie the slat ribs together
 cross_w     = 8.0
 
 # print orientation: plate face down on the bed, slats extrude +Z. No overhangs.
 # seam: the slicer will pin it on a slat's back vertical edge — hidden in the gap.
 
-RUN_W, RUN_D = tile_w * cols, tile_d * rows          # real run (1125 × 450 at 90%)
+RUN_W, RUN_D = tile_w * cols, tile_d * rows          # real run (1219 × 356 mm = 48 × 14 in)
 DESIGN_W, DESIGN_D = 1250.0, 500.0                    # the field is authored at full size and scaled
 
 # accents: three deliberate peaks ON the main ridge (thirds of the run, asymmetric heights),
@@ -110,7 +114,7 @@ def field_design(x, y):
 def field(x, y):
     """Real-space height: the full-size design evaluated at (x, y)/SCALE. Only the footprint
     is scaled — heights stay at full size (the 3in crest was the brief)."""
-    return field_design(x / SCALE, y / SCALE)
+    return field_design(x / SCALE_X, y / SCALE_Y)
 
 def slat(x_local, x_global, y0_global):
     """A slat = (wave prism, YZ profile extruded along X) ∩ (tapered blade, XZ profile
@@ -135,7 +139,7 @@ def tile(r, c):
     plate = (cq.Workplane("XY").box(tile_w, tile_d, plate_t, centered=(False, False, False))
              .edges("<Z").chamfer(bed_chamfer))     # elephant-foot relief on the bed perimeter
     # lattice back: cut windows between the slat ribs (glue lands on ribs + border)
-    n = int(round(tile_w / slat_pitch))
+    n = slats_per
     xcs = [(i + 0.5) * slat_pitch for i in range(n)]
     ybands, y_edges = [], [border] + sorted(cross_y) + [tile_d - border]
     for k in range(0, len(y_edges) - 1):
@@ -158,7 +162,7 @@ def tile(r, c):
         plate = plate.cut(cq.Workplane().add(cq.Solid.makeCylinder(pin_d / 2, pin_depth + 0.01, cq.Vector(x, -0.01, zc), cq.Vector(0, 1, 0))))
         plate = plate.cut(cq.Workplane().add(cq.Solid.makeCylinder(pin_d / 2, pin_depth + 0.01, cq.Vector(x, tile_d + 0.01, zc), cq.Vector(0, -1, 0))))
     body = plate
-    n = int(round(tile_w / slat_pitch))
+    n = slats_per
     for i in range(n):
         xl = (i + 0.5) * slat_pitch
         body = body.union(slat(xl, x0 + xl, y0).translate((0, 0, plate_t - 0.01)))
