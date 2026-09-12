@@ -12,7 +12,7 @@ SCALE       = SCALE_X                    # kept for older references
 plate_t     = 4.0     # back plate (4mm so the edge dowel holes keep 1mm walls)
 slat_t      = 4.8     # slat TIP thickness: 0.8 nozzle → one 0.8 wall each side + 3.2 core (multiples of the line)
 slat_root   = 6.4     # slat ROOT thickness (0.8 multiples)
-root_fillet = 2.0     # concave fillet where each slat meets the plate (prints face-up, no overhang)
+root_fillet = 3.0     # concave fillet where each slat meets the plate (prints face-up, no overhang)
 crest_chamfer = True  # knife-edge crests: 45° flanks both sides, following the wave (prints face-up)
 slats_per   = 9
 slat_pitch  = tile_w / slats_per   # 9 slats per tile ≈ 22.6 mm pitch (the reference's spacing), continuous across joints
@@ -25,10 +25,10 @@ crest_power = 1.4     # >1 sharpens crests, widens troughs
 pin_d       = 2.2     # 1.75mm filament dowel + 0.45 (horizontal hole, 0.8-nozzle sag allowance)
 pin_depth   = 12.0    # per side → 22mm pins
 pin_y       = [tile_d * 0.2, tile_d * 0.8]      # on the left/right edges
-pin_x       = [1.5 * tile_w / 9, 7.5 * tile_w / 9]   # on the top/bottom edges, on slat ribs 1 and 7
+pin_x       = None    # set per tile: on slat ribs 1 and n-2 (rhythm moves the ribs)
 bed_chamfer = 0.8     # Phase 3: chamfer on the plate's bed edges (one 0.8 line; elephant foot, clean joints)
 # lattice back: windows through the plate between slats; ribs stay under every slat
-rib_w       = 11.4    # rib under each slat (root 6.4 + fillets 2×2.0 = 10.4, +0.5 each side)
+rib_w       = 13.4    # rib under each slat (root 6.4 + fillets 2×3.0 = 12.4, +0.5 each side)
 border      = 14.0    # solid border all round (dowel sockets live in it)
 cross_y     = [tile_d / 2] # cross ribs (Y) that tie the slat ribs together
 cross_w     = 8.0
@@ -118,6 +118,34 @@ def field_design(x, y):
     f = _ss(x / end_taper) * _ss((DESIGN_W - x) / end_taper)
     return end_floor + (h - end_floor) * f
 
+# ── slat rhythm: 54 slats across the run, packed tighter where the wave is tall ──
+rhythm_amt  = 0.28    # 0 = even pitch; 0.28 = ±28% density swing
+edge_margin = 7.5     # a slat centre never sits closer than this to a tile edge
+_SLAT_X = None
+def slat_positions():
+    global _SLAT_X
+    if _SLAT_X is not None: return _SLAT_X
+    N = slats_per * cols; xs = [i * 2.0 for i in range(int(RUN_W / 2.0) + 1)]
+    def tallness(x):   # mean height along y at this x, normalised
+        ys = [j * 12.0 for j in range(int(RUN_D / 12.0) + 1)]
+        return sum(field(x, y) for y in ys) / len(ys)
+    t = [tallness(x) for x in xs]; lo, hi = min(t), max(t)
+    dens = [1.0 + rhythm_amt * (2.0 * (v - lo) / max(1e-6, hi - lo) - 1.0) for v in t]
+    cum = [0.0]
+    for i in range(1, len(xs)): cum.append(cum[-1] + 0.5 * (dens[i] + dens[i-1]) * (xs[i] - xs[i-1]))
+    total = cum[-1]; pos = []
+    for k in range(N):
+        target = (k + 0.5) / N * total
+        for i in range(1, len(xs)):
+            if cum[i] >= target:
+                f = (target - cum[i-1]) / max(1e-9, cum[i] - cum[i-1]); pos.append(xs[i-1] + f * (xs[i] - xs[i-1])); break
+    # keep every slat clear of the tile edges
+    out = []
+    for x in pos:
+        c = min(cols - 1, int(x // tile_w)); lo_e, hi_e = c * tile_w + edge_margin, (c + 1) * tile_w - edge_margin
+        out.append(min(hi_e, max(lo_e, x)))
+    _SLAT_X = out; return out
+
 def field(x, y):
     """Real-space height: the full-size design evaluated at (x, y)/SCALE. Only the footprint
     is scaled — heights stay at full size (the 3in crest was the brief)."""
@@ -157,8 +185,8 @@ def tile(r, c):
     plate = (cq.Workplane("XY").box(tile_w, tile_d, plate_t, centered=(False, False, False))
              .edges("<Z").chamfer(bed_chamfer))     # elephant-foot relief on the bed perimeter
     # lattice back: cut windows between the slat ribs (glue lands on ribs + border)
-    n = slats_per
-    xcs = [(i + 0.5) * slat_pitch for i in range(n)]
+    xcs = [xg - c * tile_w for xg in slat_positions() if c * tile_w <= xg < (c + 1) * tile_w]
+    n = len(xcs)
     ybands, y_edges = [], [border] + sorted(cross_y) + [tile_d - border]
     for k in range(0, len(y_edges) - 1):
         ya = y_edges[k] + (cross_w / 2 if k > 0 else 0); yb = y_edges[k + 1] - (cross_w / 2 if k + 1 < len(y_edges) - 1 else 0)
@@ -177,13 +205,12 @@ def tile(r, c):
     for y in pin_y:
         if c > 0:        plate = plate.cut(cq.Workplane().add(cq.Solid.makeCylinder(pin_d / 2, pin_depth + 0.01, cq.Vector(-0.01, y, zc), cq.Vector(1, 0, 0))))
         if c < cols - 1: plate = plate.cut(cq.Workplane().add(cq.Solid.makeCylinder(pin_d / 2, pin_depth + 0.01, cq.Vector(tile_w + 0.01, y, zc), cq.Vector(-1, 0, 0))))
-    for x in pin_x:
+    px = [xcs[1], xcs[-2]] if len(xcs) >= 4 else [tile_w * 0.3, tile_w * 0.7]
+    for x in px:
         if r > 0:        plate = plate.cut(cq.Workplane().add(cq.Solid.makeCylinder(pin_d / 2, pin_depth + 0.01, cq.Vector(x, -0.01, zc), cq.Vector(0, 1, 0))))
         if r < rows - 1: plate = plate.cut(cq.Workplane().add(cq.Solid.makeCylinder(pin_d / 2, pin_depth + 0.01, cq.Vector(x, tile_d + 0.01, zc), cq.Vector(0, -1, 0))))
     body = plate
-    n = slats_per
-    for i in range(n):
-        xl = (i + 0.5) * slat_pitch
+    for xl in xcs:
         body = body.union(slat(xl, x0 + xl, y0).translate((0, 0, plate_t - 0.01)))
     return body
 
