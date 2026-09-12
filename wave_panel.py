@@ -13,6 +13,7 @@ plate_t     = 4.0     # back plate (4mm so the edge dowel holes keep 1mm walls)
 slat_t      = 4.8     # slat TIP thickness: 0.8 nozzle → one 0.8 wall each side + 3.2 core (multiples of the line)
 slat_root   = 6.4     # slat ROOT thickness (0.8 multiples)
 root_fillet = 2.0     # concave fillet where each slat meets the plate (prints face-up, no overhang)
+crest_chamfer = True  # knife-edge crests: 45° flanks both sides, following the wave (prints face-up)
 slats_per   = 9
 slat_pitch  = tile_w / slats_per   # 9 slats per tile ≈ 22.6 mm pitch (the reference's spacing), continuous across joints
 h_min       = 6.0     # trough slat height
@@ -48,6 +49,8 @@ peaks       = [(0.10, 16.7, 90.0), (0.22, 23.3, 80.0), (0.78, 21.7, 80.0), (0.91
 eddies      = [(0.30, 95.0, 21.7, 105.0), (0.70, 405.0, 18.3, 100.0), (0.36, 380.0, 16.7, 90.0), (0.64, 120.0, 16.7, 90.0)]   # free peaks (u, y, extra mm, radius)
 end_taper   = 230.0   # mm: the left and right ends fade toward the wall over this distance
 end_floor   = 3.0     # slat height at the very ends (a lip, not a cliff)
+seam_dip    = 0.22    # fraction of local height removed at a tile seam (0 = off)
+seam_sigma  = 16.0    # mm (design space) half-width of the seam dip
 centre_dip  = 0.35    # centre height factor = 1 - centre_dip·exp(-((u-0.5)/0.16)²)  → ~55% behind the monitor
 ripple_amp  = 0.08    # ±8% of local height, wavelength ~150mm along the run
 ripple_wl   = 150.0
@@ -106,6 +109,10 @@ def field_design(x, y):
     for (ue, ye, amp, rad) in eddies:
         h += amp * math.exp(-((x - ue * DESIGN_W) ** 2 + (y - ye) ** 2) / rad ** 2)
     h *= 1.0 + ripple_amp * g * math.sin(2*math.pi * x / ripple_wl + 1.1 * math.sin(2*math.pi * y / DESIGN_D))
+    # seams in the troughs: a soft, shallow dip where tile boundaries fall along the run
+    for k in range(1, cols):
+        xs = k * (DESIGN_W / cols)
+        h -= seam_dip * (h - h_min) * math.exp(-((x - xs) / seam_sigma) ** 2)
     # ends emerge from the wall: smooth taper to a low lip at x = 0 and x = DESIGN_W
     def _ss(t): t = min(1.0, max(0.0, t)); return t * t * (3.0 - 2.0 * t)
     f = _ss(x / end_taper) * _ss((DESIGN_W - x) / end_taper)
@@ -132,7 +139,17 @@ def slat(x_local, x_global, y0_global):
     prof = left + [(-ht, H), (ht, H)] + right
     blade = (cq.Workplane("XZ", origin=(x_local, 0, 0)).polyline(prof).close()
              .extrude(-tile_d))          # XZ normal is -Y; extrude toward +Y
-    return wave.intersect(blade)
+    slat_solid = wave.intersect(blade)
+    if crest_chamfer:
+        # 45° flanks that follow the crest: extrude the (lowered) wave profile along (±1, 0, 1)
+        L = slat_root + 8.0
+        for side in (+1, -1):
+            x0 = x_local - side * (slat_root / 2 + 1.0)
+            lowered = [(0.0, 0.0)] + [(y, max(0.0, field(x_global, y0_global + y) - slat_root / 2 - 1.0)) for y in ys] + [(tile_d, 0.0)]
+            wire = cq.Workplane("YZ", origin=(x0, 0, 0)).polyline(lowered).close().val()
+            roof = cq.Solid.extrudeLinear(cq.Face.makeFromWires(wire), cq.Vector(side * L, 0, L))
+            slat_solid = slat_solid.intersect(cq.Workplane().add(roof))
+    return slat_solid
 
 def tile(r, c):
     x0, y0 = c * tile_w, r * tile_d
