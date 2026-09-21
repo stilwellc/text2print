@@ -18,3 +18,16 @@ ui_approval.json
 archive/
 press/
 nohup.out
+
+# Session renders and slicer outputs (the harness's profiles and scripts are tracked)
+*.jpg
+!docs/*.jpg
+*.gcode
+*.log
+*.step
+split_report.json
+split_transforms.json
+printcheck.json
+structural.json
+all_check.txt
+face_check.txt
