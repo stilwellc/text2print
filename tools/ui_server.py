@@ -168,10 +168,16 @@ body::before {   /* golden-hour wash */
 
 /* Parameters */
 #params-table { font-family: ui-monospace, 'Cascadia Code', monospace;
-  font-size: 11px; width: 100%; border-collapse: collapse; }
-#params-table td { padding: 2.5px 0; border-bottom: 1px dotted rgba(255,220,170,0.07); }
-#params-table td:first-child { color: var(--text-dim); padding-right: 10px; white-space: nowrap; }
+  font-size: 11px; width: 100%; border-collapse: collapse; table-layout: fixed; }
+#params-table td { padding: 2.5px 0; border-bottom: 1px dotted rgba(255,220,170,0.07);
+  overflow-wrap: anywhere; }
+#params-table td:first-child { color: var(--text-dim); padding-right: 10px; width: 46%; }
 #params-table td:last-child { color: var(--amber2); text-align: right; }
+/* a long value gets its own line under the key, left aligned: right-aligned
+   wrapped prose was unreadable, and a nowrap key pushed it out of the panel */
+#params-table td.p-long { padding: 6px 0; text-align: left; }
+#params-table td.p-long .p-k { display: block; color: var(--text-dim); }
+#params-table td.p-long .p-v { display: block; color: var(--amber2); margin-top: 3px; line-height: 1.5; }
 #params-empty, #slicer-empty { color: var(--text-dimmer); font-size: 11px; font-style: italic; }
 
 /* Slicer */
@@ -512,10 +518,15 @@ function updateParams(params) {
   document.getElementById('params-table').style.display = has ? '' : 'none';
   empty.style.display = has ? 'none' : '';
   if (!has) return;
+  const esc = t => String(t).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
   for (const [k, v] of Object.entries(params)) {
     const tr = document.createElement('tr');
     const val = typeof v === 'number' ? (Number.isInteger(v) ? v : v.toFixed(2)) : v;
-    tr.innerHTML = `<td>${k}</td><td>${val}</td>`;
+    if (String(val).length > 26 || String(k).length > 18) {
+      tr.innerHTML = `<td colspan="2" class="p-long"><span class="p-k">${esc(k)}</span><span class="p-v">${esc(val)}</span></td>`;
+    } else {
+      tr.innerHTML = `<td>${esc(k)}</td><td>${esc(val)}</td>`;
+    }
     tbody.appendChild(tr);
   }
 }
@@ -676,6 +687,10 @@ function frameModel(mesh) {
   const fov = camera.fov * (Math.PI / 180);
   let dist = Math.max(Math.abs(maxDim / Math.sin(fov / 2)) * 0.7, maxDim * 1.5);
   camera.position.set(center.x + dist * 0.6, center.y + dist * 0.5, center.z + dist * 0.8);
+  // the fog has to follow the model: it was fixed at 700-1600, so anything big
+  // enough to push the camera past 1600 (a 1219 mm wall panel, say) rendered as
+  // a black screen - fully fogged, no error, nothing on screen
+  if (scene.fog) { scene.fog.near = Math.max(dist * 0.55, 120); scene.fog.far = Math.max(dist * 2.4, 900); }
   controls.target.copy(center); controls.update();
 }
 function loadSTL(filename) {
