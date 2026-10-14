@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import trimesh
 
-from . import bambu, fabric, lattice, printer
+from . import bambu, droop, fabric, lattice, printer
 from .shapes import SHAPES
 
 # Bambu PLA Matte, approximate swatches (preview + 3MF colour only; the real colour is your spool)
@@ -27,7 +27,17 @@ DEFAULT_COLOURS = ["#8B3A2F", "#EDE3D1", "#C58A3F"]
 
 TEXTURES = {**{k: dict(family="lattice", **{kk: vv for kk, vv in v.items() if kk != "fn"})
                for k, v in lattice.PATTERNS.items()},
-            **{k: dict(family="fabric", slots=1, swaps="none", **v) for k, v in fabric.STITCHES.items()}}
+            **{k: dict(family="fabric", slots=1, swaps="none", **v) for k, v in fabric.STITCHES.items()},
+            **{k: dict(family="droop", slots=1, swaps="none", **v) for k, v in droop.STYLES.items()}}
+
+# options each family offers in the picker: key -> (label, kind, choices, default)
+OPTIONS = {
+    "fabric": [("rim_loops", "Loop edge at the rim", "toggle", None, False),
+               ("floor", "Floor", "seg", [("solid", "Solid"), ("diamonds", "Diamonds"), ("lens", "Eyes")], "solid")],
+    "droop": [("density", "Density", "seg", [("sparse", "Sparse"), ("medium", "Medium"), ("dense", "Dense")], "medium"),
+              ("length", "Loop length", "seg", [("short", "Short"), ("medium", "Medium"), ("long", "Long")], "medium")],
+    "lattice": [],
+}
 
 SWAP_SECONDS = 45          # P2S AMS filament change incl. flush (rough)
 SWAP_GRAMS = 0.45          # flush + prime tower per change at the project's 280 mm3 flush volume
@@ -49,6 +59,7 @@ class Build:
     stats: dict
     overrides: dict
     warnings: list = field(default_factory=list)
+    preview: list = None              # [(name, mesh, slot, colour)] — droop: strands hung as gravity will hang them
 
     @property
     def colours(self):
@@ -100,6 +111,14 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         over = printer.overrides(nz.size, "lattice", slots=len(parts))
         extra = dict(rods=rods.count(), courses=region.n, rod=f"{nz.rod_w:.2f} × {nz.rod_h:.2f} mm",
                      pitch=nz.pitch)
+    elif T["family"] == "droop":
+        mesh, info = droop.build(S, v, nz, style=texture, density=options.get("density", "medium"),
+                                 length=options.get("length", "medium"), preview=True)
+        parts = [("colour 1", mesh, 1, colours[0])]; swaps = 0
+        over = printer.overrides(nz.size, "droop", slots=1, floor_layers=info["floor_layers"], solid=info["solid"])
+        extra = dict(strands=info["strands"], reach=info["reach"])
+        warnings.append("Strands droop under gravity — the preview shows them before they fall. Keep the fan low; "
+                        "the project already does.")
     else:
         mesh, info = fabric.build(S, v, nz.size, stitch=texture, rim_loops=bool(options.get("rim_loops")),
                                   floor=options.get("floor", "solid"))
@@ -118,10 +137,17 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     all_v = np.vstack([m.vertices for _, m, _, _ in parts])
     lo, hi = all_v.min(0), all_v.max(0)
     vol = sum(m.volume for _, m, _, _ in parts) / 1000.0
+    if T["family"] == "droop" and info.get("solid"):          # solid body prints as 2 walls + 15 % infill
+        m0 = parts[0][1]; skin = m0.area * 2 * nz.line_w / 1000.0
+        vol = min(vol, skin + 0.15 * max(vol - skin, 0.0))
     stats = dict(size=[round(float(hi[0] - lo[0]), 1), round(float(hi[1] - lo[1]), 1), round(float(hi[2]), 1)],
                  triangles=int(sum(len(m.faces) for _, m, _, _ in parts)), colours=len(parts), swaps=int(swaps),
                  grams_est=int(round(float(vol) * 1.26 + swaps * SWAP_GRAMS)), swap_minutes=round(swaps * SWAP_SECONDS / 60),
                  layer_h=nz.layer_h, nozzle=nz.size, **extra)
     if max(hi[0] - lo[0], hi[1] - lo[1]) > 2 * printer.SAFE_HALF + 1:
         warnings.append("wider than 200 mm — the prime tower may not fit beside it")
-    return Build(shape, texture, nz.size, v, T["family"], parts, stats, over, warnings)
+    preview = None
+    if T["family"] == "droop":
+        dm = info["draped"]; dm.apply_translation([0, 0, -zmin])
+        preview = [("colour 1", dm, 1, colours[0])]
+    return Build(shape, texture, nz.size, v, T["family"], parts, stats, over, warnings, preview)

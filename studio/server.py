@@ -43,7 +43,9 @@ def _catalogue():
                 for k, t in build.TEXTURES.items()]
     nozzles = [dict(size=n, rod=f"{printer.nozzle(n).rod_w:.2f} × {printer.nozzle(n).rod_h:.2f}",
                     layer=printer.nozzle(n).layer_h, verified=printer.nozzle(n).verified) for n in printer.NOZZLES]
-    return dict(printer=dict(name=printer.PRINTER, bed=printer.BED), nozzles=nozzles, shapes=shapes,
+    options = {fam: [dict(key=k, label=lab, kind=kind, choices=[list(c) for c in (ch or [])], default=d)
+                     for k, lab, kind, ch, d in opts] for fam, opts in build.OPTIONS.items()}
+    return dict(printer=dict(name=printer.PRINTER, bed=printer.BED), nozzles=nozzles, shapes=shapes, options=options,
                 textures=textures, palette=build.PALETTE, colours=build.DEFAULT_COLOURS,
                 defaults=dict(shape="tray", texture="twill", nozzle=printer.DEFAULT_NOZZLE),
                 slicer=bambu.slicer_available(), mac=platform.system() == "Darwin")
@@ -82,7 +84,9 @@ def api_build():
         _, old = JOBS.popitem(last=False); shutil.rmtree(old["dir"], ignore_errors=True)
     return jsonify(id=jid, title=b.title(), params=b.params, stats=b.stats, warnings=b.warnings, seconds=round(secs, 2),
                    parts=[dict(n=i, name=n, slot=s, colour=c, triangles=int(len(m.faces)), url=f"/api/job/{jid}/mesh/{i}")
-                          for i, (n, m, s, c) in enumerate(b.parts)])
+                          for i, (n, m, s, c) in enumerate(b.parts)],
+                   preview=[dict(n=i, colour=c, url=f"/api/job/{jid}/mesh/{i}?view=draped")
+                            for i, (n, m, s, c) in enumerate(b.preview)] if b.preview else None)
 
 
 def _job(jid):
@@ -95,7 +99,8 @@ def _job(jid):
 @app.get("/api/job/<jid>/mesh/<int:n>")
 def mesh(jid, n):
     """Indexed mesh as raw bytes: uint32 vertex count, uint32 face count, float32 xyz..., uint32 abc..."""
-    m = _job(jid)["build"].parts[n][1]
+    b = _job(jid)["build"]
+    m = (b.preview if request.args.get("view") == "draped" and b.preview else b.parts)[n][1]
     v = np.ascontiguousarray(m.vertices, dtype=np.float32); f = np.ascontiguousarray(m.faces, dtype=np.uint32)
     head = np.array([len(v), len(f)], dtype=np.uint32).tobytes()
     return Response(head + v.tobytes() + f.tobytes(), mimetype="application/octet-stream",

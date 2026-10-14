@@ -41,9 +41,7 @@
     </section>
     <section id="finishSec" hidden>
       <h2>Finish</h2>
-      <label class="toggle"><input type="checkbox" id="rimLoops"><span>Loop edge at the rim</span></label>
-      <div class="field-label">Floor</div>
-      <div class="seg small" id="floors"></div>
+      <div id="finish"></div>
     </section>
   </aside>
 
@@ -52,6 +50,7 @@
     <div class="status" id="status" hidden><span class="spin"></span><span id="statusText">Weaving…</span></div>
     <div class="dims" id="dims"></div>
     <div class="viewbtns">
+      <div class="seg small" id="dropView" role="radiogroup" aria-label="Preview" hidden></div>
       <button class="ghost" id="spinBtn" aria-pressed="false">Spin</button>
       <button class="ghost" id="resetBtn">Reset view</button>
     </div>

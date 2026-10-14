@@ -65,6 +65,19 @@ course and change about once per layer).
 
 Fabric pieces can add a looped rim and diamond or eye cut-outs in the floor.
 
+**Droop.** Single strands leave the wall, arc into air, and sag under gravity into hanging loops. The
+printer lays each span fast and hot so it stays molten and falls; the preview shows it after the droop,
+with an "As printed" switch for the flat strands the printer actually lays.
+
+| Texture | What it is |
+|---|---|
+| Fringe | Dense narrow loops that fall into a long hanging fringe |
+| Swag | Wide, fat loops that sag into layered festoons |
+| Curls | Small loops in drifting columns that settle into coils |
+| Unraveled | A wild mix of short and long loops, as if the wall is coming apart |
+
+Droop pieces choose a density and a loop length.
+
 ## Shapes
 
 | Shape | Textures | Sizes |
@@ -73,10 +86,12 @@ Fabric pieces can add a looped rim and diamond or eye cut-outs in the floor.
 | Platter | woven | the low, wide tray |
 | Round dish | woven (incl. Rose window) | diameter, height, dish, floor, top edge |
 | Coaster | woven | width, height, seat, floor, corner |
-| Cup | woven or fabric | diameter, height (+ wall and floor for rods) |
+| Cup | woven, fabric or droop | diameter, height (+ wall and floor for rods) |
 | Lamp shade | woven | open cylinder: diameter, height, wall |
-| Bowl | fabric | diameter, height, base width |
-| Vase | fabric | belly, height, neck |
+| Bowl | fabric or droop | diameter, height, base width |
+| Vase | fabric or droop | belly, height, neck |
+| Goblet | fabric or droop | a cup on a stem and foot |
+| Candle holder | droop | a solid bell with a socket for a taper candle |
 
 ## Made for the Bambu Lab P2S
 
@@ -103,11 +118,14 @@ These are print-verified, and the tests enforce the geometric ones.
 - Each colour is a part of one object, never its own object (alternating courses leave empty layers, which Bambu refuses).
 - Fabric stitches keep their swing-to-wavelength ratio at every height, so narrow necks don't collapse.
 - The layer height is part of the geometry: print at the nozzle's layer height.
+- Droop strands are one extrusion wide, at most 4 layers tall, never touch each other in the mesh, and start high
+  enough that the droop can't reach the bed. They print with overhang slow-down off, fan at 20 % and the nozzle
+  5 °C hotter; slow or cold strands freeze where they are laid.
 
 ## Repo
 
 ```
-text2print/   shapes.py · lattice.py (woven rods) · fabric.py + fabric_wall.py + fabric_presets.py (fabric)
+text2print/   shapes.py · lattice.py (woven rods) · droop.py (strands) · fabric.py + fabric_wall.py + fabric_presets.py (fabric)
               floors.py · build.py (pick -> project) · printer.py + data/ (P2S) · bambu.py (3MF + CLI slice)
 studio/       server.py + static/ (the picker)
 tests/        python -m pytest

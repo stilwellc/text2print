@@ -14,8 +14,9 @@ const el = (tag, attrs = {}, ...kids) => {
 const fmt = (n, d = 0) => Number(n).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
 
 let CAT = null;
-const state = { shape: null, texture: null, nozzle: 0.4, params: {}, colours: [], options: { rim_loops: false, floor: "solid" } };
+const state = { shape: null, texture: null, nozzle: 0.4, params: {}, colours: [], options: {} };
 let job = null;
+let draped = true;               // droop pieces: show strands hung as gravity will hang them
 
 // ── catalogue + url state ──────────────────────────────────────────────────────
 const shapeOf = (k) => CAT.shapes.find((s) => s.key === k);
@@ -29,16 +30,21 @@ function readUrl() {
   if (q.get("texture") && textureOf(q.get("texture"))) state.texture = q.get("texture");
   if (q.get("nozzle")) state.nozzle = parseFloat(q.get("nozzle"));
   if (q.get("c")) state.colours = q.get("c").split(",").map((h) => "#" + h.replace("#", ""));
-  for (const [k, v] of q) if (!["shape", "texture", "nozzle", "c", "rim", "floor"].includes(k)) state.params[k] = parseFloat(v);
-  if (q.get("rim")) state.options.rim_loops = q.get("rim") === "1";
-  if (q.get("floor")) state.options.floor = q.get("floor");
+  const optKeys = Object.values(CAT.options).flat().map((o) => o.key);
+  for (const [k, v] of q) {
+    if (optKeys.includes(k)) state.options[k] = v === "1" ? true : v === "0" ? false : v;
+    else if (!["shape", "texture", "nozzle", "c"].includes(k)) state.params[k] = parseFloat(v);
+  }
 }
 function writeUrl() {
   const q = new URLSearchParams({ shape: state.shape, texture: state.texture, nozzle: state.nozzle });
   const sh = shapeOf(state.shape);
   for (const p of sh.params) if (state.params[p.key] !== undefined && state.params[p.key] !== p.default) q.set(p.key, state.params[p.key]);
   q.set("c", state.colours.slice(0, textureOf(state.texture).slots).map((h) => h.replace("#", "")).join(","));
-  if (textureOf(state.texture).family === "fabric") { if (state.options.rim_loops) q.set("rim", "1"); if (state.options.floor !== "solid") q.set("floor", state.options.floor); }
+  for (const o of familyOptions()) {
+    const v = state.options[o.key] ?? o.default;
+    if (v !== o.default) q.set(o.key, v === true ? "1" : v === false ? "0" : v);
+  }
   history.replaceState(null, "", "?" + q.toString());
 }
 
@@ -77,7 +83,7 @@ function pickShape(key) {
 
 function renderTextures() {
   const sh = shapeOf(state.shape);
-  const groups = [["lattice", "Woven rods"], ["fabric", "Printed fabric"]].filter(([f]) => sh.families.includes(f));
+  const groups = [["lattice", "Woven rods"], ["fabric", "Printed fabric"], ["droop", "Droop"]].filter(([f]) => sh.families.includes(f));
   const kids = [];
   for (const [fam, label] of groups) {
     if (groups.length > 1) kids.push(el("div", { class: "group-label" }, label));
@@ -130,15 +136,22 @@ document.addEventListener("pointerdown", (e) => {
   if (!$("palette").hidden && !$("palette").contains(e.target) && !e.target.closest(".swatch-btn")) $("palette").hidden = true;
 });
 
+const familyOptions = () => CAT.options[textureOf(state.texture).family] || [];
 function renderFinish() {
-  const fab = textureOf(state.texture).family === "fabric";
-  $("finishSec").hidden = !fab;
-  if (!fab) return;
-  $("rimLoops").checked = state.options.rim_loops;
-  seg($("floors"), [["solid", "Solid"], ["diamonds", "Diamonds"], ["lens", "Eyes"]], state.options.floor,
-    (v) => { state.options.floor = v; renderFinish(); changed(); });
+  const opts = familyOptions();
+  $("finishSec").hidden = !opts.length;
+  $("finish").replaceChildren(...opts.flatMap((o) => {
+    const val = state.options[o.key] ?? o.default;
+    if (o.kind === "toggle") {
+      const input = el("input", { type: "checkbox" }); input.checked = !!val;
+      input.addEventListener("change", () => { state.options[o.key] = input.checked; changed(); });
+      return [el("label", { class: "toggle" }, input, el("span", {}, o.label))];
+    }
+    const box = el("div", { class: "seg small", role: "radiogroup", "aria-label": o.label });
+    seg(box, o.choices.map(([v, l]) => [v, l]), val, (v) => { state.options[o.key] = v; renderFinish(); changed(); });
+    return [el("div", { class: "field-label" }, o.label), box];
+  }));
 }
-$("rimLoops").addEventListener("change", (e) => { state.options.rim_loops = e.target.checked; changed(); });
 
 function renderAll() { renderShapes(); renderTextures(); renderSizes(); renderColours(); renderFinish(); }
 
@@ -151,7 +164,7 @@ function changed(newShape = false) {
 async function requestBuild() {
   if (inflight) { pending = true; return; }
   inflight = true; pending = false;
-  $("status").hidden = false; $("statusText").textContent = textureOf(state.texture).family === "fabric" ? "Knitting…" : "Weaving…";
+  $("status").hidden = false; $("statusText").textContent = { fabric: "Knitting…", droop: "Spinning strands…" }[textureOf(state.texture).family] || "Weaving…";
   try {
     const res = await fetch("/api/build", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shape: state.shape, texture: state.texture, nozzle: state.nozzle, params: state.params,
@@ -160,7 +173,7 @@ async function requestBuild() {
     if (!res.ok) throw new Error(data.error || "Build failed");
     if (!pending) {
       job = data; $("error").hidden = true;
-      await showModel(data); renderPrint(data);
+      renderDropView(data); await showModel(data); renderPrint(data);
     }
   } catch (e) {
     $("error").textContent = e.message; $("error").hidden = false;
@@ -177,6 +190,7 @@ function renderPrint(d) {
   const rows = [["Size", `${fmt(s.size[0])} × ${fmt(s.size[1])} × ${fmt(s.size[2], 1)} mm`]];
   if (s.rods) rows.push(["Rods", `${fmt(s.rods)} · ${s.courses} courses`]);
   if (s.stitches) rows.push(["Stitches around", fmt(s.stitches)]);
+  if (s.strands) rows.push(["Strands", `${fmt(s.strands)} · up to ${fmt(s.reach)} mm out`]);
   rows.push(["Colours", String(s.colours)]);
   if (s.swaps) rows.push(["AMS changes", `${fmt(s.swaps)} · ≈ ${fmt(s.swap_minutes)} min`]);
   rows.push(["Filament", `≈ ${fmt(s.grams_est)} g`]);
@@ -190,12 +204,16 @@ function renderPrint(d) {
   const noz = CAT.nozzles.find((n) => n.size === s.nozzle);
   const notes = [...d.warnings];
   if (tex.swaps === "layer" && s.colours > 1) notes.push("This pattern changes colour about once per layer — expect a long print, or pick one colour.");
-  notes.push(tex.family === "lattice" ? "No supports, no infill — the rods are the object. Print on a clean plate, no brim."
-    : "Vase mode off. The layer height must stay at " + noz.layer + " mm — the pattern is built on it.");
+  notes.push({
+    lattice: "No supports, no infill — the rods are the object. Print on a clean plate, no brim.",
+    fabric: "Vase mode off. The layer height must stay at " + noz.layer + " mm — the pattern is built on it.",
+    droop: "Glossy or translucent PETG/PLA shows the strands best. Don't slow overhangs down or raise the fan — the strands only droop while molten.",
+  }[tex.family]);
   $("notes").replaceChildren(...notes.map((n) => el("li", {}, n)));
   const set = [["Printer", CAT.printer.name], ["Nozzle", `${s.nozzle} mm`], ["Layer height", `${s.layer_h} mm`],
-    ...(tex.family === "lattice" ? [["Rod", s.rod], ["Rod spacing", `${s.pitch} mm`], ["Walls", "rods only"], ["Infill", "0%"]]
-      : [["Walls", "2 loops"], ["Infill", "0%"], ["Top layers", "0"]]),
+    ...({ lattice: [["Rod", s.rod], ["Rod spacing", `${s.pitch} mm`], ["Walls", "rods only"], ["Infill", "0%"]],
+          fabric: [["Walls", "2 loops"], ["Infill", "0%"], ["Top layers", "0"]],
+          droop: [["Walls", "2 loops, strands 1 line"], ["Overhang slow-down", "off"], ["Fan", "≤ 20%"], ["Nozzle", "+5 °C"]] }[tex.family]),
     ["Supports", "none"], ["Filament", "Bambu PLA Matte"]];
   $("settings").replaceChildren(...set.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
 }
@@ -264,8 +282,16 @@ const edge = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.PlaneGeome
 
 let model = new THREE.Group(); scene.add(model);
 
+function renderDropView(d) {
+  const box = $("dropView"); box.hidden = !d.preview;
+  if (!d.preview) return;
+  seg(box, [[true, "After droop", "Strands hung as gravity will hang them (preview)"], [false, "As printed", "The flat strands the printer lays"]],
+    draped, async (v) => { draped = v; renderDropView(job); await showModel(job); });
+}
+
 async function showModel(d) {
-  const meshes = await Promise.all(d.parts.map(async (p) => {
+  const list = d.preview && draped ? d.preview : d.parts;
+  const meshes = await Promise.all(list.map(async (p) => {
     const buf = await (await fetch(p.url)).arrayBuffer();
     const [nv, nf] = new Uint32Array(buf, 0, 2);
     const pos = new Float32Array(buf, 8, nv * 3), idx = new Uint32Array(buf, 8 + nv * 12, nf * 3);

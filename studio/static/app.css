@@ -102,7 +102,8 @@ h2 { font-size: 15px; margin-bottom: 12px; }
   background: rgba(255,255,255,.78); border: 1px solid var(--line); color: var(--muted); font-size: 12.5px;
   font-variant-numeric: tabular-nums; }
 .dims:empty { display: none; }
-.viewbtns { position: absolute; right: 16px; bottom: 16px; display: flex; gap: 6px; }
+.viewbtns { position: absolute; right: 16px; bottom: 16px; display: flex; gap: 6px; align-items: center; }
+.viewbtns .seg { background: rgba(255,255,255,.78); }
 .ghost { padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,.78);
   color: var(--muted); font-size: 12.5px; }
 .ghost:hover, .ghost[aria-pressed="true"] { color: var(--ink); border-color: var(--line-strong); }
@@ -164,4 +165,5 @@ h2 { font-size: 15px; margin-bottom: 12px; }
   .dims .tris { display: none; }
   .dims { left: 12px; bottom: 12px; }
   .viewbtns { right: 12px; bottom: 12px; }
+  .viewbtns #spinBtn, .viewbtns #resetBtn { display: none; }
 }
