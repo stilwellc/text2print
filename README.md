@@ -156,21 +156,28 @@ and the rest of the piece keeps full cooling. Woven rods can't join a mix — th
 | Coaster | woven | width, height, seat, floor, corner |
 | Cup | woven, fabric, droop or halftone | diameter, height (+ wall and floor for rods) |
 | Lamp shade | woven | open cylinder: diameter, height, wall |
-| Bowl | fabric, droop or halftone | diameter, height, base width |
-| Vase | fabric, droop or halftone | belly, height, neck |
-| Goblet | fabric, droop or halftone | a cup on a stem and foot |
+| Bowl | woven, fabric, droop or halftone | diameter, height, base width |
+| Vase | woven, fabric, droop or halftone | belly, height, neck |
+| Goblet | woven, fabric, droop or halftone | a cup on a stem and foot |
 | Candle holder | droop | a solid bell with a socket for a taper candle |
-| Your shape | fabric, droop, halftone, mix, vase mode, shell | widest, height, and a 5-point drawn silhouette |
-| Cachepot | fabric, halftone, vase mode, shell | sized to a 3–7 in nursery pot, with a foot ring that lifts it |
-| Liner sleeve | fabric, vase mode, shell | slides over a glass liner (a cylinder vase or jar) |
+| Your shape | woven, fabric, droop, halftone, mix, vase mode, shell | widest, height, and a 5-point drawn silhouette |
+| Cachepot | woven, fabric, halftone, vase mode, shell | sized to a 3–7 in nursery pot, with a foot ring that lifts it |
+| Liner sleeve | woven, fabric, vase mode, shell | slides over a glass liner (a cylinder vase or jar) |
 | Tealight lantern | fabric, shell, halftone | plinth with a 41 × 17 mm tealight pocket |
 | Pendant shade | fabric, droop, shell | top plate with a 40 mm hole for an E27 socket ring |
 | Puck lamp | fabric, shell, halftone | collar pocket for a 59 × 18 mm LED puck, with a cable notch |
-| Amphora | fabric, vase mode, shell | tall belly and neck that never lean past 45° |
+| Amphora | woven, fabric, vase mode, shell | tall belly and neck that never lean past 45° |
 | Basket | woven | rounded box with two arched handle holes |
 | Catch-all | woven | low rounded tray |
 | Hex tile | woven, flat | hexagon: lattice tile or backlit picture |
 | Tile | flat | rounded rectangle for lithophanes and CMYK |
+
+**Woven vessels.** Woven rods work on every round silhouette, not just the cup: bowl, vase, goblet, your drawn
+shape, cachepot, glass sleeve and amphora. The rod ring follows the silhouette course by course, and no course
+steps more than 0.8 mm per mm (about 39°) in or out of the one below, because rod ends overhang on both faces.
+Cachepot and sleeve keep their fitted inner size and the weave grows outward. A woven 180 mm vase slices at about
+14 h 40 min and 260 g in two colours. Rose window turns into stacked hoops on curved walls, because its rings
+sit at fixed radii.
 
 **Fittings.** The lamp, lantern, pendant, cachepot and candle shapes carry their hardware fit. The collar,
 plinth, foot ring or crush ribs print in the floor colour, and the app adds the safety copy: LED pucks and
