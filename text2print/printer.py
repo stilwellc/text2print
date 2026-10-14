@@ -2,6 +2,7 @@
 slicer overrides each texture family needs. The resolved Bambu Studio configs live in data/p2s_<nozzle>.json
 (built by data/build_profiles.py from Bambu's own P2S + PLA Matte presets)."""
 import json
+import math
 import pathlib
 from dataclasses import dataclass
 
@@ -83,6 +84,18 @@ def overrides(size, family, slots=1, floor_layers=0, wall_speed=None, solid=Fals
                      "bridge_speed": "50", "outer_wall_speed": "100", "inner_wall_speed": "150",
                      "initial_layer_speed": "35"}.items():
             o[k] = _per_extruder(base, k, v)
+    elif family == "litho":
+        # solid wall: enough loops to fill 3 mm, fine layers for smooth tones
+        o.update({"wall_loops": str(max(6, int(math.ceil(3.2 / n.line_w)))), "bottom_shell_layers": str(max(floor_layers, 4)),
+                  "top_shell_layers": "0", "sparse_infill_density": "0%", "detect_thin_wall": "1", "wall_generator": "arachne",
+                  "seam_position": "back"})
+    elif family == "spiral":
+        # one continuous spiral: Bambu's spiral vase mode, 1 wall a touch wider than the nozzle, solid floor
+        w = f"{max(n.line_w, round(n.size * 1.25, 2)):.2f}"
+        o.update({"spiral_mode": "1", "wall_loops": "1", "bottom_shell_layers": str(max(floor_layers, 4)),
+                  "top_shell_layers": "0", "sparse_infill_density": "0%", "outer_wall_line_width": w,
+                  "outer_wall_speed": _per_extruder(base, "outer_wall_speed", "60"), "detect_thin_wall": "0",
+                  "slice_closing_radius": "0" if solid else base.get("slice_closing_radius", "0.049")})
     elif family == "halftone":
         # one wide line per layer at the nozzle's max layer height (the published 0.4/0.8 recipe)
         w = f"{line_w:.2f}"
@@ -111,6 +124,10 @@ DROOP_FILAMENT = {"fan_max_speed": "20", "fan_min_speed": "10", "overhang_fan_sp
                   "additional_cooling_fan_speed": "0", "slow_down_for_layer_cooling": "0"}
 
 
+FUR_FILAMENT = {"fan_max_speed": "100", "fan_min_speed": "100", "overhang_fan_speed": "100",
+                "additional_cooling_fan_speed": "70", "slow_down_for_layer_cooling": "1"}
+
+
 def filament_settings(size, kinds):
     """Per-filament settings, one entry per AMS slot used. kinds: "droop" | "normal" per slot. Droop slots run a
     low fan and +5 C so their strands stay molten long enough to fall; the other slots keep the stock cooling."""
@@ -121,7 +138,9 @@ def filament_settings(size, kinds):
         vals = []
         for kind in kinds:
             if key == "nozzle_temperature":
-                t = int(first("nozzle_temperature")); vals.append(str(t + 5 if kind == "droop" else t))
+                t = int(first("nozzle_temperature")); vals.append(str(t + 5 if kind == "droop" else t - 5 if kind == "fur" else t))
+            elif kind == "fur":
+                vals.append(FUR_FILAMENT[key])
             else:
                 vals.append(DROOP_FILAMENT[key] if kind == "droop" else str(first(key)))
         out[key] = vals

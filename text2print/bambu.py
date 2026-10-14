@@ -53,7 +53,11 @@ def _thumbnail(objects, colours, size, bed=256.0):
             if sec is None:
                 continue
             p2, _ = sec.to_2D(to_2D=np.eye(4))   # identity: keep bed XY
-            for poly in p2.polygons_full:
+            try:
+                polys = p2.polygons_full
+            except ValueError:                   # odd outline: the thumbnail is cosmetic, skip it
+                continue
+            for poly in polys:
                 xy = np.array(poly.exterior.coords) + [px, py]
                 ax.add_patch(MplPoly(xy, closed=True, facecolor=colours[slot - 1], edgecolor="none"))
                 for hole in poly.interiors:
@@ -138,7 +142,8 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
                          f'      <metadata key="extruder" value="{slot}"/>\n'
                          f'      <mesh_stat face_count="{len(m.faces)}" edges_fixed="0" degenerate_facets="0" '
                          f'facets_removed="0" facets_reversed="0" backwards_edges="0"/>\n    </part>\n')
-        settings_objects += (f'  <object id="{obj_id}">\n    <metadata key="name" value="{ob["name"]}"/>\n'
+        obj_meta = "".join(f'    <metadata key="{k}" value="{_x(val)}"/>\n' for k, val in (ob.get("settings") or {}).items())
+        settings_objects += (f'  <object id="{obj_id}">\n    <metadata key="name" value="{_x(ob["name"])}"/>\n{obj_meta}'
                              f'    <metadata face_count="{sum(len(m.faces) for _, m, _ in ob["parts"])}"/>\n{part_xml}  </object>\n')
         plate_instances += (f'    <model_instance>\n      <metadata key="object_id" value="{obj_id}"/>\n'
                             f'      <metadata key="instance_id" value="0"/>\n      <metadata key="identify_id" value="{obj_id * 100}"/>\n'
@@ -241,5 +246,6 @@ def slice_project(p3mf, workdir):
     t = re.search(r"; model printing time: ([^;]+);", g).group(1).strip()
     mins = sum(int(n) * {"d": 1440, "h": 60, "m": 1, "s": 1 / 60}[u] for n, u in re.findall(r"(\d+)([dhms])", t))
     return {"time": t, "minutes": round(mins, 1),
-            "grams": float(re.search(r"; total filament weight \[g\] : ([\d.]+)", g).group(1)),
+            "grams": round(sum(float(x) for x in re.search(r"; total filament weight \[g\] : ([\d.,]+)", g).group(1)
+                                .split(",") if x), 2),      # one number per filament: the total is their sum
             "layers": int(re.search(r"; total layer number: (\d+)", g).group(1))}
