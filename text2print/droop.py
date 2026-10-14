@@ -22,7 +22,9 @@ STYLES = {
     "swag":      dict(name="Swag", blurb="Wide, fat loops that sag into layered festoons"),
     "curls":     dict(name="Curls", blurb="Small loops stacked in drifting columns — they settle into coils"),
     "unraveled": dict(name="Unraveled", blurb="A wild mix of short and long loops, as if the wall is coming apart"),
+    "fur":       dict(name="Fur", blurb="Hundreds of bridged hairs out to a cut-away shell — brush them into a mane"),
 }
+FUR_LEN = {"short": 10.0, "medium": 15.0, "long": 22.0}
 DENSITY = {"sparse": 0.55, "medium": 1.0, "dense": 1.45}
 LENGTH = {"short": 0.7, "medium": 1.0, "long": 1.4}
 
@@ -181,8 +183,56 @@ def drape(wall, spots, prof, q, ribbons, style, seed=11):
     return trimesh.util.concatenate(out)
 
 
+def fur(shape, v, nz, density="medium", length="medium", draft=False, preview=False):
+    """Bridge-strand fur (Cepin's "Furry Lion" method): each hair is a one-layer slab two lines wide (out and back)
+    bridged from the wall to a thin sacrificial shell. After printing, cut the hairs at the shell, pull it away and
+    brush/heat-style the fur. Hairs never touch: one per angle slot per layer, staggered layer to layer."""
+    import manifold3d as m3d
+    from .meshops import manifold_to_trimesh
+    wall, prof, height, rmax, shell = body(shape, v, nz)
+    lh = nz.layer_h; L = FUR_LEN.get(length, 15.0); w = 2 * nz.line_w
+    z_lo, z_hi = height * 0.28, height * 0.86
+    every = {"sparse": 3, "medium": 2, "dense": 1}.get(density, 2)
+    shell_t = 2 * nz.line_w + 0.05
+    # shell: follows the wall at +L from the bed to the top of the fur band
+    zs = np.append(np.arange(0, z_hi + lh, 0.6), z_hi + lh)
+    outer = [(prof(z) + L + shell_t, z) for z in zs]; inner = [(prof(z) + L, z) for z in zs[::-1]]
+    sh = trimesh.creation.revolve(np.array(outer + inner + [outer[0]]), sections=max(120, int(2 * math.pi * (rmax + L) / 1.2)))
+    if sh.volume < 0:
+        sh.invert()
+    hairs = []; k = int(z_lo / lh)
+    while (k + 1) * lh <= z_hi:
+        if (k % every) == 0:
+            z0 = k * lh + 0.03; z1 = (k + 1) * lh - 0.03; zm = (z0 + z1) / 2; R = prof(zm)
+            n = max(12, int(2 * math.pi * R / (w + 1.4)))
+            off = 0.5 * ((k // every) % 2)
+            for i in range(n):
+                a = 360.0 * (i + off) / n
+                hb = m3d.Manifold.cube([L + shell_t * 0.6 + shell * 0.6, w, z1 - z0], False)
+                hairs.append(hb.translate([R - shell * 0.6, -w / 2, z0]).rotate([0, 0, a]))
+        k += 1
+    if draft:
+        hairs_m = [manifold_to_trimesh(h) for h in hairs[:: max(1, len(hairs) // 400)]]
+        return trimesh.util.concatenate([wall, sh] + hairs_m), dict(strands=len(hairs), reach=round(L, 1), draped=None,
+                                                                   floor_layers=int(round(max(1.6, 8 * lh) / lh)), solid=False)
+    to_m = lambda t: m3d.Manifold(m3d.Mesh(vert_properties=np.asarray(t.vertices, np.float32), tri_verts=np.asarray(t.faces, np.int32)))
+    merged = m3d.Manifold.batch_boolean([to_m(wall), to_m(sh)] + hairs, m3d.OpType.Add)
+    mesh = manifold_to_trimesh(merged)
+    trimmed = None
+    if preview:                                     # what you hold after cutting the hairs free of the shell
+        cut = [(prof(z) + L - 0.4, z) for z in zs] + [(prof(z) + L + shell_t + 2, z) for z in zs[::-1]]
+        tube = trimesh.creation.revolve(np.array(cut + [cut[0]]), sections=max(120, int(2 * math.pi * (rmax + L) / 1.2)))
+        if tube.volume < 0:
+            tube.invert()
+        trimmed = manifold_to_trimesh(merged - to_m(tube))
+    return mesh, dict(strands=len(hairs), reach=round(L, 1), draped=trimmed, floor_layers=int(round(max(1.6, 8 * lh) / lh)),
+                      solid=False)
+
+
 def build(shape, v, nz, style="fringe", density="medium", length="medium", preview=False, draft=False):
     import manifold3d as m3d
+    if style == "fur":
+        return fur(shape, v, nz, density, length, draft, preview)
     wall, prof, height, rmax, shell = body(shape, v, nz)
     spots = _rows(style, prof, height, nz, DENSITY.get(density, 1.0), LENGTH.get(length, 1.0))
     embed = shell * 0.55

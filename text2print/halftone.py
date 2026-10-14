@@ -61,7 +61,13 @@ def picture(name, u, v, path=None):
     return np.clip(np.maximum(body, small) + (v < 0.12), 0, 1)
 
 
-def build(shape, v, nz, picture_name="flames", image_path=None, band=1, draft=False):
+AREAS = {"full": 1.0, "half": 0.5, "third": 1 / 3}
+
+
+def build(shape, v, nz, picture_name="flames", image_path=None, band=1, draft=False, area="full", silk=False):
+    """Economy levers (research §5.5): `band` layers per colour (fewer changes), `area` keeps the picture to the
+    lower part of the piece (plain background above, no changes there), `silk` prints one dual-colour silk
+    filament — the ribs flip its sheen, the picture shows with zero AMS changes."""
     lh, lw = RECIPE[nz.size]
     prof, height, rmax = shape.profile(v)
     floor_t = max(1.2, 4 * lh)
@@ -75,20 +81,31 @@ def build(shape, v, nz, picture_name="flames", image_path=None, band=1, draft=Fa
     # floor: a solid disc in colour A
     disc = trimesh.creation.cylinder(radius=prof(floor_t / 2), height=n_floor * lh, sections=n_th)
     disc.apply_translation([0, 0, n_floor * lh / 2]); parts[0].append(disc)
+    pic_top = floor_t + (height - floor_t) * AREAS.get(area, 1.0)
+    swaps = 0; prev = 0
     for k in range(n_floor, n_layers):
         z0, z1 = k * lh, (k + 1) * lh; zm = (z0 + z1) / 2
-        colour = ((k - n_floor) // band) % 2                      # colour B first above the floor
+        in_pic = zm <= pic_top
+        if silk:
+            colour = 0
+        elif in_pic:
+            colour = ((k - n_floor) // band) % 2                  # colour B first above the floor
+        else:
+            colour = 1                                            # plain background above the picture
+        swaps += colour != prev; prev = colour
         R = prof(zm)
         step = max(prof(zm) - prof(zm - lh), 0.0)               # the wall's own outward lean this layer
         amp = max(0.2 * lw, min(0.5 * lw, 0.6 * lw - step))      # overhang law: lean + swing <= 0.6 line
-        g = picture(picture_name, th / (2 * np.pi), (zm - floor_t) / max(height - floor_t, 1e-6), image_path)
-        g = g if colour == 0 else 1.0 - g
+        if in_pic:
+            g = picture(picture_name, th / (2 * np.pi), (zm - floor_t) / max(pic_top - floor_t, 1e-6), image_path)
+            g = g if (colour == 0 or silk) else 1.0 - g
+        else:
+            g = np.zeros_like(th)
         outer = R + amp * g * wave
         inner = outer - lw
         parts[colour].append(_ring(th, inner, outer, z0, z1))
-    return {c: trimesh.util.concatenate(ms) for c, ms in parts.items()}, dict(
-        layers=n_layers, ribs=n_ribs, layer_h=lh, line_w=lw, floor_layers=n_floor,
-        swaps=(n_layers - n_floor) // band)
+    return {c: trimesh.util.concatenate(ms) for c, ms in parts.items() if ms}, dict(
+        layers=n_layers, ribs=n_ribs, layer_h=lh, line_w=lw, floor_layers=n_floor, swaps=swaps)
 
 
 def _ring(th, r_in, r_out, z0, z1):
