@@ -6,6 +6,7 @@ from text2print import build, halftone, printer
 from text2print.shapes import SHAPES
 
 
+@pytest.mark.full
 @pytest.mark.parametrize("shape", ["cup", "vase", "bowl", "goblet"])
 @pytest.mark.parametrize("pic", list(halftone.PICTURES))
 def test_builds_two_watertight_parts(shape, pic):

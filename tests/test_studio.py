@@ -37,3 +37,31 @@ def test_incompatible_pick_is_a_clear_400(client):
 
 def test_index_serves_the_picker(client):
     assert b"text2print" in client.get("/").data
+
+
+def test_draft_builds_and_superseded_requests(client):
+    r = client.post("/api/build", json={"shape": "cup", "texture": "zigzag", "params": {"height": 30}, "draft": True})
+    assert r.status_code == 200 and r.get_json()["draft"] is True
+
+
+def test_send_needs_explicit_confirmation(client):
+    jid = client.post("/api/build", json={"shape": "coaster", "texture": "grid", "params": {"width": 70, "dish": 0}}).get_json()["id"]
+    r = client.post(f"/api/job/{jid}/send", json={})
+    assert r.status_code == 400 and "confirm" in r.get_json()["error"]
+
+
+def test_designs_and_printer_endpoints(client, tmp_path, monkeypatch):
+    from text2print import store
+    monkeypatch.setattr(store, "HOME", tmp_path)
+    d = client.post("/api/designs", json={"name": "A", "link": "?shape=cup&texture=zigzag"}).get_json()
+    assert client.get("/api/designs").get_json()[0]["id"] == d["id"]
+    assert client.delete(f"/api/designs/{d['id']}").get_json()["ok"]
+    r = client.post("/api/printer", json={"ip": "10.0.0.2", "serial": "X", "access_code": "Y", "name": "P2S"}).get_json()
+    assert r["configured"] and "access_code" not in client.get("/api/printer").get_json()
+
+
+def test_catalogue_has_status_plates_and_lan(client):
+    c = client.get("/api/catalogue").get_json()
+    tw = next(t for t in c["textures"] if t["key"] == "twill")
+    assert tw["status"]["0.4"] == "printed" and {p["key"] for p in c["plates"]} == {"woven", "colour", "droop", "fabric"}
+    assert "configured" in c["lan"]

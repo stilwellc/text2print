@@ -22,9 +22,27 @@ python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
 .venv/bin/python -m text2print studio            # opens http://127.0.0.1:7384
 ```
 
-Pick, watch it rebuild, then **Open in Bambu Studio**. The project lands in `~/Downloads/text2print/`:
+Pick, watch it rebuild (a quick sketch while you drag, the full build when you let go), then **Open in
+Bambu Studio**. The project lands in `~/Downloads/text2print/`:
 one object, one part per colour already mapped to AMS slots, the P2S profile for your nozzle, no supports.
-**Get exact print time** slices it with the Bambu Studio CLI in the background.
+**Get exact print time** slices it with the Bambu Studio CLI in the background — real AMS changes and purge
+included — and remembers the result for that design. **Save design** keeps it (with a thumbnail and the
+slicer's numbers) under **Saved**; every design is also a shareable link.
+
+Everything else lives in the studio too:
+
+- **Up to 4 colours.** Any fabric or droop piece (and woven pieces coloured by height) splits into 1–4 colour
+  bands or repeating stripes, cut exactly on layer boundaries. Mixes give each band its own AMS slot.
+- **Lids.** Cups, vases, bowls, dishes, trays and your own shapes get an optional lid with a 0.25 mm slip-fit
+  plug and a press-fit knob. Both print top-face down beside the piece (or on their own plate if it's too big).
+- **Exact sizes.** Type any dimension in millimetres, or drag. **Your shape** lets you draw the silhouette with
+  five points; it's clamped so the wall never leans out past ~42°.
+- **Your own picture** for halftone (upload a PNG/JPG; dark = colour 1).
+- **Test plates.** One plate per family with a small coupon of every texture. Print one and record the result
+  (`python -m text2print verify fringe 0.4 ok --note "..."`); the cards then show **Printed** badges and the
+  warnings come from real prints.
+- **Send to printer** (experimental). Add your P2S's IP, serial and LAN access code once (stored only on this
+  Mac in `~/.text2print`); the studio slices and sends over your network, always asking before it starts.
 
 From the command line:
 
@@ -66,6 +84,10 @@ course and change about once per layer).
 
 Fabric pieces can add a looped rim and diamond or eye cut-outs in the floor.
 
+**Reliefs.** Raised textures on a fabric-thin wall, every underside ramped at 45° or less so they print without
+supports: **Garland** (festoon scallops), **Drips** (a glue-gun bead with drips running down), **Melt** (sagging
+coil beads with broken arcs).
+
 **Droop.** Single strands leave the wall, arc into air, and sag under gravity into hanging loops. The
 printer lays each span fast and hot so it stays molten and falls; the preview shows it after the droop,
 with an "As printed" switch for the flat strands the printer actually lays.
@@ -91,9 +113,10 @@ where a wall flares so a rib never overhangs more than 60 % of its line.
 **Mix.** Stack textures in bands up one wall: plain, zigzag, knit, wave, halftone, fringe, swag, curls and
 unraveled, each band with its own height and AMS colour. Presets: *Coil band* (plain, curls, plain), *Fringe
 skirt* (wave foot, dense fringe, plain neck), *Flame foot* (halftone flames under zigzag) and *Knit & wave*.
-The whole mix prints at the nozzle's standard layer height with one shared wall; the AMS changes where two
-colours meet (and every layer inside a halftone band). If any band droops, the whole print runs at the droop
-fan. Woven rods can't join a mix — they are the whole object, not a wall. Mixes work on cup, vase, bowl and goblet.
+Bands print at the nozzle's standard layer height, except halftone bands, which keep their 0.28 mm (0.4
+nozzle) recipe through a Bambu layer range. The AMS changes where two colours meet (and every layer inside a
+halftone band). Droop bands get their own low-fan, +5 °C filament settings; give a droop band its own colour slot
+and the rest of the piece keeps full cooling. Woven rods can't join a mix — they are the whole object, not a wall. Mixes work on cup, vase, bowl and goblet.
 
 ```bash
 # mixes are easiest in the studio; every mix is a shareable link (/?shape=vase&texture=mix&mix=[...])
@@ -113,6 +136,7 @@ fan. Woven rods can't join a mix — they are the whole object, not a wall. Mixe
 | Vase | fabric, droop or halftone | belly, height, neck |
 | Goblet | fabric, droop or halftone | a cup on a stem and foot |
 | Candle holder | droop | a solid bell with a socket for a taper candle |
+| Your shape | fabric, droop, halftone, mix | widest, height, and a 5-point drawn silhouette |
 
 ## Made for the Bambu Lab P2S
 
@@ -130,6 +154,16 @@ nozzle) with every `inherits` link resolved, so projects don't depend on your Ba
 at its stock 10 mm/s the print takes twice as long for nothing); fabric prints as a 2-loop shell with
 0% infill and no top layers. Objects are capped at 200 mm so the prime tower always fits back-right.
 
+## What the slicer confirmed
+
+- Bambu Studio's CLI honours each part's AMS slot once every per-filament setting list is the right length, so
+  the exact-time numbers include real colour changes. On three mixes the slicer's change count matched the app's
+  estimate exactly.
+- Layer ranges are keyed by the object's position in the build (`Metadata/layer_config_ranges.xml`). A range
+  must set `layer_height`; line widths in a range drop layers of multi-part objects, and "extruder" breaks them.
+- The prime tower needs every object on a plate to share one set of layer ranges.
+- Purge per change comes from the colour pair (light after dark costs most), not a flat number.
+
 ## Laws
 
 These are print-verified, and the tests enforce the geometric ones.
@@ -146,10 +180,11 @@ These are print-verified, and the tests enforce the geometric ones.
 ## Repo
 
 ```
-text2print/   shapes.py · lattice.py (woven rods) · droop.py (strands) · halftone.py · compose.py (mix) · fabric.py + fabric_wall.py + fabric_presets.py (fabric)
+text2print/   shapes.py · lattice.py (woven rods) · droop.py (strands) · halftone.py · compose.py (mix) · extras.py (zones, lids)
+              sampler.py (test plates) · verify.py · store.py (~/.text2print) · lan.py (send) · fabric.py + fabric_wall.py + fabric_presets.py (fabric)
               floors.py · build.py (pick -> project) · printer.py + data/ (P2S) · bambu.py (3MF + CLI slice)
 studio/       server.py + static/ (the picker)
-tests/        python -m pytest
+tests/        python -m pytest          (fast)   ·   python -m pytest -m ""   (everything, incl. the real slicer)
 ```
 
 Adding a texture is one function in `lattice.py` (`PATTERNS`) or `fabric.py` (`STITCHES`); adding a shape is
