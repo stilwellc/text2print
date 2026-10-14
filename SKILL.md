@@ -38,7 +38,10 @@ cup, bowl, vase, goblet, candle (solid bell + taper socket) — droop.
 Woven textures (`lattice.PATTERNS`): grid "Weave", twill, kagome, polar "Rose window" (round shapes only),
 ripple, selvedge, beat "Moiré", overunder, tartan. Fabric (`fabric.STITCHES`): zigzag, domes "Knit", wave;
 options rim_loops and floor = solid | diamonds | lens. Droop (`droop.STYLES`): fringe, swag, curls, unraveled;
-options density = sparse | medium | dense, length = short | medium | long. `Build.preview` holds the strands hung
+options density = sparse | medium | dense, length = short | medium | long. Multi-colour droop: zones 2-4 with
+zone_style courses (default for droop; woven-style, colour per strand row via droop.courses() cut-safe row
+boundaries + build._course_edges; curls snap to the row grid when aligned) | bands | stripes; course_rows 1-4.
+Slicer-verified: 3-colour swag cup = 13 changes in both app and slicer. `Build.preview` holds the strands hung
 by gravity (display only — strands pass through each other); the print files carry the flat strands.
 Halftone (`halftone.py`, texture "halftone" on cup/vase/bowl/goblet): options picture = flames|fade|dots|chevron|waves,
 band = 1|2 layers per colour, CLI `--image path` (dark = colour 1). Recipe `halftone.RECIPE`: layer = nozzle max

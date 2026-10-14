@@ -205,3 +205,44 @@ def test_real_slicer_accepts_the_new_families(tmp_path, shape, texture, dims, op
 def test_vase_mode_estimate_counts_one_wall_not_the_solid_body():
     b = build.make("vase", "pleats", draft=True)
     assert 15 < b.stats["grams_est"] < 150
+
+
+# ── multi-colour droop: woven-style courses ──────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("style", ["fringe", "swag", "curls", "unraveled"])
+def test_droop_courses_never_cut_a_strand(style):
+    import math
+    from text2print import droop
+    nz = printer.nozzle(0.4); S = SHAPES["cup"]; v = S.resolve({"diameter": 70, "height": 80})
+    _, info = droop.build(S, v, nz, style, preview=False, draft=True, aligned=True)
+    edges, zone_of = build._course_edges(info["courses"], info["course_gap"], 80.0, 2)
+    assert len(edges) > 8 and set(zone_of) == {0, 1}
+    lh = nz.layer_h
+    spots = droop._rows(style, S.profile(v)[0], 80.0, nz, 1.0, 1.0, aligned=True)
+    for e in edges[1:-1]:
+        k = round(e / lh)
+        for *_, z, hh, _, _ in spots:
+            a = math.floor(z / lh + 1e-9)
+            assert not (a < k <= a + round(hh / lh)), (style, e, z)
+
+
+def test_droop_courses_change_once_per_course_and_rows_cut_it():
+    one = build.make("cup", "fringe", {"diameter": 70, "height": 80}, colours=["#2E4E7E", "#EDE3D1"],
+                     options={"zones": "2"}, draft=True)
+    three = build.make("cup", "fringe", {"diameter": 70, "height": 80}, colours=["#2E4E7E", "#EDE3D1"],
+                       options={"zones": "2", "course_rows": "3"}, draft=True)
+    assert len(one.parts) == 2 and one.stats["swaps"] > 20
+    assert three.stats["swaps"] <= one.stats["swaps"] / 2.5
+    assert len(one.preview) == 2                                  # hung strands keep their course colour
+
+
+@pytest.mark.slicer
+def test_real_slicer_counts_droop_course_changes(tmp_path):
+    if not bambu.slicer_available():
+        pytest.skip("Bambu Studio not installed")
+    import re
+    b = build.make("cup", "swag", {"diameter": 60, "height": 60}, colours=["#2E4E7E", "#EDE3D1", "#C3302C"],
+                   options={"zones": "3"})
+    r = bambu.slice_project(b.write_3mf(tmp_path / "d.3mf"), tmp_path / "s")
+    assert "error" not in r, r
+    g = zipfile.ZipFile(tmp_path / "s" / "sliced.3mf").read("Metadata/plate_1.gcode").decode(errors="ignore")
+    assert len(re.findall(r"^M620 S\dA", g, re.M)) == b.stats["swaps"]

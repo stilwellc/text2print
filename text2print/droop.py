@@ -63,7 +63,7 @@ def _ribbon(theta_c, chord, bulge, z0, height, width, r_of_z, embed, power, lean
     return m
 
 
-def _rows(style, r_of_z, height, nz, density, length, seed=11, z_range=None):
+def _rows(style, r_of_z, height, nz, density, length, seed=11, z_range=None, aligned=False):
     """Strand placements (theta, chord, bulge, z0, tall, lean, width) honouring the laws above."""
     sp = _SPEC[style]; lh, lw = nz.layer_h, nz.line_w
     tall = min(4, sp["tall"]); strand_h = tall * lh; width = sp["width"] * lw
@@ -83,6 +83,8 @@ def _rows(style, r_of_z, height, nz, density, length, seed=11, z_range=None):
             for c in range(n_cols):
                 th = 2 * math.pi * (c + 0.5 * (tier % 2) + 0.3 * _h(seed, "c", tier, c)) / n_cols
                 z = z_t + _h(seed, "z", tier, c) * tier_h * 0.5
+                if aligned:                                    # courses: every loop on one row grid, so colour
+                    z = z_lo + round((z - z_lo) / gap) * gap   # can change between rows without cutting a loop
                 run = int(run_n * (0.6 + 0.6 * _h(seed, "n", tier, c))); d = 1 if (c + tier) % 2 else -1
                 for k in range(run):
                     if z > z_hi:
@@ -166,7 +168,15 @@ def body(shape, v, nz):
 HANG = {"fringe": (78, 88), "swag": (55, 72), "curls": (45, 80), "unraveled": (35, 88)}   # degrees below horizontal
 
 
-def drape(wall, spots, prof, q, ribbons, style, seed=11):
+def courses(spots, lh):
+    """Layer boundaries (z) where a colour can change without cutting a strand: each strand row's first layer,
+    kept only if no other strand spans it. Like woven courses — colour follows the row, one change per row."""
+    occ = [(int(math.floor(z / lh + 1e-9)), int(math.floor(z / lh + 1e-9)) + int(round(hh / lh))) for _, _, _, z, hh, _, _ in spots]
+    starts = sorted({a for a, _ in occ})
+    return [k * lh for k in starts if not any(a < k <= b for a, b in occ)]
+
+
+def drape(wall, spots, prof, q, ribbons, style, seed=11, pieces=False):
     """Preview only: each strand swung down about the line joining its anchors, as gravity will do it.
     Not printable (strands pass through each other) — the print files always carry the flat strands."""
     lo, hi = HANG[style]; out = [wall]
@@ -179,7 +189,9 @@ def drape(wall, spots, prof, q, ribbons, style, seed=11):
         probe = trimesh.transform_points([pivot + [math.cos(th) * 5, math.sin(th) * 5, 0]], R)[0]
         if probe[2] > pivot[2]:
             R = trimesh.transformations.rotation_matrix(-ang, axis, pivot)
-        d = rib.copy(); d.apply_transform(R); out.append(d)
+        d = rib.copy(); d.apply_transform(R); out.append((z, d) if pieces else d)
+    if pieces:                                       # wall + [(anchor z, hung strand)]: colour follows the anchor
+        return out[0], out[1:]
     return trimesh.util.concatenate(out)
 
 
@@ -229,12 +241,12 @@ def fur(shape, v, nz, density="medium", length="medium", draft=False, preview=Fa
                       solid=False)
 
 
-def build(shape, v, nz, style="fringe", density="medium", length="medium", preview=False, draft=False):
+def build(shape, v, nz, style="fringe", density="medium", length="medium", preview=False, draft=False, aligned=False):
     import manifold3d as m3d
     if style == "fur":
         return fur(shape, v, nz, density, length, draft, preview)
     wall, prof, height, rmax, shell = body(shape, v, nz)
-    spots = _rows(style, prof, height, nz, DENSITY.get(density, 1.0), LENGTH.get(length, 1.0))
+    spots = _rows(style, prof, height, nz, DENSITY.get(density, 1.0), LENGTH.get(length, 1.0), aligned=aligned)
     embed = shell * 0.55
     lh = nz.layer_h
     q = lambda z: (math.floor(z / lh) + 0.25) * lh           # quarter-layer shift: no strand face is coplanar with
@@ -260,6 +272,8 @@ def build(shape, v, nz, style="fringe", density="medium", length="medium", previ
             mesh.invert()
     reach = max((bu for _, _, bu, _, _, _, _ in spots), default=0.0)
     draped = drape(wall, spots, prof, q, ribbons, style) if preview else None
-    info = dict(strands=len(spots), reach=round(reach, 1), draped=draped,
+    drape_pieces = drape(wall, spots, prof, q, ribbons, style, pieces=True) if preview else None
+    info = dict(strands=len(spots), reach=round(reach, 1), draped=draped, drape_pieces=drape_pieces,
+                courses=courses(spots, lh), course_gap=max(_SPEC[style]["row"], _SPEC[style]["tall"] + 1) * lh,
                 floor_layers=int(round(max(1.6, 8 * nz.layer_h) / nz.layer_h)), solid=bool(getattr(shape, "solid", False)))
     return mesh, info
