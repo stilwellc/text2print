@@ -34,7 +34,58 @@ def main(argv=None):
     sp.add_argument("--out", default="~/Downloads/text2print/test-plates"); sp.add_argument("--slice", action="store_true")
     vf = sub.add_parser("verify"); vf.add_argument("texture"); vf.add_argument("nozzle", type=float)
     vf.add_argument("result", choices=["ok", "fail"]); vf.add_argument("--note", default="")
+    pc = sub.add_parser("pictures", help="list built-in, text and library pictures, and fonts")
+    pt = sub.add_parser("picture", help="render text as a picture (preview)")
+    pt.add_argument("kind", choices=["text"]); pt.add_argument("words")
+    pt.add_argument("--font", default="futura"); pt.add_argument("--layout", default="center", choices=["center", "repeat", "stack"])
+    pt.add_argument("--aspect", type=float, default=3.0); pt.add_argument("--invert", action="store_true")
+    pt.add_argument("--out", default="text.png")
+    pg = sub.add_parser("plugin", help="plugins: list | check FILE | new picture|woven|stitch NAME")
+    pg.add_argument("action", choices=["list", "check", "new"]); pg.add_argument("args", nargs="*")
+    pg.add_argument("--out", default=None)
+    tt = sub.add_parser("thumb-texture"); tt.add_argument("key"); tt.add_argument("out")   # studio helper
     a = ap.parse_args(argv)
+
+    if a.cmd == "thumb-texture":
+        from . import build, plugins, thumbs
+        plugins.load_all()
+        if build.TEXTURES[a.key]["family"] == "lattice":
+            b = build.make("coaster", a.key, {"width": 80, "height": 8, "dish": 0}, colours=["#8B3A2F", "#EDE3D1"], draft=True)
+            thumbs.render([(m, c) for _, m, _, c in b.parts], a.out, size=360, view=(1.0, -0.95, 0.8), zoom=1.12)
+        else:
+            b = build.make("cup", a.key, {"diameter": 70, "height": 80}, colours=[thumbs.FABRIC_TONE], draft=True)
+            thumbs.render([(m, c) for _, m, _, c in b.parts], a.out, size=360, view=(1.0, -0.9, 0.35), zoom=1.1, rake=True)
+        return 0
+
+    if a.cmd == "pictures":
+        from . import pictures
+        print("fonts:", ", ".join(k for k, _ in pictures.fonts()))
+        for c in pictures.choices():
+            print(f"  {c['group']:9s} {c['key']:20s} {c['name']}")
+        return 0
+    if a.cmd == "picture":
+        from . import pictures
+        pictures.render_text(a.words, a.font, a.layout, a.aspect, invert=a.invert).save(a.out); print(a.out); return 0
+    if a.cmd == "plugin":
+        from . import plugins
+        if a.action == "list":
+            keys = plugins.load_all()
+            print(f"plugin folder: {plugins.DIR}")
+            for k in keys:
+                from .build import TEXTURES
+                print(f"  {k:24s} {TEXTURES[k]['family']:8s} {TEXTURES[k]['name']}")
+            for k, m in plugins.pictures().items():
+                print(f"  {k:24s} picture  {m['name']}")
+            for stem, err in plugins.ERRORS.items():
+                print(f"  ! {stem}: {err.strip().splitlines()[-1]}")
+            return 0
+        if a.action == "check":
+            for f in a.args:
+                print(json.dumps(plugins.check(f, a.out), indent=1))
+            return 0
+        if a.action == "new":
+            kind, name = (a.args + ["", ""])[:2]
+            path = plugins.new(kind, name or "my_" + kind); print(path); return 0
 
     if a.cmd == "studio":
         from studio.server import run

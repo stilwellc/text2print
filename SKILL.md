@@ -136,3 +136,40 @@ a separate -lid.3mf with 2+ colours parks the tower front-right. Woven round ope
 Lid section options: lid (none|slip|thread|magnets), lid_texture (match|plain|texture key from build.lid_textures()),
 lid_colours [hex, hex?], lid_height (5-40 mm, else auto 8-14), lid_knob (knob|button|none), lid_fit. Writer law:
 every object carries an object-level extruder = its first part's (a one-part object otherwise prints filament 1).
+
+## Custom pictures and patterns from a prompt (this is where Claude does the work)
+
+The studio covers everything that needs no judgement. When someone asks for something it can't pick from a list,
+make it — then hand back a studio link. Four routes, cheapest first:
+
+1. **Words** ("put MOBI LABS on it", "her name in script"): no code. Studio link with
+   `picture=text&text=...&font=futura|helvetica|avenir|didot|georgia|rockwell|typewriter|impact|script|chalk&text_layout=center|repeat|stack`
+   (+ `text_invert=1`). Works on halftone, wall lithophane (`litho`), `flatlitho`, `cmyk`. Text renders at the wall's
+   true proportions; `repeat` tiles a whole number of times around so no word is cut at the seam.
+   Preview offline: `python -m text2print picture text "WORDS" --font didot --layout stack --aspect 3 --out x.png`.
+2. **Their image**: copy it to `~/.text2print/pictures/<name>.png` (or they upload in the studio) -> `picture=lib:<name>`.
+   Dark = the front colour / the thick part of a lithophane. CMYK uses the colours. Never trace someone else's
+   artwork or a brand from the web; their own photos and drawings are fine.
+3. **A picture from a prompt** ("koi pond", "art-deco sunburst", "a field of poppies"): write
+   `~/.text2print/plugins/<name>.py` with `PICTURE = dict(name=..., colour=False)` and `draw(u, v, aspect)`:
+   u 0..1 around the wall, v 0..1 up, aspect = width/height in mm — work in `x = u * aspect, y = v` so shapes
+   aren't stretched; wrap x at the seam (`(dx + aspect/2) % aspect - aspect/2`). Return darkness 0..1 (1 = front
+   colour), or RGB (..., 3) with `colour=True` for CMYK tiles. Build pictures from signed distances (ellipses,
+   polygons, smooth unions), hash-seeded placement (deterministic), and keep features >= ~2 mm at print size:
+   halftone resolves ~1 rib (~3 mm) across and 2 layers (0.56 mm) up. Example: plugin_examples/koi.py.
+4. **A weave or stitch from a prompt** ("herringbone", "basket-weave diamonds", "fish-scale knit"):
+   - `WOVEN = dict(name, blurb, slots=2, swaps="course", round_only=False)` + `pattern(region, nz, rods)` using
+     the lattice API: `c = Course(region, nz, i)`; `c.lines(theta, pitch=..., keep=lambda j: ..., offset=...)` gives
+     clipped rods; `rods.line(_pt(pf, t0, c.z), _pt(pf, t1, c.z), slot)`; curved rods via `rods.path(pts, slot)`.
+     Woven laws hold automatically (rods clipped half a bead inside, every course full-width). Colour by course
+     parity keeps one change per course. Example: plugin_examples/diamond_weave.py.
+   - `STITCH = dict(name, blurb)` + `displace(u, layer, band_layers, band, z_frac)` -> 0..1 of the stitch depth
+     (u: 1 per stitch, odd bands shifted half a stitch). It is printed on the knit (domes) proportions. Keep
+     layer-to-layer changes gentle. Example: plugin_examples/fish_scales.py.
+   Keys: woven/stitch -> texture `x_<file stem>`, picture -> `lib:<file stem>`.
+
+Always: `python -m text2print plugin check ~/.text2print/plugins/<name>.py` -> builds it on a sample piece,
+checks watertight + overhang against the built-in stitches (verdict "ok"), renders a preview PNG — LOOK at the
+preview and iterate before handing over. Then `plugin list` (shows load errors) and give the studio link
+(`/?shape=vase&texture=x_<name>` or `/?shape=cup&texture=halftone&picture=lib:<name>`). The studio picks plugins
+up on the next load — no restart. `python -m text2print plugin new picture|woven|stitch NAME` writes a starter.

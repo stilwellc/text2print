@@ -261,3 +261,8 @@ h2 { font-size: 15px; margin-bottom: 12px; }
 
 /* progressive builds: the refine pass is a quiet chip, not a blocking overlay */
 .status.quiet { opacity: .72; transform: scale(.94); }
+
+/* picture library + text */
+#finish select, #finish input.words { font: inherit; font-size: 13.5px; padding: 7px 9px; border-radius: 9px;
+  border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink); width: 100%; box-sizing: border-box; }
+#finish input.words { font-size: 15px; }

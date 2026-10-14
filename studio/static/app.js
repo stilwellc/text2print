@@ -55,8 +55,8 @@ function readUrl() {
   if (q.get("texture") && textureOf(q.get("texture"))) state.texture = q.get("texture");
   if (q.get("nozzle")) state.nozzle = parseFloat(q.get("nozzle"));
   if (q.get("c")) state.colours = q.get("c").split(",").map((h) => "#" + h.replace("#", ""));
-  const optKeys = Object.values(CAT.options).flat().map((o) => o.key).concat(["picture", "image"]).concat(["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "tower"]);
-  const toggleKeys = Object.values(CAT.options).flat().filter((o) => o.kind === "toggle").map((o) => o.key);
+  const optKeys = Object.values(CAT.options).flat().map((o) => o.key).concat(["picture", "image"]).concat(TEXT_KEYS).concat(["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "tower"]);
+  const toggleKeys = Object.values(CAT.options).flat().filter((o) => o.kind === "toggle").map((o) => o.key).concat(["text_invert"]);
   for (const [k, v] of q) {
     if (k === "mix") { try { state.bands = JSON.parse(v); } catch (e) { /* a bad link keeps the default */ } }
     else if (optKeys.includes(k)) state.options[k] = toggleKeys.includes(k) ? v === "1" : v;   // only checkboxes are booleans
@@ -73,6 +73,7 @@ function linkFor() {
     if (v !== o.default) q.set(o.key, v === true ? "1" : v === false ? "0" : v);
   }
   if (state.options.image && textureOf(state.texture).family === "halftone") q.set("image", state.options.image);
+  if (state.options.picture === "text") for (const k of TEXT_KEYS) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k] === true ? "1" : state.options[k] === false ? "0" : state.options[k]);
   if (state.options.lid && state.options.lid !== "none" && shapeOf(state.shape).lid) {
     for (const k of ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "tower"]) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k]);
   }
@@ -282,7 +283,7 @@ function renderFinish() {
       && (state.options.zone_style ?? "courses") === "courses" && state.texture !== "fur";
     return true;
   });
-  const kids = shown.flatMap((o) => optionControl(o, after));
+  const kids = shown.flatMap((o) => o.key === "picture" ? pictureControl(o, after) : optionControl(o, after));
   if (IMAGE_TEXTURES.includes(state.texture)) kids.splice(Math.min(2, kids.length), 0, uploader(state.options.image, (id) => { if (id) state.options.image = id; else delete state.options.image; renderFinish(); changed(); }));
   $("finishSec").hidden = !kids.length;
   $("finish").replaceChildren(...kids);
@@ -347,6 +348,31 @@ function buildOptions() {
   if (ls.length) o.lid_colours = ls.map((i) => state.colours[i]);
   delete o.lid_slot; delete o.lid_slot2;
   return o;
+}
+
+// ── pictures: built-ins, text in any font, and library pictures (uploads and ones written from a prompt) ──
+const TEXT_KEYS = ["text", "font", "text_layout", "text_invert"];
+let textTimer = null;
+function pictureControl(o, after) {
+  const P = CAT.pictures, val = state.options.picture ?? o.default, groups = {};
+  for (const c of P.choices) (groups[c.group] ||= []).push(c);
+  const sel = el("select", { "aria-label": "Picture", class: "pic" }, ...Object.entries(groups).map(([g, cs]) =>
+    el("optgroup", { label: g }, ...cs.map((c) => { const op = el("option", { value: c.key }, c.name); op.selected = c.key === val; return op; }))));
+  sel.addEventListener("change", () => { state.options.picture = sel.value; after(); });
+  const kids = [el("div", { class: "field-label" }, "Picture"), sel];
+  if (val === "text") {
+    const inp = el("input", { type: "text", class: "words", placeholder: "Your words", value: state.options.text || "", "aria-label": "Words" });
+    inp.addEventListener("input", () => { clearTimeout(textTimer); textTimer = setTimeout(() => { state.options.text = inp.value; changed(); }, 350); });
+    const font = el("select", { "aria-label": "Font", class: "font" }, ...P.fonts.map(([k, lab]) => {
+      const op = el("option", { value: k }, lab); op.selected = (state.options.font || "futura") === k; return op; }));
+    font.addEventListener("change", () => { state.options.font = font.value; changed(); });
+    kids.push(el("div", { class: "field-label" }, "Words"), inp, el("div", { class: "field-label" }, "Font"), font,
+      ...optionControl({ key: "text_layout", label: "Layout", kind: "seg", choices: P.layouts, default: "center" }, after),
+      ...optionControl({ key: "text_invert", label: "Light letters on dark", kind: "toggle", default: false }, after));
+  }
+  if (Object.keys(P.errors || {}).length)
+    kids.push(el("p", { class: "hint" }, `A plugin didn't load: ${Object.keys(P.errors).join(", ")} — run "python -m text2print plugin list".`));
+  return kids;
 }
 
 // ── lid: its own section — closure, look, fit, height, colours, knob ─────────────────────────────

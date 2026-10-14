@@ -1,6 +1,7 @@
 """Research top-12 features: fittings, halftone economy, vase mode, shell textures, fur, lid styles, footprints, flat."""
 import json
 import math
+import pathlib
 import zipfile
 
 import numpy as np
@@ -547,3 +548,56 @@ def test_real_slicer_on_cheaper_colour_options(tmp_path, opts):
     assert len(re.findall(r"^M620 S\dA", g, re.M)) == b.stats["swaps"]
     if opts.get("tower") == "off":
         assert "; FEATURE: Prime tower" not in g
+
+
+# ── picture library, text, plugins ──────────────────────────────────────────────────────────────────────
+def test_text_pictures_fit_the_wall_and_drive_every_picture_texture():
+    from text2print import pictures
+    im = pictures.render_text("MOBI", "futura", "repeat", aspect=4.0)
+    assert im.size[0] == pytest.approx(4 * im.size[1], rel=0.02)
+    o = {"picture": "text", "text": "HI", "font": "impact"}
+    a = build.make("cup", "halftone", {"diameter": 60, "height": 40}, options=o, colours=["#F3D34A", "#2E4E7E"], draft=True)
+    b = build.make("cup", "halftone", {"diameter": 60, "height": 40}, colours=["#F3D34A", "#2E4E7E"], draft=True)
+    _ok(a)
+    assert abs(a.parts[0][1].volume - b.parts[0][1].volume) > 1.0      # the words change the ribs
+    for shape, tex in (("cup", "litho"), ("tile", "flatlitho"), ("tile", "cmyk")):
+        _ok(build.make(shape, tex, options=o, draft=True))
+
+
+def test_plugins_register_build_and_unregister(tmp_path, monkeypatch):
+    import shutil, pathlib as pl
+    from text2print import plugins, pictures, lattice
+    src = pl.Path(__file__).resolve().parent.parent / "plugin_examples"
+    for f in src.glob("*.py"):
+        shutil.copy(f, tmp_path / f.name)
+    monkeypatch.setattr(plugins, "DIR", tmp_path)
+    keys = plugins.load_all()
+    assert {"x_diamond_weave", "x_fish_scales"} <= set(keys) and "lib:koi" in pictures.library()
+    w = build.make("coaster", "x_diamond_weave", {"width": 70, "height": 6, "dish": 0}, colours=["#8B3A2F", "#EDE3D1"], draft=True)
+    f = build.make("cup", "x_fish_scales", {"diameter": 60, "height": 40}, draft=True)
+    k = build.make("cup", "halftone", {"diameter": 60, "height": 40}, options={"picture": "lib:koi"},
+                   colours=["#F3D34A", "#2E4E7E"], draft=True)
+    for b in (w, f, k):
+        _ok(b)
+    assert build.compatible("tray", "x_diamond_weave") and build.compatible("bowl", "x_fish_scales")
+    (tmp_path / "fish_scales.py").unlink()
+    plugins.load_all()
+    assert "x_fish_scales" not in build.TEXTURES and "x_diamond_weave" in lattice.PATTERNS
+    monkeypatch.setattr(plugins, "DIR", tmp_path / "none"); plugins.load_all()
+    assert "x_diamond_weave" not in build.TEXTURES
+
+
+def test_plugin_check_reports_and_a_broken_plugin_never_breaks_the_catalogue(tmp_path, monkeypatch):
+    from text2print import plugins
+    monkeypatch.setattr(plugins, "DIR", tmp_path)
+    p = plugins.new("stitch", "soft ridges")
+    r = plugins.check(p, tmp_path / "prev")
+    item = r["items"][0]
+    assert item["watertight"] and item["verdict"] == "ok" and pathlib.Path(item["preview"]).exists()
+    (tmp_path / "broken.py").write_text("WOVEN = dict(name='x')\ndef pattern(:\n")
+    plugins.load_all()
+    assert "broken" in plugins.ERRORS
+    from studio import server
+    c = server.app.test_client().get("/api/catalogue").get_json()
+    assert "broken" in c["pictures"]["errors"] and any(t["key"] == "x_soft_ridges" for t in c["textures"])
+    monkeypatch.setattr(plugins, "DIR", tmp_path / "none"); plugins.load_all()
