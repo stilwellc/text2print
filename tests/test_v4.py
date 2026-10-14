@@ -393,3 +393,16 @@ def test_fur_unions_one_solid_per_layer():
     b = build.make("cup", "fur", {"diameter": 60, "height": 40})
     m = b.parts[0][1]
     assert m.is_watertight and len(m.split(only_watertight=False)) == 1 and b.stats["strands"] > 1000
+
+
+def test_fittings_get_infill_and_a_top_through_a_layer_range():
+    b = build.make("lantern", "domes", draft=True)
+    r = [o for a, z, o in b.ranges if a < 10 < z]
+    assert r and r[0]["sparse_infill_density"] == "20%" and r[0]["top_shell_layers"] == "4" and "layer_height" in r[0]
+
+
+def test_merge_range_splits_and_keeps_layer_height():
+    out = build._merge_range([(10.0, 30.0, {"layer_height": "0.28"})], 0.0, 20.0, {"top_shell_layers": "4"}, 0.2)
+    assert [(a, b) for a, b, _ in out] == [(0.0, 10.0), (10.0, 20.0), (20.0, 30.0)]
+    assert out[0][2] == {"top_shell_layers": "4", "layer_height": "0.20"}
+    assert out[1][2] == {"layer_height": "0.28", "top_shell_layers": "4"} and out[2][2] == {"layer_height": "0.28"}

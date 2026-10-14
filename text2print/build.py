@@ -186,6 +186,59 @@ class Build:
         return out
 
 
+def _merge_range(ranges, z0, z1, opts, base_lh):
+    """Add settings over [z0, z1] to Bambu layer ranges, splitting and merging existing ones (later wins);
+    every range keeps a layer_height (the CLI needs it)."""
+    cuts = sorted({z0, z1} | {a for a, _, _ in ranges or []} | {b for _, b, _ in ranges or []})
+    out = []
+    for a, b in zip(cuts, cuts[1:]):
+        if b - a < 1e-6:
+            continue
+        o = {}
+        for ra, rb, ro in ranges or []:
+            if ra - 1e-6 <= a and b <= rb + 1e-6:
+                o.update(ro)
+        if z0 - 1e-6 <= a and b <= z1 + 1e-6:
+            o.update(opts)
+        if not o:
+            continue
+        o.setdefault("layer_height", f"{base_lh:.2f}")
+        if out and out[-1][2] == o and abs(out[-1][1] - a) < 1e-6:
+            out[-1] = (out[-1][0], b, o)
+        else:
+            out.append((a, b, o))
+    return out
+
+
+def _geom_transitions(parts, over, ranges):
+    """Colour changes counted from the geometry, layer by layer, the way Bambu orders them: each layer starts
+    with the colour already loaded. Used where parts share layers in ways the family's own count can't see."""
+    lh = float(over.get("layer_height", "0.2")); h0 = float(over.get("initial_layer_print_height", lh))
+    top = max(float(m.bounds[1][2]) for _, m, _, _ in parts)
+    mids, z = [], 0.0; first = True
+    while z < top - 1e-6:
+        step = h0 if first else lh
+        for a, b, opt in ranges or []:
+            if a - 1e-6 <= z < b - 1e-6 and "layer_height" in opt:
+                step = float(opt["layer_height"])
+        mids.append(z + step / 2); z += step; first = False
+    mids = np.array(mids)
+    present = {}
+    for _, m, _, col in parts:
+        tz = m.vertices[m.faces][:, :, 2]; lo, hi = tz.min(1), tz.max(1)
+        a = np.searchsorted(mids, lo, side="left"); b = np.searchsorted(mids, hi, side="right")
+        d = np.zeros(len(mids) + 1, int); np.add.at(d, a, 1); np.add.at(d, b, -1)
+        on = np.cumsum(d)[:-1] > 0
+        present[col] = present.get(col, np.zeros(len(mids), bool)) | on
+    cols = list(present); seq = []
+    for k in range(len(mids)):
+        here = [c for c in cols if present[c][k]]
+        if seq and seq[-1] in here:
+            here.remove(seq[-1]); here.insert(0, seq[-1])
+        seq.extend(here)
+    return [(x, y) for x, y in zip(seq, seq[1:]) if x != y]
+
+
 def _cut_handles(parts, v, info, mix_preview=None):
     """Basket handle slots through both short walls: 14 mm straight, then a 45 deg pointed arch (no overhang)."""
     import manifold3d as m3d
@@ -463,6 +516,13 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     # ── fittings (after zones, so the fitting takes the bottom zone's colour): collars, pockets, plinths, foot rings, crush ribs ──
     if shape in ("pendant", "puck", "lantern", "cachepot", "candle") and T["family"] != "lattice":
         parts = fittings.apply(parts, shape, v, S.profile(v)[0], 1.0)
+        if len({c for _, _, _, c in parts}) > 1:          # the fitting shares layers with the wall: recount
+            transitions = _geom_transitions(parts, over, ranges); swaps = len(transitions)
+        fit_m = next((m for n_, m, _, _ in parts if n_ == "fitting"), None)
+        if fit_m is not None and T["family"] != "spiral":  # wall families print 0 % infill, no top layers: a plinth
+            lh_ = float(over.get("layer_height", nz.layer_h))   # or collar would come out a hollow shell
+            ranges = _merge_range(ranges, 0.0, float(fit_m.bounds[1][2]) + lh_,
+                                  {"sparse_infill_density": "20%", "top_shell_layers": "4"}, lh_)
     if shape in fittings.NOTES:
         warnings.append(fittings.NOTES[shape])
     zmin = min(float(m.bounds[0][2]) for _, m, _, _ in parts)
@@ -479,10 +539,16 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         m0 = parts[0][1]; skin = m0.area * 2 * nz.line_w / 1000.0
         vol = min(vol, skin + 0.15 * max(vol - skin, 0.0))
     if T["family"] == "spiral":                               # vase mode lays one wall on a solid body + a floor
-        m0 = parts[0][1]
-        sec = m0.section(plane_origin=[0, 0, 0.1], plane_normal=[0, 0, 1])
-        base = float(sec.to_planar()[0].area) if sec is not None else 0.0
-        vol = min(vol, ((m0.area - 2 * base) * nz.line_w * 1.05 + base * 1.2) / 1000.0)
+        m0 = parts[0][1]; ztop = float(m0.bounds[1][2])
+        def cap(z):
+            sec = m0.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1])
+            return float(sec.to_planar()[0].area) if sec is not None else 0.0
+        base, top_cap = cap(0.1), cap(ztop - 0.1)              # a bowl's top cap is far wider than its base
+        vol = min(vol, ((m0.area - base - top_cap) * nz.line_w * 1.05 + base * 1.2) / 1000.0)
+    for n_, m_, _, _ in parts:                                # fittings print as shells + 20 % infill, not solid
+        if n_ == "fitting" and T["family"] != "spiral":
+            skin = m_.area * 3 * nz.line_w / 1000.0; fv = m_.volume / 1000.0
+            vol -= fv - min(fv, skin + 0.2 * max(fv - skin, 0.0))
     # purge: each change flushes the colour pair's volume (x the multiplier) + a sliver of prime tower
     purge_g = sum(bambu.flush_volume(a, b) for a, b in transitions) * flush_mult * 1.26 / 1000 + 0.12 * len(transitions)
     stats = dict(size=[round(float(hi[0] - lo[0]), 1), round(float(hi[1] - lo[1]), 1), round(float(hi[2]), 1)],
