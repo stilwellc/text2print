@@ -88,6 +88,17 @@ command line (`--image photo.png`). It prints at the nozzle's maximum layer heig
 "2 layers per colour" keeps the change count sane. Works on cup, vase, bowl and goblet; the rib depth shrinks
 where a wall flares so a rib never overhangs more than 60 % of its line.
 
+**Mix.** Stack textures in bands up one wall: plain, zigzag, knit, wave, halftone, fringe, swag, curls and
+unraveled, each band with its own height and AMS colour. Presets: *Coil band* (plain, curls, plain), *Fringe
+skirt* (wave foot, dense fringe, plain neck), *Flame foot* (halftone flames under zigzag) and *Knit & wave*.
+The whole mix prints at the nozzle's standard layer height with one shared wall; the AMS changes where two
+colours meet (and every layer inside a halftone band). If any band droops, the whole print runs at the droop
+fan. Woven rods can't join a mix — they are the whole object, not a wall. Mixes work on cup, vase, bowl and goblet.
+
+```bash
+# mixes are easiest in the studio; every mix is a shareable link (/?shape=vase&texture=mix&mix=[...])
+```
+
 ## Shapes
 
 | Shape | Textures | Sizes |
@@ -135,7 +146,7 @@ These are print-verified, and the tests enforce the geometric ones.
 ## Repo
 
 ```
-text2print/   shapes.py · lattice.py (woven rods) · droop.py (strands) · halftone.py · fabric.py + fabric_wall.py + fabric_presets.py (fabric)
+text2print/   shapes.py · lattice.py (woven rods) · droop.py (strands) · halftone.py · compose.py (mix) · fabric.py + fabric_wall.py + fabric_presets.py (fabric)
               floors.py · build.py (pick -> project) · printer.py + data/ (P2S) · bambu.py (3MF + CLI slice)
 studio/       server.py + static/ (the picker)
 tests/        python -m pytest

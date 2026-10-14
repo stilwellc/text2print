@@ -45,7 +45,14 @@ def _catalogue():
                     layer=printer.nozzle(n).layer_h, verified=printer.nozzle(n).verified) for n in printer.NOZZLES]
     options = {fam: [dict(key=k, label=lab, kind=kind, choices=[list(c) for c in (ch or [])], default=d)
                      for k, lab, kind, ch, d in opts] for fam, opts in build.OPTIONS.items()}
-    return dict(printer=dict(name=printer.PRINTER, bed=printer.BED), nozzles=nozzles, shapes=shapes, options=options,
+    from text2print import compose
+    mix = dict(textures=[dict(key=k, name=compose.NAMES[k], family=("plain" if k == "plain" else build.TEXTURES[k]["family"]))
+                         for k in compose.MIXABLE],
+               presets=[dict(key=k, name=v["name"], bands=v["bands"]) for k, v in compose.PRESETS.items()],
+               default=compose.DEFAULT_PRESET,
+               droop_options=[list(c) for c in build.OPTIONS["droop"][0][3]],
+               pictures=[[k, v["name"]] for k, v in __import__("text2print.halftone", fromlist=["x"]).PICTURES.items()])
+    return dict(printer=dict(name=printer.PRINTER, bed=printer.BED), nozzles=nozzles, shapes=shapes, options=options, mix=mix,
                 textures=textures, palette=build.PALETTE, colours=build.DEFAULT_COLOURS,
                 defaults=dict(shape="tray", texture="twill", nozzle=printer.DEFAULT_NOZZLE),
                 slicer=bambu.slicer_available(), mac=platform.system() == "Darwin")
