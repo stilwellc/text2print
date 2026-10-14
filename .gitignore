@@ -8,6 +8,7 @@ __pycache__/
 *.3mf
 *.png
 !docs/*.png
+!studio/static/thumbs/*.png
 
 # Local example models — not part of the skill
 examples/
