@@ -22,11 +22,8 @@ def _m3d(mesh):
 
 
 def _tm(man):
-    out = man.to_mesh()
-    m = trimesh.Trimesh(np.asarray(out.vert_properties)[:, :3], np.asarray(out.tri_verts), process=True)
-    if len(m.faces) and m.volume < 0:
-        m.invert()
-    return m
+    from .meshops import manifold_to_trimesh
+    return manifold_to_trimesh(man, min_volume=0.01)
 
 
 def zone_edges(height, n, grid, style="bands", stripe=None):
@@ -72,23 +69,25 @@ def split_by_height(mesh, edges, draft=False):
 
 
 # ── lids ──────────────────────────────────────────────────────────────────────
-LID_SHAPES = {"cup", "vase", "bowl", "dish", "tray", "custom"}
+LID_SHAPES = {"cup", "vase", "bowl", "dish", "tray", "custom", "cachepot", "sleeve", "lantern", "amphora"}
+FITS = {"snug": 0.15, "slip": 0.25, "loose": 0.40}          # per side, PLA (research §4.1)
+THREAD = dict(pitch=3.0, starts=2, depth=1.2, clear=0.2, height=9.0, ring=3.0)   # 45 deg flanks, 0.4 diametral
+MAGNET = dict(d=6.0, h=2.0, clear_d=0.15, clear_h=0.2, n=3, land=6.5)            # 6x2 N52, press fit
 
 
 def opening(build_, shape, v):
-    """(outer radius of the rim, plug radius) for the piece's top opening, or None."""
+    """(outer rim radius, inner opening radius) at the top of the piece, or None."""
     if build_.shape in ("dish", "tray"):
         d = v.get("dish", 0)
         if d <= 8:
             return None
         top = build_.stats["size"][2]
         rim = min(build_.stats["size"][0], build_.stats["size"][1]) / 2
-        # the dish is spherical: the plug must fit the dish where the plug ends, LIP_H down
         depth = top - v.get("floor", 4)
         Rs = ((d / 2) ** 2 + depth ** 2) / (2 * depth)
-        h = depth - LIP_H
+        h = depth - LIP_H                                  # the spherical dish narrows: fit where the plug ends
         r_at = math.sqrt(max(Rs ** 2 - (Rs - h) ** 2, 1.0)) if h > 0 else 4.0
-        return rim, r_at - CLEAR
+        return rim, r_at
     mesh = trimesh.util.concatenate([m for _, m, _, _ in build_.parts])
     top = mesh.bounds[1][2]
     best = None
@@ -103,35 +102,127 @@ def opening(build_, shape, v):
         r_in = min(math.hypot(x, y) for h in holes for x, y in h.coords)
         best = r_in if best is None else min(best, r_in)
     outer = float(np.hypot(mesh.vertices[:, 0], mesh.vertices[:, 1])[mesh.vertices[:, 2] > top - 1.0].max())
-    return outer, best - CLEAR
+    return outer, best
 
 
-def lid(rim_r, plug_r, square=None, corner=0.0):
-    """Lid in print orientation (top face on the bed): plate, plug ring rising above it, knob hole in the middle.
-    Returns (lid mesh, knob mesh)."""
+def _helix_ridge(r_base, depth, pitch, starts, z0, height, outward, n_per_turn=96, embed=0.3):
+    """Triangular (45 deg flank) helical ridges on a cylinder of radius r_base, pointing out (+1) or in (-1)."""
     import manifold3d as m3d
-    n = max(96, int(2 * math.pi * rim_r / 1.2))
-    if square:                                                     # rounded square plate matching a tray
-        half = square / 2; r = min(corner, half - 1)
-        plate = m3d.Manifold.cube([2 * (half - r), 2 * (half - r), LID_T], True).translate([0, 0, LID_T / 2])
-        if r > 0:
-            plate = m3d.Manifold.cylinder(LID_T, r, r, n // 4).translate([0, 0, 0])
-            corners = [m3d.Manifold.cylinder(LID_T, r, r, max(24, n // 8)).translate([sx * (half - r), sy * (half - r), 0])
-                       for sx in (-1, 1) for sy in (-1, 1)]
-            bars = [m3d.Manifold.cube([2 * half, 2 * (half - r), LID_T], True).translate([0, 0, LID_T / 2]),
-                    m3d.Manifold.cube([2 * (half - r), 2 * half, LID_T], True).translate([0, 0, LID_T / 2])]
-            plate = m3d.Manifold.batch_boolean(corners + bars, m3d.OpType.Add)
-    else:
-        plate = m3d.Manifold.cylinder(LID_T, rim_r + 0.6, rim_r + 0.6, n)
-    ring = (m3d.Manifold.cylinder(LIP_H, plug_r, plug_r, n) - m3d.Manifold.cylinder(LIP_H + 1, plug_r - LIP_W, plug_r - LIP_W, n).translate([0, 0, -0.5]))
-    ring = ring.translate([0, 0, LID_T - 0.01])
-    body = plate + ring
-    # chamfer-free: the knob hole goes through the plate (the top face is the bed face, so it prints clean)
-    hole = m3d.Manifold.cylinder(LID_T + 2, KNOB_HOLE / 2, KNOB_HOLE / 2, 48).translate([0, 0, -1])
-    lid_m = _tm(body - hole)
-    # knob: a mushroom printed flat-side down, with a peg on top that presses into the lid from below
+    lead = pitch * starts; turns = height / lead + 0.25
+    n = max(8, int(n_per_turn * turns)); w = depth                     # half-base = depth -> 45 deg flanks
+    ridges = []
+    for st in range(starts):
+        V, F = [], []
+        for i in range(n + 1):
+            t = i / n; ang = 2 * math.pi * turns * t + 2 * math.pi * st / starts
+            zc = z0 + w + (height - 2 * w) * t
+            ca, sa = math.cos(ang), math.sin(ang)
+            rb = r_base - outward * embed; rt = r_base + outward * depth
+            for rr, zz in ((rb, zc - w - embed), (rt, zc), (rb, zc + w + embed)):
+                V.append([rr * ca, rr * sa, zz])
+        for i in range(n):
+            a, b = 3 * i, 3 * (i + 1)
+            for k in range(3):
+                k2 = (k + 1) % 3
+                F += [[a + k, b + k, b + k2], [a + k, b + k2, a + k2]]
+        F += [[0, 2, 1], [3 * n, 3 * n + 1, 3 * n + 2]]
+        mesh = trimesh.Trimesh(np.array(V), np.array(F), process=True)
+        trimesh.repair.fix_winding(mesh); trimesh.repair.fix_normals(mesh)
+        if mesh.volume < 0:
+            mesh.invert()
+        ridges.append(_m3d(mesh))
+    return m3d.Manifold.batch_boolean(ridges, m3d.OpType.Add)
+
+
+def _plate(rim_r, t, square=None, corner=0.0, n=128):
+    import manifold3d as m3d
+    if square:
+        half = square / 2; r = max(0.5, min(corner, half - 1))
+        corners = [m3d.Manifold.cylinder(t, r, r, 48).translate([sx * (half - r), sy * (half - r), 0])
+                   for sx in (-1, 1) for sy in (-1, 1)]
+        bars = [m3d.Manifold.cube([2 * half, 2 * (half - r), t], True).translate([0, 0, t / 2]),
+                m3d.Manifold.cube([2 * (half - r), 2 * half, t], True).translate([0, 0, t / 2])]
+        return m3d.Manifold.batch_boolean(corners + bars, m3d.OpType.Add)
+    return m3d.Manifold.cylinder(t, rim_r + 0.6, rim_r + 0.6, n)
+
+
+def _knob(rim_r):
+    import manifold3d as m3d
     cap_r = max(9.0, min(16.0, rim_r * 0.18))
     cap = m3d.Manifold.cylinder(5.0, cap_r, cap_r * 0.72, 64)
     peg = m3d.Manifold.cylinder(LID_T + 0.6, (KNOB_HOLE - 0.15) / 2, (KNOB_HOLE - 0.15) / 2, 48).translate([0, 0, 4.99])
-    knob = _tm(cap + peg)
-    return lid_m, knob
+    return _tm(cap + peg)
+
+
+def lid_set(style, rim_r, open_r, top_z, fit="slip", square=None, corner=0.0):
+    """-> dict(lid, knob, rim: [solids added to the piece], plug_d, clearance, notes). Lids print top-face down."""
+    import manifold3d as m3d
+    clear = FITS.get(fit, 0.25); n = max(96, int(2 * math.pi * rim_r / 1.2)); notes = []
+    hole = m3d.Manifold.cylinder(30, KNOB_HOLE / 2, KNOB_HOLE / 2, 48).translate([0, 0, -1])
+    rim_parts = []
+    if style == "thread" and open_r > 18 and not square:
+        T = THREAD; r_ring = open_r - T["ring"]
+        z0 = top_z - T["height"] - 1.0
+        ring_prof = np.array([(open_r + 0.6, z0 - T["ring"]), (open_r + 0.6, top_z), (r_ring, top_z),
+                              (r_ring, z0), (open_r + 0.6, z0 - T["ring"])])        # 45 deg underside, no overhang
+        ring = _m3d(trimesh.creation.revolve(ring_prof, sections=n))
+        ring = ring + _helix_ridge(r_ring, T["depth"], T["pitch"], T["starts"], z0 + 0.5, T["height"] - 0.5, -1)
+        rim_parts.append(_tm(ring))
+        r_p = r_ring - T["depth"] - T["clear"] - 0.0                   # plug core clears the ring's ridges
+        plug = (m3d.Manifold.cylinder(T["height"], r_p, r_p, n) - m3d.Manifold.cylinder(T["height"] + 1, r_p - LIP_W, r_p - LIP_W, n).translate([0, 0, -0.5]))
+        plug = plug + _helix_ridge(r_p, T["depth"], T["pitch"], T["starts"], 0.6, T["height"] - 0.6, +1)
+        # the plug's ridges sit half a pitch from the ring's: rotate by 180/starts so they interleave
+        plug = plug.rotate([0, 0, 180.0 / T["starts"]]).translate([0, 0, LID_T - 0.01])
+        body = _plate(rim_r, LID_T, square, corner, n) + plug
+        notes.append(f"Two-start thread, {T['pitch']} mm pitch: half a turn closes it.")
+        plug_d = 2 * r_p
+    elif style == "magnets" and open_r > 14:
+        M = MAGNET; land_in = open_r - M["land"]; t_plate = 3.6
+        z0 = top_z - 5.0
+        land_prof = np.array([(open_r + 0.6, z0 - M["land"]), (open_r + 0.6, top_z), (land_in, top_z),
+                              (land_in, z0), (open_r + 0.6, z0 - M["land"])])
+        land = _m3d(trimesh.creation.revolve(land_prof, sections=n))
+        rp = open_r - M["land"] / 2; pd = M["d"] + M["clear_d"]; ph = M["h"] + M["clear_h"]
+        pockets = [m3d.Manifold.cylinder(ph + 1, pd / 2, pd / 2, 32).translate([rp, 0, top_z - ph]).rotate([0, 0, 360 * k / M["n"]])
+                   for k in range(M["n"])]
+        rim_parts.append(_tm(land - m3d.Manifold.batch_boolean(pockets, m3d.OpType.Add)))
+        r_plug = land_in - clear
+        plug = (m3d.Manifold.cylinder(3.0, r_plug, r_plug, n) - m3d.Manifold.cylinder(4, r_plug - LIP_W, r_plug - LIP_W, n).translate([0, 0, -0.5])).translate([0, 0, t_plate - 0.01])
+        lid_pockets = [m3d.Manifold.cylinder(ph + 1, pd / 2, pd / 2, 32).translate([rp, 0, t_plate - ph]).rotate([0, 0, 360 * k / M["n"]])
+                       for k in range(M["n"])]
+        body = _plate(rim_r, t_plate, square, corner, n) + plug - m3d.Manifold.batch_boolean(lid_pockets, m3d.OpType.Add)
+        notes.append(f"Press {2 * M['n']} 6 × 2 mm magnets into the pockets (mind the poles: lid and rim must attract).")
+        plug_d = 2 * r_plug
+    else:
+        r_p = open_r - clear
+        ring = (m3d.Manifold.cylinder(LIP_H, r_p, r_p, n) - m3d.Manifold.cylinder(LIP_H + 1, r_p - LIP_W, r_p - LIP_W, n).translate([0, 0, -0.5]))
+        lead = m3d.Manifold.cylinder(0.8, r_p + 0.01, r_p - 0.7, n).translate([0, 0, LIP_H - 0.8])   # lead-in chamfer
+        ring = (ring - (m3d.Manifold.cylinder(0.8, r_p + 1, r_p + 1, n).translate([0, 0, LIP_H - 0.8]) - lead)).translate([0, 0, LID_T - 0.01])
+        body = _plate(rim_r, LID_T, square, corner, n) + ring
+        plug_d = 2 * r_p
+    lid_m = _tm(body - hole)
+    return dict(lid=lid_m, knob=_knob(rim_r), rim=rim_parts, plug_d=round(plug_d, 1), clearance=clear, notes=notes)
+
+
+def lid(rim_r, plug_r, square=None, corner=0.0):
+    """Back-compat: a slip lid whose plug is plug_r (clearance already taken off)."""
+    d = lid_set("slip", rim_r, plug_r + FITS["slip"], 0.0, "slip", square, corner)
+    return d["lid"], d["knob"]
+
+
+def fit_test(nozzle=0.4):
+    """Rim rings and lids at 0.15 / 0.20 / 0.25 / 0.30 / 0.40 mm a side; notches on each lid count the step."""
+    import manifold3d as m3d
+    out = []
+    for i, c in enumerate((0.15, 0.20, 0.25, 0.30, 0.40), 1):
+        ro, ri = 25.0, 23.0
+        rim = m3d.Manifold.cylinder(10, ro, ro, 128) - m3d.Manifold.cylinder(12, ri, ri, 128).translate([0, 0, -1])
+        d = lid_set("slip", ro, ri, 10.0, "slip")
+        r_p = ri - c
+        ring = (m3d.Manifold.cylinder(LIP_H, r_p, r_p, 128) - m3d.Manifold.cylinder(LIP_H + 1, r_p - LIP_W, r_p - LIP_W, 128).translate([0, 0, -0.5])).translate([0, 0, LID_T - 0.01])
+        lid_m = m3d.Manifold.cylinder(LID_T, ro + 0.6, ro + 0.6, 128) + ring
+        for k in range(i):                                            # i notches on the rim edge = step i
+            lid_m = lid_m - m3d.Manifold.cube([3, 3, LID_T + 2], True).translate([ro + 0.6, 0, LID_T / 2]).rotate([0, 0, 12 * k])
+        out.append((f"fit {c:.2f} rim", _tm(rim)))
+        out.append((f"fit {c:.2f} lid", _tm(lid_m)))
+    return out

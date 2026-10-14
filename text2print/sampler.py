@@ -28,6 +28,7 @@ PLATES = {
     "droop": dict(name="Droop", coupons=[
         ("cup", s, {"diameter": 44, "height": 50, "wall": 6, "floor": 3}, {"length": "short"})
         for s in ("fringe", "swag", "curls", "unraveled")]),
+    "fit": dict(name="Lid fit", coupons=[]),       # rims + lids at 5 clearances (extras.fit_test)
     "fabric": dict(name="Fabric & relief", coupons=[
         ("cup", s, {"diameter": 50, "height": 40}, {}) for s in ("zigzag", "domes", "wave", "garland", "drips", "melt")]),
 }
@@ -50,7 +51,19 @@ def _layout(halves, bed=printer.BED, tower=printer.TOWER, gap=8.0):
     return pos
 
 
+def _fit_plate(nozzle):
+    from . import extras
+    pieces = extras.fit_test(nozzle)
+    pos = _layout([float(np.abs(m.bounds[:, :2]).max()) for _, m in pieces])
+    objects = [{"name": n, "position": p, "parts": [(n, m, 1)], "settings": {"wall_loops": "3", "sparse_infill_density": "20%",
+                "top_shell_layers": "4", "bottom_shell_layers": "4"}} for (n, m), p in zip(pieces, pos)]
+    over = printer.overrides(nozzle, "fabric", slots=1, floor_layers=4)
+    return dict(name="Lid fit", objects=objects, colours=[COLOURS[0]], overrides=over, per_filament=None, builds=[])
+
+
 def plate(key, nozzle=0.4, colours=None):
+    if key == "fit":
+        return _fit_plate(nozzle)
     spec = PLATES[key]; colours = colours or COLOURS
     builds = [build.make(s, t, p, nozzle=nozzle, colours=colours, options=o) for s, t, p, o in spec["coupons"]]
     halves = [max(np.abs(m.bounds[:, :2]).max() for _, m, _, _ in b.parts) for b in builds]
@@ -85,7 +98,7 @@ def write_all(out, nozzle=0.4, slice_=False):
     for key in PLATES:
         path = out / f"test-plate-{key}-{nozzle:g}mm.3mf"
         p = write(key, path, nozzle)
-        report[key] = dict(project=str(path), coupons=[b.texture for b in p["builds"]])
+        report[key] = dict(project=str(path), coupons=[b.texture for b in p["builds"]] or [o["name"] for o in p["objects"]])
         if slice_:
             report[key]["slice"] = bambu.slice_project(path, out / f".slice-{key}")
     return report
