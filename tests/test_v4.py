@@ -1,4 +1,5 @@
 """Research top-12 features: fittings, halftone economy, vase mode, shell textures, fur, lid styles, footprints, flat."""
+import json
 import math
 import zipfile
 
@@ -502,3 +503,47 @@ def test_real_slicer_counts_a_three_colour_lid(tmp_path):
     assert "error" not in r, r
     g = zipfile.ZipFile(tmp_path / "s" / "sliced.3mf").read("Metadata/plate_1.gcode").decode(errors="ignore")
     assert len(re.findall(r"^M620 S\dA", g, re.M)) == b.stats["swaps"]
+
+
+# ── cheaper multi-colour: courses per colour, no tower, lid on its own plate ─────────────────────────────
+@pytest.mark.parametrize("g", [2, 3, 4])
+def test_courses_per_colour_divides_the_changes(g):
+    one = build.make("cup", "twill", {"diameter": 70, "height": 50}, colours=["#8B3A2F", "#EDE3D1"], draft=True)
+    grp = build.make("cup", "twill", {"diameter": 70, "height": 50}, options={"course_group": str(g)},
+                     colours=["#8B3A2F", "#EDE3D1"], draft=True)
+    assert grp.stats["swaps"] <= one.stats["swaps"] / g + 1 and len(grp.parts) == 2
+
+
+def test_tower_off_writes_no_tower_and_drops_its_purge(tmp_path):
+    on = build.make("cup", "twill", {"diameter": 70, "height": 50}, colours=["#8B3A2F", "#EDE3D1"], draft=True)
+    off = build.make("cup", "twill", {"diameter": 70, "height": 50}, options={"tower": "off"},
+                     colours=["#8B3A2F", "#EDE3D1"], draft=True)
+    cfg = json.loads(zipfile.ZipFile(off.write_3mf(tmp_path / "o.3mf")).read("Metadata/project_settings.config"))
+    assert cfg["enable_prime_tower"] == "0" and off.stats["grams_purge"] < on.stats["grams_purge"]
+
+
+def test_auto_puts_a_costly_lid_on_its_own_plate(tmp_path):
+    o = {"lid": "slip", "lid_texture": "twill", "lid_colours": ["#2E4E7E", "#EDE3D1"]}
+    auto = build.make("cup", "zigzag", {"diameter": 70, "height": 50}, options=o, colours=["#8B3A2F"], draft=True)
+    same = build.make("cup", "zigzag", {"diameter": 70, "height": 50}, options=dict(o, lid_plate="same"),
+                      colours=["#8B3A2F"], draft=True)
+    assert auto.stats["lid"]["plate"] == "own" and auto.stats["swaps"] < same.stats["swaps"]
+    auto.write_3mf(tmp_path / "a.3mf")
+    assert (tmp_path / "a-lid.3mf").exists()
+    plain = build.make("cup", "zigzag", {"diameter": 70, "height": 50}, options={"lid": "slip"}, draft=True)
+    assert plain.stats["lid"]["plate"] == "same"                     # a matching lid shares the plate for free
+
+
+@pytest.mark.slicer
+@pytest.mark.parametrize("opts", [{"course_group": "3"}, {"tower": "off"}])
+def test_real_slicer_on_cheaper_colour_options(tmp_path, opts):
+    if not bambu.slicer_available():
+        pytest.skip("Bambu Studio not installed")
+    import re
+    b = build.make("cup", "twill", {"diameter": 60, "height": 40}, options=opts, colours=["#8B3A2F", "#EDE3D1"])
+    r = bambu.slice_project(b.write_3mf(tmp_path / "c.3mf"), tmp_path / "s")
+    assert "error" not in r, r
+    g = zipfile.ZipFile(tmp_path / "s" / "sliced.3mf").read("Metadata/plate_1.gcode").decode(errors="ignore")
+    assert len(re.findall(r"^M620 S\dA", g, re.M)) == b.stats["swaps"]
+    if opts.get("tower") == "off":
+        assert "; FEATURE: Prime tower" not in g

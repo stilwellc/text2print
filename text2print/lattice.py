@@ -381,7 +381,31 @@ PATTERNS = {
 }
 
 
-def weave(region, nz, pattern):
+GROUPABLE = {"grid", "twill", "kagome", "polar", "ripple", "selvedge", "beat"}   # colour follows the course
+
+
+def weave(region, nz, pattern, group=1):
+    """group > 1: colour changes every `group` courses instead of every course (bands, not colour by
+    direction) — a half, a third or a quarter of the AMS changes."""
     rods = Rods(nz)
     PATTERNS[pattern]["fn"](region, nz, rods)
+    if group > 1 and pattern in GROUPABLE:
+        regroup(rods, group, PATTERNS[pattern]["slots"])
     return rods
+
+
+def regroup(rods, group, n_slots):
+    """Reassign every rod's colour by its course: slot = (course // group) % n_slots."""
+    h = rods.nz.rod_h
+    course = lambda z: int(round((z - h / 2) / h))
+    lines, paths, layers = {}, {}, {}
+    for _, ls in rods.lines.items():
+        for a, b in ls:
+            s = (course(a[2]) // group) % n_slots
+            lines.setdefault(s, []).append((a, b)); layers.setdefault(s, []).append((a[2] - h / 2, a[2] + h / 2))
+    for _, ps in rods.paths.items():
+        for pts in ps:
+            s = (course(float(np.mean(pts[:, 2]))) // group) % n_slots
+            paths.setdefault(s, []).append(pts)
+            layers.setdefault(s, []).append((pts[:, 2].min() - h / 2, pts[:, 2].max() + h / 2))
+    rods.lines, rods.paths, rods.layers = lines, paths, layers

@@ -17,7 +17,7 @@ const MAX_SLOTS = 4;
 const FAMILY_NAMES = { lattice: "Woven", fabric: "Fabric", droop: "Droop", halftone: "Halftone", spiral: "Vase mode",
   shell: "Shell", flat: "Flat", mix: "Mix" };
 // options that only apply to some textures
-const ONLY = { folds: ["pleats", "flutes", "twist", "lowpoly", "ribs"], turn: ["twist", "lowpoly"], cell: ["voronoi"],
+const ONLY = { course_group: ["grid", "twill", "kagome", "polar", "ripple", "selvedge", "beat"], folds: ["pleats", "flutes", "twist", "lowpoly", "ribs"], turn: ["twist", "lowpoly"], cell: ["voronoi"],
   noise: ["fuzzy"], fuzzy_bands: ["fuzzy"], picture: ["litho", "halftone", "flatlitho", "cmyk"], length: ["fringe", "swag", "curls", "unraveled", "fur"] };
 const IMAGE_TEXTURES = ["halftone", "litho", "flatlitho", "cmyk"];
 // mix bands with two colour slots: halftone (picture/background) and woven (one colour per rod direction)
@@ -55,7 +55,7 @@ function readUrl() {
   if (q.get("texture") && textureOf(q.get("texture"))) state.texture = q.get("texture");
   if (q.get("nozzle")) state.nozzle = parseFloat(q.get("nozzle"));
   if (q.get("c")) state.colours = q.get("c").split(",").map((h) => "#" + h.replace("#", ""));
-  const optKeys = Object.values(CAT.options).flat().map((o) => o.key).concat(["picture", "image"]).concat(["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2"]);
+  const optKeys = Object.values(CAT.options).flat().map((o) => o.key).concat(["picture", "image"]).concat(["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "tower"]);
   const toggleKeys = Object.values(CAT.options).flat().filter((o) => o.kind === "toggle").map((o) => o.key);
   for (const [k, v] of q) {
     if (k === "mix") { try { state.bands = JSON.parse(v); } catch (e) { /* a bad link keeps the default */ } }
@@ -74,7 +74,7 @@ function linkFor() {
   }
   if (state.options.image && textureOf(state.texture).family === "halftone") q.set("image", state.options.image);
   if (state.options.lid && state.options.lid !== "none" && shapeOf(state.shape).lid) {
-    for (const k of ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2"]) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k]);
+    for (const k of ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "tower"]) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k]);
   }
   if (state.options.image && IMAGE_TEXTURES.includes(state.texture)) q.set("image", state.options.image);
   return "?" + q.toString();
@@ -205,6 +205,14 @@ function renderColours() {
     class: "swatch-btn", onclick: (e) => openPalette(i, e.currentTarget),
   }, el("span", { class: "chip", style: `background:${state.colours[i]}` }), el("span", { class: "name" }, nameOfColour(state.colours[i])),
      el("span", { class: "slot" }, `AMS ${i + 1}${i >= n && lidUse.includes(i) ? " · lid" : ""}`))));
+  const tw = $("towerToggle");
+  tw.hidden = all < 2;
+  if (!tw.hidden) {
+    const cb = el("input", { type: "checkbox" }); cb.checked = state.options.tower !== "off";
+    cb.addEventListener("change", () => { if (cb.checked) delete state.options.tower; else state.options.tower = "off"; changed(); });
+    tw.replaceChildren(el("label", { class: "toggle" }, cb, el("span", {}, "Prime tower")),
+      el("p", { class: "hint" }, "Off saves the tower's filament and time; the purge still goes out the chute."));
+  }
   $("colourHint").textContent = isMix() ? (n === 1 ? "One colour — no AMS changes. Give a band another colour in Bands."
       : "Each band picks its AMS slot. Changes happen where bands meet, every layer inside a halftone band, and every course inside a woven band.")
     : zonesOn() && n > 1 && tex.family === "droop" && (state.options.zone_style ?? "courses") === "courses"
@@ -215,7 +223,9 @@ function renderColours() {
     : state.texture === "cmyk" ? "Load cyan, magenta, yellow and white in slots 1–4. The AMS changes only where an ink starts or stops."
     : tex.family === "halftone" ? "Colour 1 paints the picture, colour 2 the background. The AMS changes every layer — pick strong contrast."
     : tex.swaps === "layer" ? "Colours mix inside every course, so the AMS changes about once per layer. Pick the same colour twice for a one-colour print."
-    : "Colour follows rod direction: one AMS change per course. Pick the same colour twice for a one-colour print.";
+    : parseInt(state.options.course_group || "1", 10) > 1
+      ? `Colour changes every ${state.options.course_group} courses: woven bands instead of colour by direction, with 1/${state.options.course_group} of the AMS changes.`
+    : "Colour follows rod direction: one AMS change per course. More courses per colour (Finish) cuts the changes. Pick the same colour twice for a one-colour print.";
 }
 function openPalette(slot, anchor) {
   const pop = $("palette"), r = anchor.getBoundingClientRect();
@@ -265,6 +275,7 @@ function renderFinish() {
   const after = () => { renderFinish(); renderColours(); changed(); };
   const shown = familyOptions().filter((o) => {
     if (ONLY[o.key] && !ONLY[o.key].includes(state.texture)) return false;
+    if (o.key === "course_group") return state.options.colour_by !== "height" && slotCount() > 1;
     if (o.key === "zones") return zonesOn();
     if (o.key === "zone_style") return zonesOn() && parseInt(state.options.zones || "1", 10) > 1;
     if (o.key === "course_rows") return zonesOn() && parseInt(state.options.zones || "1", 10) > 1
@@ -329,7 +340,7 @@ $("addBand").addEventListener("click", () => {
 function renderAll() { renderShapes(); renderTextures(); renderBands(); renderSizes(); renderColours(); renderFinish(); renderLid(); }
 
 function buildOptions() {
-  const lidKeys = ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob"];
+  const lidKeys = ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_plate", "tower"];
   const o = isMix() ? { bands: state.bands, purge: state.options.purge } : { ...state.options };
   for (const k of lidKeys) if (state.options[k] !== undefined) o[k] = state.options[k];
   const ls = lidSlots();
@@ -389,6 +400,9 @@ function renderLid() {
       kids.push(el("div", { class: "field-label" }, "Colours"), el("div", { class: "chips" }, chip("lid_slot", "0"), lidTwoSlot() ? chip("lid_slot2", "1") : null));
     }
     kids.push(...optionControl({ key: "lid_knob", label: "Knob", kind: "seg", choices: CAT.lid.knobs, default: "knob" }, after));
+    kids.push(...optionControl({ key: "lid_plate", label: "Print the lid", kind: "seg",
+      choices: [["auto", "Auto"], ["same", "With the piece"], ["own", "On its own"]], default: "auto" }, after));
+    kids.push(el("p", { class: "hint" }, "Auto prints the lid on its own plate when sharing would add colour changes."));
   }
   $("lid").replaceChildren(...kids);
 }
@@ -439,7 +453,8 @@ function renderPrint(d) {
   if (s.bands) rows.push(["Bands × layers", `${s.bands} × ${fmt(s.layers)}`]);
   if (s.ribs) rows.push(["Ribs × layers", `${fmt(s.ribs)} × ${fmt(s.layers)}`]);
   if (s.strands) rows.push(["Strands", `${fmt(s.strands)} · up to ${fmt(s.reach)} mm out`]);
-  if (s.lid) rows.push(["Lid", `${s.lid.cap ? s.lid.cap + " · " : ""}${{ slip: "slip-on", thread: "screw", magnets: "magnets" }[s.lid.style] || "lid"} · ${s.lid.clearance} mm fit`]);
+  if (s.lid) rows.push(["Lid", `${s.lid.cap ? s.lid.cap + " · " : ""}${{ slip: "slip-on", thread: "screw", magnets: "magnets" }[s.lid.style] || "lid"} · ${s.lid.clearance} mm fit`
+    + (s.lid.plate === "own" ? ` · own plate${s.lid.swaps ? `, ${fmt(s.lid.swaps)} changes` : ""}` : "")]);
   rows.push(["Colours", String(s.colours)]);
   if (s.swaps) rows.push(["AMS changes", `${fmt(s.swaps)} · ≈ ${fmt(s.swap_minutes)} min`]);
   rows.push(["Filament", s.grams_purge ? `≈ ${fmt(s.grams_part)} g + ${fmt(s.grams_purge)} g purge` : `≈ ${fmt(s.grams_est)} g`]);
