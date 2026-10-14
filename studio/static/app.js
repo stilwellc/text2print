@@ -101,7 +101,10 @@ function renderNozzles() {
     state.nozzle, (v) => { state.nozzle = v; renderNozzles(); renderTextures(); changed(); });
 }
 function renderShapes() {
-  $("shapes").replaceChildren(...CAT.shapes.map((s) => card(s, s.key === state.shape, () => pickShape(s.key))));
+  // each card shows the shape in the picked family when we have that render (a knit basket under Fabric)
+  const fam = state.family || textureOf(state.texture)?.family;
+  $("shapes").replaceChildren(...CAT.shapes.map((s) => card({ ...s, thumb: s.thumbs?.[fam] || s.thumb },
+    s.key === state.shape, () => pickShape(s.key))));
 }
 function pickShape(key) {
   const prevFamily = textureOf(state.texture)?.family;

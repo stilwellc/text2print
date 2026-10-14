@@ -20,3 +20,17 @@ def manifold_to_trimesh(man, min_volume=0.05):
     if len(m.faces) and m.volume < 0:
         m.invert()
     return m
+
+
+def drop_flaps(mesh, min_volume=1e-3):
+    """Remove zero-volume flaps (e.g. two back-to-back triangles a relief can leave at one radius). Only touches a
+    mesh that isn't already watertight; returns it unchanged when there's nothing to drop."""
+    import trimesh
+    if mesh.is_watertight:
+        return mesh
+    bodies = mesh.split(only_watertight=False)
+    keep = [b for b in bodies if abs(b.volume) > min_volume]
+    if not keep or len(keep) == len(bodies):
+        return mesh
+    out = trimesh.util.concatenate(keep)
+    return out

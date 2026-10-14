@@ -29,6 +29,7 @@ from text2print.shapes import SHAPES
 STATIC = pathlib.Path(__file__).parent / "static"
 WORK = pathlib.Path(tempfile.gettempdir()) / "text2print_studio"
 DOWNLOADS = pathlib.Path.home() / "Downloads" / "text2print"
+THUMBS = pathlib.Path(__file__).resolve().parent / "static" / "thumbs"
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = 12 * 1024 * 1024
 JOBS = OrderedDict()
@@ -44,7 +45,9 @@ def _catalogue():
     shapes = [dict(key=s.key, name=s.name, blurb=s.blurb, families=list(s.families), round=s.round, lid=s.key in extras.LID_SHAPES,
                    params=[dict(key=p.key, label=p.label, lo=p.lo, hi=p.hi, step=p.step, default=p.default,
                                 unit=p.unit, family=p.family) for p in s.params],
-                   thumb=f"/static/thumbs/shape_{s.key}.png") for s in SHAPES.values()]
+                   thumb=f"/static/thumbs/shape_{s.key}.png",
+                   thumbs={f: f"/static/thumbs/shape_{s.key}__{f}.png" for f in s.families
+                           if (THUMBS / f"shape_{s.key}__{f}.png").exists()}) for s in SHAPES.values()]
     textures = []
     for k, t in build.TEXTURES.items():
         st = {n: verify.status(k, n)[0] for n in printer.NOZZLES}

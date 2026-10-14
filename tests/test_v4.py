@@ -370,6 +370,26 @@ def test_basket_handles_cut_through_wall_textures():
     assert any("handle" in w for w in spiral.warnings)
 
 
-def test_non_round_wall_pieces_skip_lids():
-    b = build.make("tray", "zigzag", options={"lid": "slip"}, draft=True)
-    assert not b.extras and any("lid" in w.lower() for w in b.warnings)
+@pytest.mark.parametrize("shape,texture", [("tray", "zigzag"), ("basket", "domes"), ("catchall", "fringe")])
+def test_non_round_wall_pieces_get_a_slip_lid_that_follows_the_opening(shape, texture):
+    b = build.make(shape, texture, options={"lid": "thread"}, draft=True)
+    assert [n for n, *_ in b.extras] == ["Lid", "Knob"] and all(m.is_watertight for _, m, _, _ in b.extras)
+    assert b.stats["lid"]["style"] == "slip" and any("round rim" in w for w in b.warnings)
+    W = b.params["width"]
+    assert b.stats["lid"]["plug"] < min(W, b.params.get("depth", W))
+
+
+def test_round_fabric_dish_takes_a_screw_lid():
+    b = build.make("dish", "wave", options={"lid": "thread"}, draft=True)
+    assert b.stats["lid"]["style"] == "thread"
+
+
+def test_relief_flaps_never_leave_a_leaking_part():
+    b = build.make("catchall", "melt")                 # found by the full sweep: a 2-triangle zero-volume flap
+    assert all(m.is_watertight for _, m, _, _ in b.parts) and not any("watertight" in w for w in b.warnings)
+
+
+def test_fur_unions_one_solid_per_layer():
+    b = build.make("cup", "fur", {"diameter": 60, "height": 40})
+    m = b.parts[0][1]
+    assert m.is_watertight and len(m.split(only_watertight=False)) == 1 and b.stats["strands"] > 1000
