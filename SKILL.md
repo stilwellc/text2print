@@ -133,3 +133,6 @@ mix -> top band's texture. Woven caps stripe the graft per course. Plate-wide ch
 _geom_transitions when Build.lid_shares_plate(). Lid objects are multi-part (write_3mf groups extras by name);
 a separate -lid.3mf with 2+ colours parks the tower front-right. Woven round openings come from the region
 (extras.opening), vase mode from prof - line_w. Slicer-verified: 6 lid projects incl. 2-colour, counts equal.
+Lid section options: lid (none|slip|thread|magnets), lid_texture (match|plain|texture key from build.lid_textures()),
+lid_colours [hex, hex?], lid_height (5-40 mm, else auto 8-14), lid_knob (knob|button|none), lid_fit. Writer law:
+every object carries an object-level extruder = its first part's (a one-part object otherwise prints filament 1).

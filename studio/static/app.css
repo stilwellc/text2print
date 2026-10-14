@@ -247,3 +247,14 @@ h2 { font-size: 15px; margin-bottom: 12px; }
   border: 1px solid transparent; border-radius: 7px; background: transparent; padding: 2px 4px; -moz-appearance: textfield; }
 .exact:hover, .exact:focus { border-color: var(--line-strong); background: var(--card); outline: none; }
 .exact::-webkit-inner-spin-button, .exact::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* lid section */
+#lid select { font: inherit; font-size: 13.5px; padding: 7px 9px; border-radius: 9px; border: 1px solid var(--line-strong);
+  background: var(--panel); color: var(--ink); width: 100%; }
+#lid .chips { display: flex; gap: 6px; }
+#lid .chip-btn { width: 30px; height: 30px; border-radius: 50%; border: 1px solid rgba(0,0,0,.14); padding: 0; position: relative; cursor: pointer; }
+#lid .chip-btn span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; font-weight: 600;
+  color: rgba(255,255,255,.92); text-shadow: 0 0 2px rgba(0,0,0,.45); }
+#lid .height { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; }
+#lid .height input { width: 100%; accent-color: var(--ink); margin: 0; }
+#lid .height output { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }

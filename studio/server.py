@@ -68,6 +68,7 @@ def _catalogue():
     cfg = store.printer_config()
     return dict(printer=dict(name=printer.PRINTER, bed=printer.BED), nozzles=nozzles, shapes=shapes, options=options,
                 mix=mix, textures=textures, palette=build.PALETTE, colours=build.DEFAULT_COLOURS,
+                lid=dict(textures=build.lid_textures(), knobs=[list(k) for k in build.LID_KNOBS]),
                 defaults=dict(shape="tray", texture="twill", nozzle=printer.DEFAULT_NOZZLE),
                 slicer=bambu.slicer_available(), mac=platform.system() == "Darwin",
                 lan=dict(configured=bool(cfg.get("ip") and cfg.get("serial") and cfg.get("access_code")),

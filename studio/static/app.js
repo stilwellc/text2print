@@ -39,10 +39,13 @@ const zonesOn = () => {
   const fam = textureOf(state.texture).family;
   return fam === "fabric" || fam === "droop" || fam === "shell" || (fam === "lattice" && state.options.colour_by === "height");
 };
-function slotCount() {
+function pieceSlotCount() {
   if (!isMix() && zonesOn()) return Math.max(1, parseInt(state.options.zones || "1", 10));
   if (!isMix()) return textureOf(state.texture).slots;
   return Math.max(1, ...state.bands.flatMap((b) => twoSlot(b.texture) ? [b.slot + 1, (b.slot2 ?? 1) + 1] : [b.slot + 1]));
+}
+function slotCount() {                     // the piece's slots, plus any the lid's own colours use
+  return Math.max(pieceSlotCount(), ...(typeof lidSlots === "function" ? lidSlots().map((i) => i + 1) : []));
 }
 
 // ── url state ──────────────────────────────────────────────────────────────────
@@ -52,10 +55,11 @@ function readUrl() {
   if (q.get("texture") && textureOf(q.get("texture"))) state.texture = q.get("texture");
   if (q.get("nozzle")) state.nozzle = parseFloat(q.get("nozzle"));
   if (q.get("c")) state.colours = q.get("c").split(",").map((h) => "#" + h.replace("#", ""));
-  const optKeys = Object.values(CAT.options).flat().map((o) => o.key).concat(["picture", "image", "lid", "lid_colour", "lid_fit"]);
+  const optKeys = Object.values(CAT.options).flat().map((o) => o.key).concat(["picture", "image"]).concat(["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2"]);
+  const toggleKeys = Object.values(CAT.options).flat().filter((o) => o.kind === "toggle").map((o) => o.key);
   for (const [k, v] of q) {
     if (k === "mix") { try { state.bands = JSON.parse(v); } catch (e) { /* a bad link keeps the default */ } }
-    else if (optKeys.includes(k)) state.options[k] = v === "1" ? true : v === "0" ? false : v;
+    else if (optKeys.includes(k)) state.options[k] = toggleKeys.includes(k) ? v === "1" : v;   // only checkboxes are booleans
     else if (!["shape", "texture", "nozzle", "c"].includes(k)) state.params[k] = parseFloat(v);
   }
 }
@@ -70,8 +74,7 @@ function linkFor() {
   }
   if (state.options.image && textureOf(state.texture).family === "halftone") q.set("image", state.options.image);
   if (state.options.lid && state.options.lid !== "none" && shapeOf(state.shape).lid) {
-    q.set("lid", state.options.lid); if (state.options.lid_colour) q.set("lid_colour", state.options.lid_colour);
-    if (state.options.lid_fit) q.set("lid_fit", state.options.lid_fit);
+    for (const k of ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2"]) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k]);
   }
   if (state.options.image && IMAGE_TEXTURES.includes(state.texture)) q.set("image", state.options.image);
   return "?" + q.toString();
@@ -197,11 +200,11 @@ function renderCurve(sh) {
 function renderColours() {
   const tex = textureOf(state.texture);
   while (state.colours.length < MAX_SLOTS) state.colours.push(CAT.colours[state.colours.length % CAT.colours.length]);
-  const n = slotCount();
-  $("colours").replaceChildren(...Array.from({ length: n }, (_, i) => el("button", {
+  const all = slotCount(), n = pieceSlotCount(), lidUse = lidSlots();
+  $("colours").replaceChildren(...Array.from({ length: all }, (_, i) => el("button", {
     class: "swatch-btn", onclick: (e) => openPalette(i, e.currentTarget),
   }, el("span", { class: "chip", style: `background:${state.colours[i]}` }), el("span", { class: "name" }, nameOfColour(state.colours[i])),
-     el("span", { class: "slot" }, `AMS ${i + 1}`))));
+     el("span", { class: "slot" }, `AMS ${i + 1}${i >= n && lidUse.includes(i) ? " · lid" : ""}`))));
   $("colourHint").textContent = isMix() ? (n === 1 ? "One colour — no AMS changes. Give a band another colour in Bands."
       : "Each band picks its AMS slot. Changes happen where bands meet, every layer inside a halftone band, and every course inside a woven band.")
     : zonesOn() && n > 1 && tex.family === "droop" && (state.options.zone_style ?? "courses") === "courses"
@@ -270,14 +273,6 @@ function renderFinish() {
   });
   const kids = shown.flatMap((o) => optionControl(o, after));
   if (IMAGE_TEXTURES.includes(state.texture)) kids.splice(Math.min(2, kids.length), 0, uploader(state.options.image, (id) => { if (id) state.options.image = id; else delete state.options.image; renderFinish(); changed(); }));
-  if (sh.lid && fam !== "flat") {
-    kids.push(...optionControl({ key: "lid", label: "Lid", kind: "seg", choices: [["none", "None"], ["slip", "Slip-on"], ["thread", "Screw"], ["magnets", "Magnets"]], default: "none" }, after));
-    if (state.options.lid && state.options.lid !== "none")
-      kids.push(...optionControl({ key: "lid_fit", label: "Lid fit", kind: "seg", choices: [["snug", "Snug 0.15"], ["slip", "Slip 0.25"], ["loose", "Loose 0.40"]], default: "slip" }, after));
-    if (state.options.lid && state.options.lid !== "none" && slotCount() > 1)
-      kids.push(...optionControl({ key: "lid_colour", label: "Lid colour", kind: "seg",
-        choices: Array.from({ length: slotCount() }, (_, i) => [String(i + 1), `AMS ${i + 1}`]), default: "1" }, after));
-  }
   $("finishSec").hidden = !kids.length;
   $("finish").replaceChildren(...kids);
 }
@@ -331,7 +326,72 @@ $("addBand").addEventListener("click", () => {
   renderBands(); renderColours(); changed();
 });
 
-function renderAll() { renderShapes(); renderTextures(); renderBands(); renderSizes(); renderColours(); renderFinish(); }
+function renderAll() { renderShapes(); renderTextures(); renderBands(); renderSizes(); renderColours(); renderFinish(); renderLid(); }
+
+function buildOptions() {
+  const lidKeys = ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob"];
+  const o = isMix() ? { bands: state.bands, purge: state.options.purge } : { ...state.options };
+  for (const k of lidKeys) if (state.options[k] !== undefined) o[k] = state.options[k];
+  const ls = lidSlots();
+  if (ls.length) o.lid_colours = ls.map((i) => state.colours[i]);
+  delete o.lid_slot; delete o.lid_slot2;
+  return o;
+}
+
+// ── lid: its own section — closure, look, fit, height, colours, knob ─────────────────────────────
+const lidOn = () => shapeOf(state.shape).lid && textureOf(state.texture).family !== "flat" && state.options.lid && state.options.lid !== "none";
+const lidTwoSlot = () => {
+  const k = state.options.lid_texture || "match";
+  if (k === "match") return false;
+  const t = CAT.textures.find((x) => x.key === k);
+  return !!t && t.slots > 1;
+};
+function lidSlots() {
+  if (!lidOn() || (state.options.lid_texture || "match") === "match") return [];
+  const num = (x, d) => { const n = parseInt(x, 10); return Number.isFinite(n) ? Math.min(MAX_SLOTS - 1, Math.max(0, n)) : d; };
+  const a = num(state.options.lid_slot, 0), b = num(state.options.lid_slot2, 1);
+  return lidTwoSlot() ? [a, b] : [a];
+}
+function renderLid() {
+  const sh = shapeOf(state.shape), sec = $("lidSec");
+  sec.hidden = !sh.lid || textureOf(state.texture).family === "flat";
+  if (sec.hidden) return;
+  const after = () => { renderLid(); renderColours(); changed(); };
+  const kids = [...optionControl({ key: "lid", label: "Lid", kind: "seg",
+    choices: sh.round ? [["none", "None"], ["slip", "Slip-on"], ["thread", "Screw"], ["magnets", "Magnets"]] : [["none", "None"], ["slip", "Slip-on"]],
+    default: "none" }, after)];
+  if (lidOn()) {
+    const L = CAT.lid, groups = {};
+    for (const t of L.textures) {
+      const fits = t.family === "match" || t.family === "plain" || CAT.textures.find((x) => x.key === t.key)?.fits.includes(sh.round ? "cup" : state.shape);
+      if (fits) (groups[t.family] ||= []).push(t);
+    }
+    const sel = el("select", { "aria-label": "Lid look", class: "lid-look" }, ...Object.entries(groups).map(([fam, ts]) =>
+      fam === "match" || fam === "plain" ? ts.map((t) => { const o = el("option", { value: t.key }, t.name); o.selected = (state.options.lid_texture || "match") === t.key; return o; })
+      : el("optgroup", { label: FAMILY_NAMES[fam] || fam }, ...ts.map((t) => { const o = el("option", { value: t.key }, t.name); o.selected = state.options.lid_texture === t.key; return o; }))).flat());
+    sel.addEventListener("change", () => { state.options.lid_texture = sel.value; after(); });
+    kids.push(el("div", { class: "field-label" }, "Look"), sel);
+    kids.push(...optionControl({ key: "lid_fit", label: "Fit", kind: "seg", choices: [["snug", "Snug 0.15"], ["slip", "Slip 0.25"], ["loose", "Loose 0.40"]], default: "slip" }, after));
+    // height: auto unless set
+    const h = state.options.lid_height ? parseFloat(state.options.lid_height) : null;
+    const out = el("output", {}, h ? `${h} mm` : "Auto");
+    const rng = el("input", { type: "range", min: "5", max: "40", step: "1", value: String(h || 11), "aria-label": "Lid height" });
+    rng.addEventListener("input", () => { out.textContent = `${rng.value} mm`; });
+    rng.addEventListener("change", () => { state.options.lid_height = rng.value; after(); });
+    const auto = h ? el("button", { class: "ghost small", onclick: () => { delete state.options.lid_height; after(); } }, "Auto") : null;
+    kids.push(el("div", { class: "field-label" }, "Height"), el("div", { class: "height" }, rng, out, auto));
+    if ((state.options.lid_texture || "match") !== "match") {
+      const chip = (key, def) => {
+        const i = Number.isFinite(parseInt(state.options[key], 10)) ? parseInt(state.options[key], 10) : parseInt(def, 10);
+        return el("button", { class: "chip-btn", style: `background:${state.colours[i]}`, title: `AMS ${i + 1} — click to change`, "aria-label": `Lid colour AMS ${i + 1}`,
+          onclick: () => { state.options[key] = String((i + 1) % MAX_SLOTS); after(); } }, el("span", {}, String(i + 1)));
+      };
+      kids.push(el("div", { class: "field-label" }, "Colours"), el("div", { class: "chips" }, chip("lid_slot", "0"), lidTwoSlot() ? chip("lid_slot2", "1") : null));
+    }
+    kids.push(...optionControl({ key: "lid_knob", label: "Knob", kind: "seg", choices: CAT.lid.knobs, default: "knob" }, after));
+  }
+  $("lid").replaceChildren(...kids);
+}
 
 // ── building: drafts while dragging, full on release; newer requests cancel older ones ─────
 let timer = null, reqSeq = 0, reframe = true;
@@ -347,7 +407,7 @@ async function requestBuild(draft) {
   try {
     const res = await fetch("/api/build", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shape: state.shape, texture: state.texture, nozzle: state.nozzle, params: state.params, draft,
-        colours: state.colours.slice(0, slotCount()), options: isMix() ? { bands: state.bands, purge: state.options.purge, lid: state.options.lid, lid_colour: state.options.lid_colour, lid_fit: state.options.lid_fit } : state.options }) });
+        colours: state.colours.slice(0, pieceSlotCount()), options: buildOptions() }) });
     const data = await res.json();
     if (res.status === 409 || seq !== reqSeq) return;               // superseded by a newer request
     if (!res.ok) throw new Error(data.error || "Build failed");

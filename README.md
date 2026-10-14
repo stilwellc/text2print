@@ -33,15 +33,16 @@ Everything else lives in the studio too:
 
 - **Up to 4 colours.** Any fabric or droop piece (and woven pieces coloured by height) splits into 1–4 colour
   bands or repeating stripes, cut exactly on layer boundaries. Mixes give each band its own AMS slot.
-- **Lids.** Cups, vases, bowls, dishes, trays, baskets, catch-alls and platters can get a lid, and the lid gets the
-piece's own treatment: it is a short cap of the same shape, texture and colours, printed top-face down, whose rim
-lands on the piece's rim so the texture carries across. A woven basket gets a woven lid, a knit cup a knit one.
-Inside the cap sits the fit: slip-on, a two-start screw (half a turn closes it) or six 6 × 2 mm magnets on a
-pedestal, all on round rims; square and hex pieces take slip lids that follow their opening. Pick a fit (snug
-0.15, slip 0.25 or loose 0.40 mm a side); the *Fit* test plate prints rings and lids at each clearance. Droop,
-fuzzy and lithophane pieces get a plain cap, since strands on a lid would point up once it's flipped on. On woven
-lids the hidden plug changes colour course by course with the rods, so the lid adds no extra colour changes
-beyond the knob; the change count covers everything on the plate.
+- **Lids.** Cups, vases, bowls, dishes, trays, baskets, catch-alls and platters can get a lid, set up in its own
+**Lid** section. By default the lid gets the piece's own treatment: a short cap of the same shape, texture and
+colours, printed top-face down, whose rim lands on the piece's rim so the texture carries across. Or pick any look
+for it (plain, any woven, fabric, halftone, vase-mode or Voronoi texture) in its own AMS colours, set its height,
+and choose a knob, a flat button or none. Inside the cap sits the closure: slip-on, a two-start screw (half a turn
+closes it) or six 6 × 2 mm magnets on a pedestal, all on round rims; square and hex pieces take slip lids that
+follow their opening. Pick a fit (snug 0.15, slip 0.25 or loose 0.40 mm a side); the *Fit* test plate prints
+rings and lids at each clearance. Droop isn't offered for lids: strands would point up once the lid is flipped
+on. On woven lids the hidden plug changes colour course by course with the rods; the change count covers
+everything on the plate.
 
 From the command line:
 

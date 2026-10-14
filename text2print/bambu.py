@@ -143,6 +143,9 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
                          f'      <mesh_stat face_count="{len(m.faces)}" edges_fixed="0" degenerate_facets="0" '
                          f'facets_removed="0" facets_reversed="0" backwards_edges="0"/>\n    </part>\n')
         obj_meta = "".join(f'    <metadata key="{k}" value="{_x(val)}"/>\n' for k, val in (ob.get("settings") or {}).items())
+        # object-level filament = the first part's: a one-part object prints with the OBJECT's extruder (default 1),
+        # whatever its part says — a blue knob beside a red piece came out red
+        obj_meta = f'    <metadata key="extruder" value="{ob["parts"][0][2]}"/>\n' + obj_meta
         settings_objects += (f'  <object id="{obj_id}">\n    <metadata key="name" value="{_x(ob["name"])}"/>\n{obj_meta}'
                              f'    <metadata face_count="{sum(len(m.faces) for _, m, _ in ob["parts"])}"/>\n{part_xml}  </object>\n')
         plate_instances += (f'    <model_instance>\n      <metadata key="object_id" value="{obj_id}"/>\n'

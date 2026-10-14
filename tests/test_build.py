@@ -35,7 +35,8 @@ def test_project_3mf_carries_nozzle_settings_and_one_part_per_colour(tmp_path, s
     assert cfg["layer_height"] == f"{printer.nozzle(size).layer_h:.2f}"
     assert cfg["wall_loops"] == str(printer.nozzle(size).rod_lines)
     assert cfg["enable_prime_tower"] == "1" and len(cfg["filament_colour"]) == 2
-    assert settings.count('key="extruder" value="1"') == 1 and settings.count('key="extruder" value="2"') == 1
+    parts = settings.split("<part ")[1:]                      # one part per colour (the object also names its first)
+    assert sum('key="extruder" value="1"' in p_ for p_ in parts) == 1 and sum('key="extruder" value="2"' in p_ for p_ in parts) == 1
 
 
 def test_fabric_build_is_one_part_with_fabric_settings(tmp_path):
