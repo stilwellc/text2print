@@ -219,23 +219,28 @@ def fur(shape, v, nz, density="medium", length="medium", draft=False, preview=Fa
     sh = trimesh.creation.revolve(np.array(outer + inner + [outer[0]]), sections=max(120, int(2 * math.pi * (rmax + L) / 1.2)))
     if sh.volume < 0:
         sh.invert()
-    hairs = []; k = int(z_lo / lh)
+    # one extruded 2D cross-section per hair layer (hairs in a layer never touch): ~100 solids to union, not ~27k
+    layers = []; k = int(z_lo / lh); n_hairs = 0
     while (k + 1) * lh <= z_hi:
         if (k % every) == 0:
             z0 = k * lh + 0.03; z1 = (k + 1) * lh - 0.03; zm = (z0 + z1) / 2; R = prof(zm)
             n = max(12, int(2 * math.pi * R / (w + 1.4)))
             off = 0.5 * ((k // every) % 2)
+            r0, r1 = R - shell * 0.6, R + L + shell_t * 0.6
+            polys = []
             for i in range(n):
-                a = 360.0 * (i + off) / n
-                hb = m3d.Manifold.cube([L + shell_t * 0.6 + shell * 0.6, w, z1 - z0], False)
-                hairs.append(hb.translate([R - shell * 0.6, -w / 2, z0]).rotate([0, 0, a]))
+                a = 2 * math.pi * (i + off) / n; c, s_ = math.cos(a), math.sin(a)
+                rect = [(r0, -w / 2), (r1, -w / 2), (r1, w / 2), (r0, w / 2)]
+                polys.append([(x * c - y * s_, x * s_ + y * c) for x, y in rect])
+            layers.append(m3d.Manifold.extrude(m3d.CrossSection(polys), z1 - z0).translate([0, 0, z0]))
+            n_hairs += n
         k += 1
     if draft:
-        hairs_m = [manifold_to_trimesh(h) for h in hairs[:: max(1, len(hairs) // 400)]]
-        return trimesh.util.concatenate([wall, sh] + hairs_m), dict(strands=len(hairs), reach=round(L, 1), draped=None,
+        hairs_m = [manifold_to_trimesh(L_) for L_ in layers[:: max(1, len(layers) // 40)]]
+        return trimesh.util.concatenate([wall, sh] + hairs_m), dict(strands=n_hairs, reach=round(L, 1), draped=None,
                                                                    floor_layers=int(round(max(1.6, 8 * lh) / lh)), solid=False)
     to_m = lambda t: m3d.Manifold(m3d.Mesh(vert_properties=np.asarray(t.vertices, np.float32), tri_verts=np.asarray(t.faces, np.int32)))
-    merged = m3d.Manifold.batch_boolean([to_m(wall), to_m(sh)] + hairs, m3d.OpType.Add)
+    merged = m3d.Manifold.batch_boolean([to_m(wall), to_m(sh)] + layers, m3d.OpType.Add)
     mesh = manifold_to_trimesh(merged)
     trimmed = None
     if preview:                                     # what you hold after cutting the hairs free of the shell
@@ -244,7 +249,7 @@ def fur(shape, v, nz, density="medium", length="medium", draft=False, preview=Fa
         if tube.volume < 0:
             tube.invert()
         trimmed = manifold_to_trimesh(merged - to_m(tube))
-    return mesh, dict(strands=len(hairs), reach=round(L, 1), draped=trimmed, floor_layers=int(round(max(1.6, 8 * lh) / lh)),
+    return mesh, dict(strands=n_hairs, reach=round(L, 1), draped=trimmed, floor_layers=int(round(max(1.6, 8 * lh) / lh)),
                       solid=False)
 
 

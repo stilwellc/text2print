@@ -109,3 +109,36 @@ def docs_sheet(path=None, cols=8, cell=230):
         w = d.textlength(n, font=f); d.text((x + (cell - w) / 2, y + cell - 6), n, fill=(60, 55, 50), font=f)
     im.save(path, optimize=True)
     return path
+
+
+FAMILY_LOOK = {"lattice": "twill", "fabric": "domes", "droop": "fringe", "halftone": "halftone", "mix": "mix",
+               "spiral": "flutes", "shell": "voronoi", "flat": "cmyk"}
+TALL = ("cup", "vase", "shade", "bowl", "goblet", "candle", "custom", "cachepot", "sleeve", "lantern", "pendant", "puck",
+        "amphora", "basket")
+
+
+def family_thumb_path(key, fam):
+    return OUT / f"shape_{key}__{fam}.png"
+
+
+def render_family_shapes(only=None, skip_existing=False):
+    """One card per shape per family it takes, so the shape grid shows what the picked family looks like."""
+    for key, s in SHAPES.items():
+        for fam in s.families:
+            path = family_thumb_path(key, fam)
+            if (only and key not in only) or (skip_existing and path.exists()):
+                continue
+            look = FAMILY_LOOK[fam]
+            if key == "dish" and fam == "lattice":
+                look = "polar"
+            if key == "candle":
+                look = "curls"
+            if not build.compatible(key, look):
+                look = next(t for t, v in build.TEXTURES.items() if v["family"] == fam and build.compatible(key, t))
+            if fam == "flat":
+                _backlit_thumb(look, key, {}, path); continue
+            cols = (HALFTONE_COLOURS if fam in ("halftone", "mix") else None if fam == "lattice" else [FABRIC_TONE])
+            b = build.make(key, look, colours=cols)
+            render([(m, c) for _, m, _, c in (b.preview or b.parts)], path, size=360,
+                   view=(1.0, -0.95, 0.45 if key in TALL else 0.8), zoom=1.12, rake=fam != "lattice")
+            print("family card", key, fam, flush=True)

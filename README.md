@@ -188,8 +188,8 @@ sit at fixed radii.
 and hex tile too. They build a round piece with the same circumference as the outline, then map it on: distance
 around the circle becomes distance along the outline, and every offset from the wall follows the outline's
 normal. Stitch spacing and wall thickness come out the same as on a round piece. Basket handle slots are cut
-through any wall texture except vase mode, which can't print a hole in its single wall. Non-round wall pieces have
-no lid yet. Dish, floor, top edge and wall sizes stay woven-only.
+through any wall texture except vase mode, which can't print a hole in its single wall. Square, rectangular and textured pieces get a
+slip lid whose plug follows the real opening: the app slices the piece just under the rim to find it. Dish, floor, top edge and wall sizes stay woven-only.
 
 **Fittings.** The lamp, lantern, pendant, cachepot and candle shapes carry their hardware fit. The collar,
 plinth, foot ring or crush ribs print in the floor colour, and the app adds the safety copy: LED pucks and

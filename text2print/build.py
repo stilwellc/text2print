@@ -402,6 +402,9 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
                                  wall_speed=info["wall_speed"])
         extra = dict(stitches=info["stitches"], swing_ratio=info["swing_ratio"])
 
+    # ── clean-up: zero-volume flaps (a relief at an unlucky radius) would make a part read as leaking ──
+    from .meshops import drop_flaps
+    parts = [(n_, drop_flaps(m_), s_, c_) for n_, m_, s_, c_ in parts]
     # ── non-round plans: the wall families built a round piece of the outline's circumference; map it on ──
     outline = S.outline(v) if (T["family"] not in ("lattice", "flat") and hasattr(S, "outline")) else None
     if outline is not None:
@@ -523,8 +526,26 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     lid_parts, assembled = [], []
     style = options.get("lid", "none")
     style = "slip" if style == "lid" else style
-    if outline is not None and style in ("slip", "thread", "magnets"):
-        warnings.append("Lids fit round rims and woven trays — this piece has no lid."); style = "none"
+    if outline is not None and style in ("slip", "thread", "magnets") and shape in extras.LID_SHAPES:
+        if style != "slip":
+            warnings.append("Threads and magnets need a round rim — this piece gets a slip lid.")
+        ls = extras.lid_outline(parts, options.get("lid_fit", "slip"))
+        if ls is None:
+            warnings.append("This piece has no opening at the top to fit a lid into.")
+        else:
+            top = stats["size"][2]
+            lc = colours[int(options.get("lid_colour", 1)) - 1] if options.get("lid_colour") else parts[0][3]
+            lid_parts = [("Lid", ls["lid"], 1, lc), ("Knob", ls["knob"], 1, lc)]
+            a_ = ls["lid"].copy(); a_.apply_transform(trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0]))
+            a_.apply_translation([0, 0, top + extras.LID_T - a_.bounds[1][2]])
+            kb = ls["knob"].copy(); kb.apply_transform(trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0]))
+            kb.apply_translation([0, 0, a_.bounds[1][2] - kb.bounds[0][2] - (extras.LID_T + 0.6)])
+            assembled = [("Lid", a_, 1, lc), ("Knob", kb, 1, lc)]
+            stats["lid"] = dict(plug=ls["plug_d"], clearance=ls["clearance"], style="slip")
+            warnings.extend(ls["notes"])
+        style = "none"
+    elif outline is not None and style in ("slip", "thread", "magnets"):
+        warnings.append("This piece has no lid."); style = "none"
     if style in ("slip", "thread", "magnets") and shape in extras.LID_SHAPES:
         tmp = Build(shape, texture, nz.size, v, T["family"], parts, stats, over)
         op = extras.opening(tmp, S, v)
@@ -532,7 +553,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
             warnings.append("This piece has no opening at the top to fit a lid into.")
         else:
             rim, open_r = op
-            if style != "slip" and shape in ("dish", "tray"):
+            if style != "slip" and shape in ("dish", "tray") and T["family"] == "lattice":
                 warnings.append("Threads and magnets need a round rim — this dish gets a slip lid."); style = "slip"
             top = stats["size"][2]
             ls = extras.lid_set(style, rim, open_r, top, options.get("lid_fit", "slip"),

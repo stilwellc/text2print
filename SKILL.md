@@ -60,7 +60,9 @@ floor-colour part (never unioned into fabric walls), cuts are booleans; `NOTES` 
 Footprints: basket (rounded box + arched handle holes), catchall, hextile, tile. Non-round plans for the
 wall families: `shapes.Outline` (contour -> arc-length samples + smoothed normals); the shape's profile() is the
 round radius R = perimeter/2pi; build.make warps every part/preview with Outline.warp (angle -> arc length,
-r - R -> along the normal; floors scale in from 4 mm inside the wall). Basket handles: build._cut_handles.
+r - R -> along the normal; floors scale in from 4 mm inside the wall). Basket handles: build._cut_handles. Non-round lids: extras.lid_outline (section under the rim -> opening polygon;
+plug = opening buffered -clear, LIP_W ring; plate = convex hull of the outline + 0.6). Per-family shape cards:
+thumbs.render_family_shapes -> static/thumbs/shape_<key>__<family>.png; the studio shows the picked family's card.
 Mix (`compose.py`, texture "mix" on cup/vase/bowl/goblet): options {"bands": [{texture, share, slot, slot2?, options}]}
 bottom-up; textures from `compose.MIXABLE` (plain + fabric + halftone + droop; never lattice or candle). One layer
 height (nozzle standard) and the fabric shell for all bands; each band emits per-layer contours, same-colour runs

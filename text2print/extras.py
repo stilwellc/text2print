@@ -69,7 +69,8 @@ def split_by_height(mesh, edges, draft=False):
 
 
 # ── lids ──────────────────────────────────────────────────────────────────────
-LID_SHAPES = {"cup", "vase", "bowl", "dish", "tray", "custom", "cachepot", "sleeve", "lantern", "amphora"}
+LID_SHAPES = {"cup", "vase", "bowl", "dish", "tray", "custom", "cachepot", "sleeve", "lantern", "amphora",
+              "basket", "catchall", "platter"}
 FITS = {"snug": 0.15, "slip": 0.25, "loose": 0.40}          # per side, PLA (research §4.1)
 THREAD = dict(pitch=3.0, starts=2, depth=1.2, clear=0.2, height=9.0, ring=3.0)   # 45 deg flanks, 0.4 diametral
 MAGNET = dict(d=6.0, h=2.0, clear_d=0.15, clear_h=0.2, n=3, land=6.5)            # 6x2 N52, press fit
@@ -77,7 +78,7 @@ MAGNET = dict(d=6.0, h=2.0, clear_d=0.15, clear_h=0.2, n=3, land=6.5)           
 
 def opening(build_, shape, v):
     """(outer rim radius, inner opening radius) at the top of the piece, or None."""
-    if build_.shape in ("dish", "tray"):
+    if build_.shape in ("dish", "tray") and build_.family == "lattice":
         d = v.get("dish", 0)
         if d <= 8:
             return None
@@ -226,3 +227,42 @@ def fit_test(nozzle=0.4):
         out.append((f"fit {c:.2f} rim", _tm(rim)))
         out.append((f"fit {c:.2f} lid", _tm(lid_m)))
     return out
+
+
+def lid_outline(parts, fit="slip"):
+    """Slip lid for any opening (square, rectangle, hex, textured): the plug follows the opening found by slicing
+    the piece just under its rim; the plate follows the piece's outline. -> lid_set-style dict, or None."""
+    import manifold3d as m3d
+    from shapely.geometry import Polygon
+    from shapely.ops import unary_union
+    clear = FITS.get(fit, 0.25)
+    mesh = trimesh.util.concatenate([m for _, m, _, _ in parts])
+    top = mesh.bounds[1][2]; hole = None; outer = None
+    for dz in (0.6, LIP_H * 0.5, LIP_H - 0.3):
+        sec = mesh.section(plane_origin=[0, 0, top - dz], plane_normal=[0, 0, 1])
+        if sec is None:
+            return None
+        pl, _ = sec.to_2D(to_2D=np.eye(4))
+        polys = sorted(pl.polygons_full, key=lambda q: -q.area)
+        if not polys or not polys[0].interiors:
+            return None
+        h = max((Polygon(i) for i in polys[0].interiors), key=lambda q: q.area)
+        hole = h if hole is None else hole.intersection(h)
+        ext = unary_union([Polygon(q.exterior) for q in polys]).convex_hull
+        outer = ext if outer is None else outer.union(ext)
+    hole = hole.buffer(-0.4).buffer(0.4)                       # drop texture specks from the opening's edge
+    plug_o = hole.buffer(-clear, join_style=1); plug_i = plug_o.buffer(-LIP_W, join_style=1)
+    if plug_i.is_empty or plug_i.area < 100:
+        return None
+    plate = outer.buffer(0.6, join_style=1).simplify(0.05)
+    ring = plug_o.difference(plug_i)
+    def ext(poly, h, z0):
+        polys = list(poly.geoms) if hasattr(poly, "geoms") else [poly]
+        ms = [trimesh.creation.extrude_polygon(q.simplify(0.05), h) for q in polys]
+        m = trimesh.util.concatenate(ms); m.apply_translation([0, 0, z0]); return _m3d(m)
+    body = ext(plate, LID_T, 0.0) + ext(ring, LIP_H, LID_T - 0.01)
+    hole_c = m3d.Manifold.cylinder(30, KNOB_HOLE / 2, KNOB_HOLE / 2, 48).translate([0, 0, -1])
+    rim_r = float(np.sqrt(plate.area / math.pi))
+    b = plug_o.bounds
+    return dict(lid=_tm(body - hole_c), knob=_knob(rim_r), rim=[], plug_d=round(min(b[2] - b[0], b[3] - b[1]), 1),
+                clearance=clear, notes=[f"The lid's plug follows the opening with {clear} mm a side."])
