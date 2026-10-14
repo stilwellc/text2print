@@ -63,7 +63,10 @@ bottom-up; textures from `compose.MIXABLE` (plain + fabric + halftone + droop; n
 height (nozzle standard) and the fabric shell for all bands; each band emits per-layer contours, same-colour runs
 become staircase solids, a same-colour neighbour reaches 1/4 layer down and is unioned (never coplanar); droop
 strands union into their band's colour (a strand adding a body raises). Any droop band -> droop cooling for the
-whole print. Presets in `compose.PRESETS`. A "fuzzy" band adds a fuzzy-skin layer range.
+whole print. Presets in `compose.PRESETS`. A "fuzzy" band adds a fuzzy-skin layer range. Woven bands (`compose.WOVEN` = grid, twill,
+ripple, beat, polar; slot = even courses, slot2 = odd): ring centred on the wall (prof - shell/2 +- wall/2, wall
+option default 6, LEAN 0.8 per course), odd course count, 45 deg collar below (floor disc if bottom band) and cap
+above (none if top band), range wall_loops=rod_lines over the band, woven speeds globally. Slicer-verified counts.
 
 ## Laws (print-verified; tests enforce the geometric ones)
 

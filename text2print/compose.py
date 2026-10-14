@@ -8,22 +8,29 @@ Layer heights: every band prints at the nozzle's standard layer EXCEPT halftone 
 (max layer height, one wide line) through a Bambu layer range — band edges are snapped so every band is a whole
 number of its own layers and the slicer's layers land exactly on the geometry's.
 
-Woven rods can't join a mix: they are the whole object, not a wall."""
+Woven bands (Weave, Twill, Ripple, Moiré, Rose window): a ring of rods centred on the wall, coloured by course
+(even courses `slot`, odd `slot2`) like any woven piece — one AMS change per course. A thin wall can't carry a
+rod ring, so a woven band starts with a solid collar that widens from the wall below at <= 45 deg (or a solid
+floor disc if it is the bottom band), and ends with a cap that narrows back to the wall for the band above.
+The band has an odd number of courses so its first and last courses share the collar's and cap's colour."""
 import math
 
 import numpy as np
 import trimesh
 
-from . import droop, halftone
+from . import droop, halftone, lattice
 from .fabric_presets import fabric_preset
 from .fabric import RELIEFS, relief
 from .fabric_wall import tri01
 
+WOVEN = ["grid", "twill", "ripple", "beat", "polar"]        # course-coloured patterns: one colour per course
 MIXABLE = ["plain", "fuzzy", "zigzag", "domes", "wave", "garland", "drips", "melt", "halftone",
-           "fringe", "swag", "curls", "unraveled"]
+           "fringe", "swag", "curls", "unraveled"] + WOVEN
+TWO_SLOT = {"halftone"} | set(WOVEN)
 NAMES = {"plain": "Plain", "fuzzy": "Fuzzy skin", "zigzag": "Zigzag", "domes": "Knit", "wave": "Wave", "garland": "Garland",
          "drips": "Drips", "melt": "Melt", "halftone": "Halftone",
-         "fringe": "Fringe", "swag": "Swag", "curls": "Curls", "unraveled": "Unraveled"}
+         "fringe": "Fringe", "swag": "Swag", "curls": "Curls", "unraveled": "Unraveled",
+         **{k: lattice.PATTERNS[k]["name"] for k in WOVEN}}
 PRESETS = {
     "candle":  dict(name="Coil band", bands=[dict(texture="plain", share=14, slot=0),
                                              dict(texture="curls", share=66, slot=0),
@@ -40,6 +47,9 @@ PRESETS = {
     "stone":   dict(name="Stone & silk", bands=[dict(texture="fuzzy", share=55, slot=0, options={"noise": "voronoi"}),
                                                 dict(texture="plain", share=8, slot=1),
                                                 dict(texture="wave", share=37, slot=1)]),
+    "basket":  dict(name="Basket band", bands=[dict(texture="plain", share=16, slot=0),
+                                               dict(texture="twill", share=58, slot=0, slot2=1),
+                                               dict(texture="plain", share=26, slot=1)]),
     "knit":    dict(name="Knit & wave", bands=[dict(texture="domes", share=30, slot=0),
                                                dict(texture="plain", share=6, slot=1),
                                                dict(texture="wave", share=64, slot=1)]),
@@ -132,10 +142,26 @@ def build(shape, v, nz, bands, draft=False):
     # band edges: each band a whole number of its own layers; the floor belongs to band 0
     lhs = [ht_lh if b["texture"] == "halftone" else base_lh for b in bands]
     n_floor = int(math.ceil(floor_t / lhs[0])); floor_z = n_floor * lhs[0]
+    rod_h, rl = nz.rod_h, nz.rod_layers
+    wplan = {}                                                   # woven band -> (lower courses, rod courses, cap courses)
+    for i, b in enumerate(bands):
+        if b["texture"] in WOVEN:
+            w = float(b["options"].get("wall", 6.0))
+            ramp = int(math.ceil(((w - shell) / 2 + 0.5) / rod_h))   # courses to widen/narrow at <= 45 deg
+            low = int(math.ceil(floor_t / rod_h)) if i == 0 else ramp
+            wplan[i] = [low, 0, ramp if i < len(bands) - 1 else 0, w]
+    if 0 in wplan:
+        n_floor = wplan[0][0] * rl; floor_z = n_floor * lhs[0]
     zs = [0.0]; acc = 0.0
     for i, b in enumerate(bands):
         acc += b["share"]; want = acc * height - zs[-1]
-        n = max(int(round(want / lhs[i])), (n_floor + 3) if i == 0 else 3)
+        if i in wplan:
+            low, _, cap, _ = wplan[i]
+            k = max(3, int(round(want / rod_h)) - low - cap); k += 1 - k % 2   # odd: first and last course = slot
+            wplan[i][1] = k
+            n = (low + k + cap) * rl
+        else:
+            n = max(int(round(want / lhs[i])), (n_floor + 3) if i == 0 else 3)
         zs.append(zs[-1] + n * lhs[i])
     total_h = zs[-1]
 
@@ -165,12 +191,19 @@ def build(shape, v, nz, bands, draft=False):
             ranges.append((za, zb, {"layer_height": f"{ht_lh:.2f}"}))
         if t in droop.STYLES:
             droop_bands.append((b, za, zb))
+        if t in WOVEN:                     # a rod is rod_lines loops side by side; the collar and cap fill solid too
+            ranges.append((za, zb, {"layer_height": f"{lh:.2f}", "wall_loops": str(nz.rod_lines)}))
         k = 0
         while za + (k + 1) * lh <= zb + 1e-6:
             z0, z1 = za + k * lh, za + (k + 1) * lh; zm = (z0 + z1) / 2; R = prof(zm)
             floor_layer = z1 <= floor_z + 1e-6
             entry = dict(z0=z0, z1=z1, slot=b["slot"], band=bi, lh=lh, n=n, r=None)
-            if floor_layer or t in ("plain", "fuzzy") or t in droop.STYLES:
+            if t in WOVEN:                                             # rods, collar and cap: no wall rings
+                low, nc, cap, _ = wplan[bi]; course = k // rl - low
+                entry["woven"] = True
+                if 0 <= course < nc and course % 2 == 1:
+                    entry["slot"] = b["slot2"]
+            elif floor_layer or t in ("plain", "fuzzy") or t in droop.STYLES:
                 pass                                                   # smooth wall
             elif t in fp:
                 f = fp[t]; cyc = f["zigzag_layers"] + f["straight_layers"]; p = k
@@ -209,8 +242,15 @@ def build(shape, v, nz, bands, draft=False):
             j += 1
         runs.append((i, j)); i = j + 1
     solids = {}
+    for bi, b in enumerate(bands):
+        if bi in wplan:
+            za = zs[bi]; prev_slot = next((L["slot"] for L in reversed(layers) if L["z1"] <= za + 1e-6), None)
+            for slot, m in _woven_band(b, wplan[bi], za, prof, shell, nz, bi == 0, prev_slot, draft).items():
+                solids.setdefault(slot, []).append(m)
     for a, b_ in runs:
         L0 = layers[a]; slot = L0["slot"]; n = L0["n"]
+        if L0.get("woven"):
+            continue
         bi = L0["band"]; sh = ht_lw if bands[bi]["texture"] == "halftone" else shell
         rings = []
         reach_down = a > 0 and layers[a - 1]["slot"] == slot
@@ -255,13 +295,13 @@ def build(shape, v, nz, bands, draft=False):
     swaps = sum(1 for x, y in zip(seq, seq[1:]) if x != y)
     kinds = {}
     for b in bands:
-        for s_ in ([b["slot"], b["slot2"]] if b["texture"] == "halftone" else [b["slot"]]):
+        for s_ in ([b["slot"], b["slot2"]] if b["texture"] in TWO_SLOT else [b["slot"]]):
             if b["texture"] in droop.STYLES:
                 kinds[s_] = "droop"
             else:
                 kinds.setdefault(s_, "normal")
     info = dict(layers=len(layers), bands=[(b["texture"], round(zs[i + 1] - zs[i], 2)) for i, b in enumerate(bands)],
-                swaps=swaps, floor_layers=n_floor, droop=bool(droop_bands), height=round(total_h, 2),
+                swaps=swaps, floor_layers=n_floor, droop=bool(droop_bands), height=round(total_h, 2), woven=bool(wplan),
                 strands=sum(len(x) for x in flat.values()), reach=round(reach, 1), ranges=ranges, kinds=kinds,
                 layer_slots=[(round(L["z0"], 4), round(L["z1"], 4), L["slot"]) for L in layers])
     return parts, preview, info
@@ -269,3 +309,49 @@ def build(shape, v, nz, bands, draft=False):
 
 def _ribs(rmax, lw):
     return max(24, int(round(2 * math.pi * rmax / max(2.6 * lw, 3.2))))
+
+
+LEAN = 0.8          # a woven course steps at most this many mm per mm in or out of the one below
+
+
+def _revolve(pts, n=192):
+    m = trimesh.creation.revolve(np.array(pts + [pts[0]], float), sections=n)
+    if m.volume < 0:
+        m.invert()
+    return m
+
+
+def _woven_band(b, plan, za, prof, shell, nz, bottom, prev_slot, draft=False):
+    """-> {slot: mesh}: collar (or floor disc), rods, cap. The ring is centred on the wall (r = prof - shell/2)."""
+    low, nc, cap, w = plan; rh, lh = nz.rod_h, nz.layer_h; q = 0.25 * lh
+    z_r0 = za + low * rh; z_r1 = z_r0 + nc * rh
+    mids = np.empty(nc)
+    for i in range(nc):
+        mids[i] = prof(z_r0 + (i + 0.5) * rh) - shell / 2
+        if i:
+            mids[i] = min(max(mids[i], mids[i - 1] - LEAN * rh), mids[i - 1] + LEAN * rh)
+    rmax = float(mids.max() + w / 2); n = max(96, int(2 * math.pi * rmax / 1.2))
+    out = {}
+    slot, slot2 = b["slot"], b["slot2"]
+    ro0, ri0 = mids[0] + w / 2, max(mids[0] - w / 2, 0.0)
+    if bottom:                                                     # solid floor disc the ring stands on
+        lower = _revolve([(0.0, 0.0), (ro0, 0.0), (ro0, z_r0 + q), (0.0, z_r0 + q)], n)
+    else:                                                          # collar: wall below -> full ring at <= 45 deg
+        zb = za - (q if prev_slot == slot else 0.0); Rw = prof(za)
+        lower = _revolve([(Rw - shell, zb), (Rw, zb), (ro0, z_r0 + q), (ri0, z_r0 + q)], n)
+    out.setdefault(slot, []).append(lower)
+    if cap:                                                        # ring -> wall for the band above
+        roN, riN = mids[-1] + w / 2, max(mids[-1] - w / 2, 0.0); zt = z_r1 + cap * rh; Rt = prof(zt)
+        out[slot].append(_revolve([(riN, z_r1 - q), (roN, z_r1 - q), (Rt, zt), (Rt - shell, zt)], n))
+
+    from .shapes import Region                                     # the ring as a lattice region, local z
+
+    def sdf_at(z):
+        k = min(nc - 1, max(0, int(z / rh)))
+        ro, ri = mids[k] + w / 2, mids[k] - w / 2
+        return lambda x, y: np.maximum(np.hypot(x, y) - ro, ri - np.hypot(x, y))
+    rods = lattice.weave(Region(nc, rh, sdf_at, rmax, True, 0), nz, b["texture"])
+    for s_, m in rods.meshes().items():
+        m = m.copy(); m.apply_translation([0, 0, z_r0])
+        out.setdefault(slot if s_ == 0 else slot2, []).append(m)
+    return {s_: trimesh.util.concatenate(ms) for s_, ms in out.items()}
