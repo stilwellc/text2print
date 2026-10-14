@@ -188,7 +188,7 @@ def test_colour_zones_are_clean_parts_on_layer_boundaries(texture, opts):
 def test_lids_fit_inside_the_opening(shape, texture):
     from text2print import extras
     b = build.make(shape, texture, options={"lid": "lid"})
-    assert [n for n, *_ in b.extras] == ["Lid", "Knob"]
+    assert list(dict.fromkeys(n for n, *_ in b.extras)) == ["Lid", "Knob"]
     lid_m = b.extras[0][1]
     assert lid_m.is_watertight and b.extras[1][1].is_watertight
     rim, open_r = extras.opening(b, SHAPES[shape], b.params)

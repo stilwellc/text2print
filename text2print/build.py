@@ -111,6 +111,17 @@ class Build:
     def title(self):
         return f"{SHAPES[self.shape].name} — {TEXTURES[self.texture]['name']}"
 
+    def lid_shares_plate(self):
+        """Do the lid, knob (and coaster) fit on the piece's plate? Same rule write_3mf uses."""
+        if not self.extras:
+            return False
+        half = max(np.abs(m.bounds[:, :2]).max() for _, m, _, _ in self.parts)
+        groups = {}
+        for n, m, _, c in self.extras:
+            groups.setdefault(n, []).append(m)
+        halves = [max(float(np.abs(m.bounds[:, :2]).max()) for m in g) for g in groups.values()]
+        return 2 * half + sum(2 * h + 8 for h in halves) + 16 <= printer.BED
+
     def write_3mf(self, path):
         """The piece (with its layer ranges) and, if any, the lid and knob laid out flat beside it."""
         half = max(np.abs(m.bounds[:, :2]).max() for _, m, _, _ in self.parts)
@@ -122,28 +133,38 @@ class Build:
         safe = printer.TOWER[0] - printer.TOWER[2] / 2 - 8
         objects = [{"name": self.title(), "position": None, "parts": [(n, m, idx(c)) for n, m, _, c in self.parts],
                     "ranges": self.ranges}]
-        extra_halves = [float(np.abs(m.bounds[:, :2]).max()) for _, m, _, _ in self.extras]
+        groups = {}                                             # a textured lid is one object of several parts
+        for n, m, _, c in self.extras:
+            groups.setdefault(n, []).append((m, c))
+        extra_halves = [max(float(np.abs(m.bounds[:, :2]).max()) for m, _ in g) for g in groups.values()]
         row = 2 * half + sum(2 * h + 8 for h in extra_halves)
         if self.extras and row + 16 <= printer.BED:
             x = 8 + half; objects[0]["position"] = (x, printer.BED / 2); x += half + 8
-            for (n, m, _, c), h in zip(self.extras, extra_halves):
+            for (n, g), h in zip(groups.items(), extra_halves):
                 # lids, knobs and coasters are solid parts: their own walls, infill and top/bottom shells, whatever
                 # the piece uses (a fabric piece runs 0 % infill and no top layers)
                 st = dict(SOLID_OBJECT)
                 if n == "Purge coaster":
                     st["flush_into_objects"] = "1"
-                objects.append({"name": n, "position": (x + h, min(printer.BED / 2, safe - h)), "parts": [(n, m, idx(c))],
+                objects.append({"name": n, "position": (x + h, min(printer.BED / 2, safe - h)),
+                                "parts": [(f"{n} {k + 1}" if len(g) > 1 else n, m, idx(c)) for k, (m, c) in enumerate(g)],
                                 "settings": st})
                 x += 2 * h + 8
         else:
             objects[0]["position"] = self._centre(half)
             if self.extras:                                        # too big to share a plate: their own project
+                lcols = list(dict.fromkeys(c for _, _, _, c in self.extras)); lidx = lambda c: lcols.index(c) + 1
                 lid_objects, x = [], 8
-                for (n, m, _, c), h in zip(self.extras, extra_halves):
-                    lid_objects.append({"name": n, "position": (x + h, printer.BED / 2), "parts": [(n, m, 1)]}); x += 2 * h + 8
-                over = dict(self.overrides); over.update(SOLID_OBJECT); over["enable_prime_tower"] = "0"
+                for (n, g), h in zip(groups.items(), extra_halves):
+                    lid_objects.append({"name": n, "position": (x + h, printer.BED / 2),
+                                        "parts": [(f"{n} {k + 1}" if len(g) > 1 else n, m, lidx(c)) for k, (m, c) in enumerate(g)]})
+                    x += 2 * h + 8
+                over = dict(self.overrides); over.update(SOLID_OBJECT)
+                over["enable_prime_tower"] = "1" if len(lcols) > 1 else "0"
+                if len(lcols) > 1:                                 # park the tower front-right, clear of the lids
+                    over["wipe_tower_x"] = [f"{printer.BED - printer.TOWER[2] - 20:g}"]; over["wipe_tower_y"] = ["20"]
                 bambu.write_3mf(str(pathlib.Path(path).with_name(pathlib.Path(path).stem + "-lid.3mf")), lid_objects,
-                                title=self.title() + " — lid", colours=(self.extras[0][3],), overrides=over,
+                                title=self.title() + " — lid", colours=tuple(lcols), overrides=over,
                                 base=printer.base_config(self.nozzle))
         over = dict(self.overrides); over["flush_multiplier"] = [f"{self.flush_mult:g}"]
         pf = self.per_filament
@@ -184,6 +205,114 @@ class Build:
         for name, m, s, _ in self.parts:
             p = folder / f"{stem}_{s}_{name.split()[0].lower()}.stl"; m.export(p); out.append(p)
         return out
+
+
+LID_SKIP = ("lid", "lid_fit", "lid_colour", "zones", "zone_style", "course_rows", "purge_piece", "floor", "rim_loops",
+            "purge", "handles")
+
+
+def _cap_or_plain(lid_parts, assembled, *a):
+    """Textured lid (a short cap of the piece itself), or the plain lid if the cap can't be built."""
+    warnings = a[-1]
+    try:
+        cap = _lid_cap(*a[:-2], a[-2])
+    except Exception as e:                                   # never lose the lid: fall back to the plain plate
+        warnings.append(f"The lid is plain: its texture couldn't be built ({type(e).__name__}).")
+        return lid_parts, assembled
+    return cap if cap else (lid_parts, assembled)
+
+
+def _lid_cap(shape, S, T, texture, v, nz, colours, options, parts, ls, t_plate, style, open_r, top, draft, stats):
+    """The lid gets the piece's own treatment: a short cap of the same shape, texture and colours (top face on the
+    bed), its rim landing on the piece's rim so the texture carries across; the plain lid's plug (slip, thread) or
+    a magnet pedestal is grafted inside, plus a solid boss for the knob. Droop, fuzzy and lithophane pieces get a
+    plain cap: strands printed on a lid would point up once it is flipped onto the piece."""
+    import manifold3d as m3d
+    fam = T["family"]
+    cap_tex = texture; cap_opts = {k: x for k, x in options.items() if k not in LID_SKIP}; cap_cols = list(colours)
+    top_col = max(parts, key=lambda p_: p_[1].bounds[1][2])[3]
+    plain = fam in ("droop", "flat") or texture in ("litho", "fuzzy")
+    if fam == "mix":
+        b = (options.get("bands") or compose.PRESETS[compose.DEFAULT_PRESET]["bands"])[-1]; t_ = b.get("texture")
+        if t_ in TEXTURES and TEXTURES[t_]["family"] in ("fabric", "halftone", "lattice"):
+            sl = int(b.get("slot", 0)); sl2 = int(b.get("slot2", 1 if sl == 0 else 0))
+            cap_tex, cap_opts = t_, dict(b.get("options") or {})
+            cap_cols = [colours[sl], colours[sl2]] if t_ in compose.TWO_SLOT else [colours[sl]]
+        else:
+            plain = True
+    if int(options.get("zones", 1) or 1) > 1:
+        cap_cols = [top_col]
+    if plain:
+        cap_tex, cap_opts, cap_cols = "mix", {"bands": [dict(texture="plain", share=100, slot=0)]}, [top_col]
+    if options.get("lid_colour") and len(set(cap_cols)) == 1:
+        cap_cols = [colours[int(options["lid_colour"]) - 1]]
+    lat = TEXTURES[cap_tex]["family"] == "lattice"
+    Hs = float(min(14.0, max(8.0, round(0.12 * top))))
+    if not getattr(S, "round", False):                          # same outline: tray, basket, catch-all, platter
+        cap_shape, cp = shape, dict(v, height=Hs, handles=0)
+        if lat and "dish" in v:
+            cp.update(dish=0, pillow=0, floor=Hs)
+        elif lat:
+            cp.update(floor=4)
+    else:
+        cap_shape = "cup"
+        if lat:
+            reg = S.lattice(v, nz.rod_h); xs = np.linspace(0, reg.extent + 6, 3000)
+            ins = xs[reg.sdf(reg.z(reg.n - 1))(xs, np.zeros_like(xs)) <= 0]
+            ro = float(ins.max()); wall = float(min(16.0, max(4.0, ro - ins.min())))
+            cp = dict(diameter=2 * ro, height=Hs, wall=wall, floor=4)
+        else:
+            prof, h_, _ = S.profile(v)
+            cp = dict(diameter=2 * prof(h_), height=Hs)
+    cap = make(cap_shape, cap_tex, cp, nz.size, cap_cols, cap_opts, draft=draft, _raw=True)
+    cparts = [(n_, m_, s_, c_) for n_, m_, s_, c_ in cap.parts]
+    # the cap's floor (= the lid's top) thickness: where a vertical probe near the centre leaves the solid
+    zs = np.arange(0.05, Hs, 0.1); F = 0.0
+    for dx, dy in ((6, 0), (0, 6), (-6, 0), (0, -6), (9, 9), (-9, -9), (9, -9), (-9, 9)):
+        pts = np.column_stack([np.full(len(zs), dx), np.full(len(zs), dy), zs])
+        inside = np.zeros(len(zs), bool)
+        for _, m_, _, _ in cparts:
+            inside |= m_.contains(pts)
+        out_ = np.where(~inside)[0]
+        F = max(F, float(zs[out_[0]]) if len(out_) else Hs)
+    F = max(F, 0.8)
+    plug, foot = extras.plug_of(ls["lid"], t_plate)
+    adds = [plug.translate([0, 0, Hs - t_plate]), extras.prism(foot, F - 0.3, Hs + 0.1)]
+    boss_h = max(F, extras.LID_T) + 0.01
+    adds.append(m3d.Manifold.cylinder(boss_h, extras.KNOB_HOLE / 2 + 3.5, extras.KNOB_HOLE / 2 + 3.5, 48))
+    cuts = [m3d.Manifold.cylinder(boss_h + 2, extras.KNOB_HOLE / 2, extras.KNOB_HOLE / 2, 48).translate([0, 0, -1])]
+    if style == "magnets" and open_r:                           # pedestal over the land, magnet pockets in its face
+        M = extras.MAGNET; clear = ls["clearance"]
+        r_in = open_r - M["land"] - clear; r_out = open_r - clear; n_ = max(96, int(2 * math.pi * r_out / 1.2))
+        ped = (m3d.Manifold.cylinder(Hs - F + 0.3, r_out, r_out, n_) - m3d.Manifold.cylinder(Hs - F + 1, r_in - 0.01, r_in - 0.01, n_)
+               .translate([0, 0, -0.3])).translate([0, 0, F - 0.3])
+        adds.append(ped)
+        rp = open_r - M["land"] / 2; pd = M["d"] + M["clear_d"]; ph = M["h"] + M["clear_h"]
+        cuts += [m3d.Manifold.cylinder(ph + 1, pd / 2, pd / 2, 32).translate([rp, 0, Hs - ph]).rotate([0, 0, 360 * k / M["n"]])
+                 for k in range(M["n"])]
+    grafted = extras.graft(cparts, adds, cuts)
+    if lat and len(set(cap_cols)) > 1:                          # woven: the hidden plug follows the rods' colour
+        g = [x for x in grafted if x[0] == "graft"]              # course by course, so a layer stays one colour
+        if g:
+            gm = g[0][1]; edges = list(np.arange(0.0, float(gm.bounds[1][2]) + nz.rod_h, nz.rod_h))
+            if edges[-1] < gm.bounds[1][2]:
+                edges.append(float(gm.bounds[1][2]) + 0.01)
+            rest = [x for x in grafted if x[0] != "graft"]
+            for i, piece in enumerate(extras.split_by_height(gm, edges, draft=False)):
+                if piece is not None and len(piece.faces):
+                    rest.append(("graft", piece, 1 + i % 2, cap_cols[i % 2]))
+            grafted = rest
+    kc = cap_cols[0] if len(set(cap_cols)) == 1 else top_col
+    lid_parts = [("Lid", m_, s_, c_) for _, m_, s_, c_ in grafted] + [("Knob", ls["knob"], 1, kc)]
+    flip = trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0])
+    assembled = []
+    for _, m_, s_, c_ in grafted:                               # flipped: plane z = Hs lands on the piece's rim
+        a_ = m_.copy(); a_.apply_transform(flip); a_.apply_translation([0, 0, top + Hs]); assembled.append(("Lid", a_, s_, c_))
+    kb = ls["knob"].copy(); kb.apply_transform(flip)
+    kb.apply_translation([0, 0, top + Hs - kb.bounds[0][2] - (extras.LID_T + 0.6)])
+    assembled.append(("Knob", kb, 1, kc))
+    stats.setdefault("lid", {}).update(cap=TEXTURES[cap_tex]["name"] if cap_tex != "mix" else "Plain", cap_h=Hs)
+    return lid_parts, assembled
 
 
 def _merge_range(ranges, z0, z1, opts, base_lh):
@@ -293,7 +422,7 @@ def _png_data_url(rgba, max_px=480):
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=None, options=None, draft=False):
+def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=None, options=None, draft=False, _raw=False):
     if shape not in SHAPES:
         raise ValueError(f"unknown shape {shape!r}")
     if texture not in TEXTURES:
@@ -310,6 +439,8 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
                                                 if (b.get("options") or {}).get("image") else {})})
                             for b in options["bands"]]
     v = S.resolve(params or {}); warnings = []
+    if _raw:                                                    # internal (lid caps): sizes below a shape's minimum
+        v.update({k: float(x) for k, x in (params or {}).items()})
     colours = list(colours or []) + DEFAULT_COLOURS[len(colours or []):]
     vstat, vnote = verify.status(texture, nz.size)
     if vstat == "failed":
@@ -592,10 +723,12 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     lid_parts, assembled = [], []
     style = options.get("lid", "none")
     style = "slip" if style == "lid" else style
-    if outline is not None and style in ("slip", "thread", "magnets") and shape in extras.LID_SHAPES:
+    woven_rect = T["family"] == "lattice" and shape in ("basket", "catchall")
+    if (outline is not None or woven_rect) and style in ("slip", "thread", "magnets") and shape in extras.LID_SHAPES:
         if style != "slip":
             warnings.append("Threads and magnets need a round rim — this piece gets a slip lid.")
-        ls = extras.lid_outline(parts, options.get("lid_fit", "slip"))
+        ls = (extras.lid_from_region(S.lattice(v, nz.rod_h), options.get("lid_fit", "slip")) if woven_rect
+              else extras.lid_outline(parts, options.get("lid_fit", "slip")))
         if ls is None:
             warnings.append("This piece has no opening at the top to fit a lid into.")
         else:
@@ -609,6 +742,8 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
             assembled = [("Lid", a_, 1, lc), ("Knob", kb, 1, lc)]
             stats["lid"] = dict(plug=ls["plug_d"], clearance=ls["clearance"], style="slip")
             warnings.extend(ls["notes"])
+            lid_parts, assembled = _cap_or_plain(lid_parts, assembled, shape, S, T, texture, v, nz, colours, options,
+                                                 parts, ls, extras.LID_T, "slip", None, top, draft, stats, warnings)
         style = "none"
     elif outline is not None and style in ("slip", "thread", "magnets"):
         warnings.append("This piece has no lid."); style = "none"
@@ -625,9 +760,10 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
             ls = extras.lid_set(style, rim, open_r, top, options.get("lid_fit", "slip"),
                                 square=v.get("width") if shape == "tray" else None, corner=v.get("corner", 0.0))
             lc = colours[int(options.get("lid_colour", 1)) - 1] if options.get("lid_colour") else parts[0][3]
-            top_part = max(parts, key=lambda p_: p_[1].bounds[1][2])
-            for rp in ls["rim"]:                       # thread ring / magnet land: a same-colour part of the piece
-                parts.append(("rim", rp, top_part[2], top_part[3]))
+            if ls["rim"]:                               # thread ring / magnet land: in the top colour, carved from others
+                ti = max(range(len(parts)), key=lambda i: parts[i][1].bounds[1][2])
+                parts = [(("rim" if n_ == "graft" else n_), m_, s_, c_) for n_, m_, s_, c_ in
+                         extras.graft(parts, [extras._m3d(r_) for r_ in ls["rim"]], [], into=ti)]
             lid_parts = [("Lid", ls["lid"], 1, lc), ("Knob", ls["knob"], 1, lc)]
             a_ = ls["lid"].copy(); a_.apply_transform(trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0]))
             t_plate = 3.6 if style == "magnets" else extras.LID_T     # the flipped plate's underside rests on the rim
@@ -637,6 +773,15 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
             assembled = [("Lid", a_, 1, lc), ("Knob", kb, 1, lc)]
             stats["lid"] = dict(plug=ls["plug_d"], clearance=ls["clearance"], style=style)
             warnings.extend(ls["notes"])
+            lid_parts, assembled = _cap_or_plain(lid_parts, assembled, shape, S, T, texture, v, nz, colours, options,
+                                                 parts, ls, t_plate, style, open_r, top, draft, stats, warnings)
+    if lid_parts:
+        probe = Build(shape, texture, nz.size, v, T["family"], parts, stats, over, extras=lid_parts)
+        if probe.lid_shares_plate() and len({c for _, _, _, c in parts + lid_parts}) > 1:
+            transitions = _geom_transitions(parts + lid_parts, over, ranges); swaps = len(transitions)
+            stats["swaps"] = swaps; stats["swap_minutes"] = round(swaps * SWAP_SECONDS / 60)
+            pg = sum(bambu.flush_volume(a, b) for a, b in transitions) * flush_mult * 1.26 / 1000 + 0.12 * swaps
+            stats["grams_purge"] = int(round(pg)); stats["grams_est"] = stats["grams_part"] + stats["grams_purge"]
     if options.get("purge_piece") == "coaster" and len({c for _, _, _, c in parts}) > 1:
         coaster = trimesh.creation.cylinder(radius=45.0, height=6.0, sections=96); coaster.apply_translation([0, 0, 3.0])
         lid_parts = list(lid_parts) + [("Purge coaster", coaster, 1, parts[0][3])]

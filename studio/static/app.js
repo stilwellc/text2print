@@ -370,7 +370,7 @@ function renderPrint(d) {
   if (s.bands) rows.push(["Bands × layers", `${s.bands} × ${fmt(s.layers)}`]);
   if (s.ribs) rows.push(["Ribs × layers", `${fmt(s.ribs)} × ${fmt(s.layers)}`]);
   if (s.strands) rows.push(["Strands", `${fmt(s.strands)} · up to ${fmt(s.reach)} mm out`]);
-  if (s.lid) rows.push(["Lid", `${{ slip: "Slip-on", thread: "Screw", magnets: "Magnets" }[s.lid.style] || "Lid"} · plug ${fmt(s.lid.plug, 1)} mm · ${s.lid.clearance} mm fit`]);
+  if (s.lid) rows.push(["Lid", `${s.lid.cap ? s.lid.cap + " · " : ""}${{ slip: "slip-on", thread: "screw", magnets: "magnets" }[s.lid.style] || "lid"} · ${s.lid.clearance} mm fit`]);
   rows.push(["Colours", String(s.colours)]);
   if (s.swaps) rows.push(["AMS changes", `${fmt(s.swaps)} · ≈ ${fmt(s.swap_minutes)} min`]);
   rows.push(["Filament", s.grams_purge ? `≈ ${fmt(s.grams_part)} g + ${fmt(s.grams_purge)} g purge` : `≈ ${fmt(s.grams_est)} g`]);
@@ -396,7 +396,7 @@ function renderPrint(d) {
       fuzzy: null }[state.texture],
     mix: "Keep the project's layer heights — each band is built on its own. Halftone bands print at their recipe height through a layer range.",
   }[tex.family]);
-  if (s.lid) notes.push("The lid and knob print top-face down beside the piece; press the knob into the lid from the top.");
+  if (s.lid) notes.push("The lid is a short cap of the piece itself, printed top-face down; its rim sits on the piece's rim so the texture carries across. Press the knob in from the top.");
   $("notes").replaceChildren(...notes.filter(Boolean).map((n) => el("li", {}, n)));
   const bl = $("backlit"); bl.hidden = !s.backlit;
   if (s.backlit) bl.replaceChildren(el("img", { src: s.backlit, alt: "The picture as it shows lit from behind" }),

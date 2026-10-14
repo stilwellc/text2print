@@ -373,7 +373,7 @@ def test_basket_handles_cut_through_wall_textures():
 @pytest.mark.parametrize("shape,texture", [("tray", "zigzag"), ("basket", "domes"), ("catchall", "fringe")])
 def test_non_round_wall_pieces_get_a_slip_lid_that_follows_the_opening(shape, texture):
     b = build.make(shape, texture, options={"lid": "thread"}, draft=True)
-    assert [n for n, *_ in b.extras] == ["Lid", "Knob"] and all(m.is_watertight for _, m, _, _ in b.extras)
+    assert list(dict.fromkeys(n for n, *_ in b.extras)) == ["Lid", "Knob"] and all(m.is_watertight for _, m, _, _ in b.extras)
     assert b.stats["lid"]["style"] == "slip" and any("round rim" in w for w in b.warnings)
     W = b.params["width"]
     assert b.stats["lid"]["plug"] < min(W, b.params.get("depth", W))
@@ -406,3 +406,41 @@ def test_merge_range_splits_and_keeps_layer_height():
     assert [(a, b) for a, b, _ in out] == [(0.0, 10.0), (10.0, 20.0), (20.0, 30.0)]
     assert out[0][2] == {"top_shell_layers": "4", "layer_height": "0.20"}
     assert out[1][2] == {"layer_height": "0.28", "top_shell_layers": "4"} and out[2][2] == {"layer_height": "0.28"}
+
+
+# ── textured lids: the lid gets the piece's own treatment ───────────────────────────────────────────────
+@pytest.mark.parametrize("shape,texture,style,cap", [("cup", "twill", "thread", "Twill"), ("basket", "domes", "slip", "Knit"),
+                                                     ("tray", "twill", "slip", "Twill"), ("cup", "fringe", "slip", "Plain"),
+                                                     ("cup", "mix", "slip", "Zigzag"), ("vase", "zigzag", "magnets", "Zigzag"),
+                                                     ("cachepot", "pleats", "slip", "Pleats"), ("basket", "twill", "slip", "Twill"),
+                                                     ("catchall", "grid", "slip", "Weave"), ("platter", "twill", "slip", "Twill")])
+def test_lid_is_a_cap_of_the_piece(shape, texture, style, cap):
+    b = build.make(shape, texture, options={"lid": style}, colours=["#8B3A2F", "#EDE3D1"], draft=True)
+    assert b.stats["lid"]["cap"] == cap
+    lid = [m for n, m, _, _ in b.extras if n == "Lid"]
+    assert lid and all(m.is_watertight for m in lid)
+    # the plug reaches below the cap's rim plane into the piece once assembled
+    top = b.stats["size"][2]
+    low = min(m.bounds[0][2] for n, m, _, _ in b.assembled if n == "Lid")
+    assert low < top - 2.5
+
+
+def test_woven_lid_plug_follows_the_course_colours():
+    b = build.make("cup", "twill", {"diameter": 70, "height": 50}, options={"lid": "slip"},
+                   colours=["#8B3A2F", "#EDE3D1"], draft=True)
+    rh = printer.nozzle(0.4).rod_h
+    lid = [(m, c) for n, m, _, c in b.extras if n == "Lid"]
+    assert len({c for _, c in lid}) == 2 and all(m.is_watertight for m, _ in lid)
+    # every course band of the lid is a single colour: no layer mixes the two
+    for k in range(int(max(m.bounds[1][2] for m, _ in lid) / rh)):
+        zc = (k + 0.5) * rh
+        here = {c for m, c in lid if m.bounds[0][2] < zc < m.bounds[1][2] and
+                m.section(plane_origin=[0, 0, zc], plane_normal=[0, 0, 1]) is not None}
+        assert len(here) <= 1, (k, here)
+
+
+def test_plate_wide_change_count_includes_the_lid():
+    b = build.make("cup", "twill", {"diameter": 70, "height": 50}, options={"lid": "thread"},
+                   colours=["#8B3A2F", "#EDE3D1"], draft=True)
+    plain = build.make("cup", "twill", {"diameter": 70, "height": 50}, colours=["#8B3A2F", "#EDE3D1"], draft=True)
+    assert b.stats["swaps"] >= plain.stats["swaps"]

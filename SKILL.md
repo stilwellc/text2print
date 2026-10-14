@@ -123,3 +123,13 @@ Then `python -m text2print thumbs` and `python -m pytest`. Verify visually: rend
   or they slice hollow under the wall families' 0 % / no-top settings.
 - Filament estimate vs slicer: within ~5 % for most families; vase mode subtracts both caps; fittings count
   shells + 20 % infill.
+
+## Lids = caps of the piece (Oct 14)
+build._lid_cap: lid = make(same shape [non-round] or cup at the rim radius [round], same texture/colours, height
+8-14 mm, _raw=True) printed top-face down; the plain lid's plug (extras.plug_of, cut ABOVE the plate) is grafted on
+at the rim plane over a column from the cap floor, + knob boss and hole (extras.graft: adds in the floor colour,
+carved from other colours). Magnets: pedestal annulus with pockets in its face. Droop/fuzzy/litho -> plain mix cap;
+mix -> top band's texture. Woven caps stripe the graft per course. Plate-wide change count (piece + lid) via
+_geom_transitions when Build.lid_shares_plate(). Lid objects are multi-part (write_3mf groups extras by name);
+a separate -lid.3mf with 2+ colours parks the tower front-right. Woven round openings come from the region
+(extras.opening), vase mode from prof - line_w. Slicer-verified: 6 lid projects incl. 2-colour, counts equal.
