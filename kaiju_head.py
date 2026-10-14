@@ -26,7 +26,12 @@ blend       = 8.0      # smooth-union radius — soft, but the features must REA
 # down to a broad flat nose, and a muzzle that drops forward and DOWN.
 shoulders   = dict(c=(0, -6, 4),    r=(74, 56, 36))
 neck        = dict(c=(0, -10, 40),  r=(36, 34, 46))
-skull       = dict(c=(0, -14, 102), r=(60, 58, 44))              # low and wide, not a ball
+skull       = dict(c=(0, -14, 102), r=(60, 58, 44))              # the wide jaw-and-ear mass
+# the Bullmark head is an EGG, not a ball (Collin, Sep 25: "way too circular —
+# needs to be oval / cone shaped"): above the brow the cranium rises through a
+# narrower dome into a blunt peak, so the silhouette tapers like a cone
+dome        = dict(c=(0, -12, 126), r=(54, 50, 36))
+peak        = dict(c=(0, -12, 150), r=(40, 40, 28))              # top of the head ≈ z 178
 brow_l      = dict(c=(-28, 47, 111), r=(35, 22, 17), tilt=-4)   # two heavy ridges, low — the eyes live in their shadow
 brow_r      = dict(c=( 28, 47, 111), r=(35, 22, 17), tilt=-4)
 scowl_l     = dict(c=(-13, 56, 106), r=(15, 11, 9))              # the inner brows pinch down hard: the scowl
@@ -42,12 +47,12 @@ upper_lip   = dict(c=(0, 78, 78),   r=(42, 10, 8))               # the curled li
 lip_corner_l = dict(c=(-40, 70, 84), r=(9, 9, 7))               # the corners pull up and back: the sneer
 lip_corner_r = dict(c=( 40, 70, 84), r=(9, 9, 7))
 jaw         = dict(c=(0, 30, 44),   r=(44, 36, 20))
-cheek_l     = dict(c=(-50, 22, 82), r=(18, 30, 34))
-cheek_r     = dict(c=( 50, 22, 82), r=(18, 30, 34))
+cheek_l     = dict(c=(-46, 22, 82), r=(15, 30, 34))
+cheek_r     = dict(c=( 46, 22, 82), r=(15, 30, 34))
 ear_l       = dict(c=(-57, -16, 102), r=(16, 20, 25))            # ears: cupped plugs — the equator sits ON the root plane |x| = 57, so beyond it the ear is a half-egg with no undercut
 ear_r       = dict(c=( 57, -16, 102), r=(16, 20, 25))
 ear_scoop   = dict(dx=79, y=-6, z=102, r=15)   # dishes the outer face ≈ 9 mm deep, 7 mm of solid left at the centre   # centred OUTSIDE the ear: dishes the outer face 7 mm deep, opening outward — up, when the ear prints on its root                      # the cup, scooped from the outside
-crest       = dict(c=(0, 12, 140),  r=(22, 54, 6), tilt=22)
+crest       = dict(c=(0, -20, 175), r=(12, 30, 6))                # rides the peak front-to-back
 # the oni horns: two in a row down the centreline, rooted on the forehead
 # and higher on the skull, both thrust FORWARD 55° off vertical (with the
 # face on its back that is 35° off print-vertical and the taper takes the
@@ -55,8 +60,8 @@ crest       = dict(c=(0, 12, 140),  r=(22, 54, 6), tilt=22)
 # on the print-up side. Solid-filled. A horn along the forehead normal (24°
 # off vertical) would print horizontal — never. Both roots sit well forward
 # of the face|cap cut (sculpt y −14).
-HORNS = [dict(base=(0, 41.0, 132.5), lean=55.0, L=20.0, r0=6.5, r1=1.5, curl=3.0, grooves=(6.0, 10.0, 14.0)),
-         dict(base=(0, 15.9, 143.6), lean=55.0, L=20.0, r0=6.5, r1=1.5, curl=3.0, grooves=(6.0, 10.0, 14.0))]
+HORNS = [dict(base=(0, 30.5, 148.5), lean=55.0, L=20.0, r0=6.5, r1=1.5, curl=3.0, grooves=(6.0, 10.0, 14.0)),   # re-seated on the egg forehead (Sep 25)
+         dict(base=(0, 18.0, 169.5), lean=55.0, L=20.0, r0=6.5, r1=1.5, curl=3.0, grooves=(6.0, 10.0, 14.0))]
 
 # features
 eye_x, eye_y, eye_z = 26, 56, 104                                # small, set wide and high, sunk beneath the ridges
@@ -84,6 +89,18 @@ fur_amp     = 1.6
 fur_pitch   = 4.2
 fur_ref_r   = 70.0
 face_zone   = dict(c=(0, 66, 92), r=(46, 38, 48))
+# the forehead show (Sep 25, "do something fun with the forehead or around the
+# horns"): a bald painted-panel forehead carrying a THIRD EYE — a tall almond
+# with a raised rim and a slit cat pupil — and FLAME LICKS curling out from each
+# horn root (oni fire). All raised relief made with the offset idiom
+# f = min(f, max(band, f − h)): the band grows h mm proud of the skin wherever
+# it lies. The face prints on its back, so the forehead faces up: clean.
+forehead_zone = dict(c=(0, 30, 146), r=(26, 22, 34))            # no fur here
+THIRD_EYE   = dict(z=128.0, R=16.25, d=9.75, rim_w=1.4, rim_h=1.8, bulge=1.0,
+                   pupil_R=21.25, pupil_d=19.25, pupil_h=1.3)     # almond 13 × 26 mm, slit pupil 4 × 18 mm
+FLAMES      = [dict(horn=0, angles=(-110, -40, 40, 110), w=4.2),     # the forehead horn: none pointing down at the eye
+               dict(horn=1, angles=(0, 72, 144, 216, 288), w=3.8)]
+FLAME       = dict(r_in=5.5, r_out=18.0, h=1.5, swirl=0.6)          # fat teardrop licks, pointed tips
 
 # print orientation: neck base on the bed, face forward; open bottom
 # seam: nowhere to hide it on an organic form — random seam in the slicer
@@ -135,7 +152,7 @@ def fur_relief(P):
     theta = np.abs(np.arctan2(P[..., 1], P[..., 0]) - np.pi / 2)
     u_side = theta * fur_ref_r - 0.55 * P[..., 2]
     u_top = P[..., 0] * 1.0 + 0.25 * P[..., 1]
-    w = smoothstep(118.0, 140.0, P[..., 2])
+    w = smoothstep(146.0, 172.0, P[..., 2])
     u = u_side + (u_top - u_side) * w + 12.0 * vnoise(P, 30.0, 1.0) + 3.0 * vnoise(P, 9.0, 4.0)
     phase = 6.0 * vnoise(P, 17.0, 2.0)
     # SHINGLE profile: with the face part printed on its back, the flank of a
@@ -145,7 +162,7 @@ def fur_relief(P):
     # 40° and needs nothing under it.
     # three coats: the crown wears short dense tufts, the sides long raked
     # strokes, the collar a heavy shag — the pitch and relief drift with height
-    crown = smoothstep(118.0, 136.0, P[..., 2]); collar = smoothstep(44.0, 26.0, P[..., 2])
+    crown = smoothstep(146.0, 170.0, P[..., 2]); collar = smoothstep(44.0, 26.0, P[..., 2])
     pitch = fur_pitch - 1.4 * crown + 1.4 * collar
     amp = fur_amp - 0.6 * crown + 0.7 * collar
     t = np.modf(u / pitch + phase / (2 * np.pi))[0]              # 0..1 across one stroke, increasing toward the back
@@ -159,7 +176,13 @@ def fur_relief(P):
     ramp = 1 - smoothstep(0.18, 1.0, t)                             # the back: down over the remaining 82 %
     ridge = rise * ramp
     tuft = smoothstep(0.28, 0.70, vnoise(P, 16.0, 3.0)) * 0.75 + 0.25   # long tufts, soft ends
-    mask = smoothstep(0.0, 10.0, ellipsoid(P, **face_zone))
+    mask = smoothstep(0.0, 10.0, ellipsoid(P, **face_zone)) * smoothstep(0.0, 8.0, ellipsoid(P, **forehead_zone))
+    if FOREHEAD == "kongster":
+        if KONG_PLATES: mask = mask * smoothstep(0.5, 3.0, plates_sdf(P))
+        for H in (HORNS if SKIN_RINGS["radii"] else []):       # bald inside the ripples so they read
+            hb, ha, hu = horn_axes(H); q = P - hb; along = q @ ha
+            radial = np.linalg.norm(q - along[..., None] * ha, axis=-1)
+            mask = mask * smoothstep(SKIN_RINGS["radii"][-1] + 1.5, SKIN_RINGS["radii"][-1] + 5.0, radial)
     return amp * ridge * tuft * mask
 
 def cyl_x(P, x0, x1, y, z, r):
@@ -225,7 +248,11 @@ WITH_EARS = True
 def field(P):
     P = P * np.array([1, -1, 1], np.float32)      # the face looks toward -Y in the world
     f = ellipsoid(P, **skull)
-    for m in (shoulders, neck, brow_l, brow_r, scowl_l, scowl_r, bridge, muzzle, jaw, cheek_l, cheek_r, crest):
+    for m in (shoulders, neck, brow_l, brow_r, scowl_l, scowl_r, bridge, muzzle, jaw, cheek_l, cheek_r, dome):
+        f = smin(f, ellipsoid(P, **m), blend)
+    for m in (peak, crest):                       # a long blend: the dome flows into the peak as one cone
+        f = smin(f, ellipsoid(P, **m), 12.0)
+    for m in ():
         f = smin(f, ellipsoid(P, **m), blend)
     # ears: grown from the skull, then dished from the outside. Built only when
     # WITH_EARS — the head is built without them and the ears are what the
@@ -270,8 +297,11 @@ def field(P):
     for m in (nose_wing_l, nose_wing_r):
         f = smin(f, ellipsoid(P, **m), 2.5)
     # the horns, each with its ring grooves
-    for H in HORNS:
-        h = horn_sdf(P, H); f = smin(f, h, 2.5); f = horn_grooves(f, P, h, H)
+    if not _PROBING:
+        for H in HORNS:
+            h = horn_sdf(P, H); f = smin(f, h, 2.5); f = horn_grooves(f, P, h, H)
+            if "rings" in H: f = horn_rings(f, P, h, H)
+        f = forehead_show(f, P)
     # the mouth cavity
     f = smax(f, -ellipsoid(P, **mouth), 5.0)
     # nostrils
@@ -302,7 +332,205 @@ def field(P):
 EYE_FLOOR_Y = eye_y - 4 - 2.0     # cup floor: 2 mm behind the ball's equator
 EYE_SEAT_R  = eye_r + 0.25 + 1.5  # bore + a 1.5 mm wall
 
+def _vesica(x, z, R, d):
+    """a tall almond (two circles' lens), < 0 inside"""
+    return np.sqrt((np.abs(x) + d) ** 2 + z ** 2) - R
+
+def forehead_show(f, P):
+    if FOREHEAD != "flames":
+        return forehead_variant(f, P)
+    x, y, z = P[..., 0], P[..., 1], P[..., 2]
+    front = y > 15.0                                   # the relief lives on the forehead only
+    E = THIRD_EYE; ez = z - E["z"]
+    a2 = _vesica(x, ez, E["R"], E["d"])
+    raise_ = lambda f, band, h: np.where(front, np.minimum(f, np.maximum(band, f - h)), f)
+    f = raise_(f, a2, E["bulge"])                                      # the eyeball swells a little
+    f = raise_(f, np.abs(a2 + E["rim_w"]) - E["rim_w"], E["rim_h"])    # the lid rim
+    f = raise_(f, _vesica(x, ez, E["pupil_R"], E["pupil_d"]), E["pupil_h"])   # the slit pupil
+    # flame licks round the horn roots, swirling as they run out
+    for fl in FLAMES:
+        b, a, u = horn_axes(HORNS[fl["horn"]])
+        q = P - b; qu = q @ u; qv = q[..., 0]
+        r = np.sqrt(qu * qu + qv * qv); phi = np.arctan2(qv, qu)
+        t = np.clip((r - FLAME["r_in"]) / (FLAME["r_out"] - FLAME["r_in"]), 0, 1)
+        w = fl["w"] * np.maximum(np.sin(np.pi * np.clip(0.3 + 0.7 * t, 0, 1)), 0.0) ** 0.6 + 0.3
+        band = None
+        for th in fl["angles"]:
+            dlt = np.mod(phi - np.radians(th) - FLAME["swirl"] * t * t + np.pi, 2 * np.pi) - np.pi
+            bk = np.maximum(np.abs(r * dlt) - w, np.maximum(FLAME["r_in"] - r, r - FLAME["r_out"]))
+            band = bk if band is None else np.minimum(band, bk)
+        band = np.maximum(band, np.abs(q @ a) - 10.0)
+        f = raise_(f, band, FLAME["h"])
+    return f
+
+_PROBING = False
+FOREHEAD = __import__("os").environ.get("KAIJU_FOREHEAD", "kongster")   # the chosen one (Sep 25) · flames · oni · crown · mane · kong · gomora
+
+def _surface(p0, d):
+    """probe the head skin (no horns, no forehead dressing) along d from p0 — sculpt frame"""
+    global _PROBING
+    _PROBING = True
+    try:
+        ts = np.arange(90, -10, -0.25, dtype=np.float32); p0 = np.asarray(p0, np.float32)
+        d = np.asarray(d, np.float32) / np.linalg.norm(d)
+        Q = p0 + ts[:, None] * d
+        fq = field(Q * np.array([1, -1, 1], np.float32)); i = int(np.argmax(fq < 0))
+        return p0 + ts[i] * d
+    finally:
+        _PROBING = False
+
+def raise_on(f, band, h, mask=True):
+    """relief: grow the skin h mm proud wherever band < 0"""
+    return np.where(mask, np.minimum(f, np.maximum(band, f - h)), f)
+
+# ── A · ONI: two big horns curling up and out from the forehead corners
+# (plugs in the print), and a real bulging third eye in a heavy-lidded mound
+ONI_HORNS = [dict(base=(sx * 21.0, 21.5, 150.0), axis=(sx * 0.62, 0.2, 0.76), bend=(-sx * 0.6, 0.15, 1.0),
+                  L=38.0, r0=11.5, r1=2.4, curl=13.0, taper=1.25, grooves=(8.0, 14.0, 20.0, 26.0)) for sx in (-1, 1)]   # fat roots sweeping OUT, then hooking UP
+ONI_EYE = dict(c=(0, 39.5, 130.0), mound=dict(c=(0, 33, 130), r=(14, 10, 16.5)), ball=(7.6, 6.8, 10.2),
+               socket=(9.2, 7.0, 11.8), lid=(9.8, 9.2, 12.6), lid_z=3.2)
+# ── B · CROWN: one big oni horn on the forehead, a ring of stubby spikes across the brow
+CROWN_HORN = [dict(base=(0, 28.5, 151.0), axis=(0, 0.45, 0.9), bend=(0, -1.0, 0.2), L=30.0, r0=10.5, r1=2.4,
+                   curl=6.0, taper=1.1, grooves=(7.0, 13.0, 19.0))]
+CROWN_SPIKES = dict(angles=(-78, -54, -30, 30, 54, 78), z=146.0, centre=(0, -12, 146), L=11.0, r0=5.0, r1=1.3)
+# ── C · MANE: three thick sculpted flame locks from the brow back over the peak, two small horns among them
+MANE_LOCKS = [dict(x0=0.0, x1=0.0, wig=5.0, r0=7.5, len=1.0), dict(x0=-15.0, x1=-30.0, wig=-4.0, r0=6.0, len=0.85),
+              dict(x0=15.0, x1=30.0, wig=4.0, r0=6.0, len=0.85)]
+MANE_HORNS = [dict(base=(sx * 23.0, 22.0, 150.0), axis=(sx * 0.35, 0.3, 0.88), bend=(sx * 1.0, 0, 0), L=16.0,
+                   r0=5.5, r1=1.4, curl=3.0, grooves=(6.0, 10.0)) for sx in (-1, 1)]
+GOMORA = dict(half=40.0, y=-4.0, sweep=7.0, z=179.0, rise=20.0, r_mid=9.0, r_tip=2.2, flat=0.6)   # tips curl up and a little forward
+# dorsal plates (Bullmark kaiju spine) from the peak back down the head. All on
+# the CAP (sculpt y < −14), raked back 25°: the cap prints with "back" up, so a
+# raked-back plate stands nearly vertical in the print.
+PLATES = dict(thetas=(98.0, 116.0, 134.0, 152.0), heights=(21.0, 26.0, 22.0, 15.0), widths=(10.0, 12.0, 11.0, 8.0),
+              rake=25.0, thick=3.6, centre=(0, -12, 140))
+SKIN_RINGS = dict(radii=(), heights=(), w=1.3)   # skin ripples round the horns: tried Sep 25, Collin: "look horrible" — off
+KONG_PLATES = False                               # dorsal plates: tried Sep 25, Collin: "horrible" — off
+_CACHE = {}
+
+def _plate_frames():
+    if "plates" in _CACHE: return _CACHE["plates"]
+    out = []; C = np.array(PLATES["centre"], np.float32)
+    for th, H, W in zip(PLATES["thetas"], PLATES["heights"], PLATES["widths"]):
+        t = np.radians(th); d = np.array([0, np.cos(t), np.sin(t)], np.float32)
+        srf = _surface(C, d)
+        r = np.radians(th + PLATES["rake"]); a = np.array([0, np.cos(r), np.sin(r)], np.float32)   # raked back
+        w = np.array([0, -a[2], a[1]], np.float32)                                                  # across the plate, in the y-z plane
+        out.append((srf - a * 3.0, a, w, H + 3.0, W))
+    _CACHE["plates"] = out
+    return out
+
+def plates_sdf(P):
+    d = None
+    for b, a, w, H, W in _plate_frames():
+        q = P - b; s = q @ a; u = q @ w; x = P[..., 0]
+        k = np.clip(s / H, 0, 1)
+        half = W * 2.2 * np.maximum(k, 0) ** 0.6 * (1 - k) ** 1.3 + 0.6 * (1 - k)   # a kaiju plate: broad low, a sharp point
+        th = PLATES["thick"] * (1 - 0.55 * k) + 0.4
+        e = smax(smax(np.abs(u) - half, np.abs(x) - th, 1.0), np.maximum(-s, s - H), 1.0)
+        d = e if d is None else np.minimum(d, e)
+    return d
+
+
+def _mane_paths():
+    if "mane" in _CACHE: return _CACHE["mane"]
+    C = np.array([0, -12, 140], np.float32); out = []
+    for L in MANE_LOCKS:
+        pts, rad = [], []
+        for t in np.linspace(0, L["len"], 22):
+            th = np.radians(8 + 112 * t)                              # from the brow, up and back over the peak
+            x = L["x0"] + (L["x1"] - L["x0"]) * t + L["wig"] * np.sin(2 * np.pi * t)
+            d = np.array([x / 40.0, np.cos(th), np.sin(th)], np.float32)
+            srf = _surface(C, d)
+            r = L["r0"] * (1 - 0.8 * t ** 1.4) + 1.2
+            lift = 2.5 * max(0.0, (t - 0.8) / 0.2) ** 2 * 3               # the tip flicks up off the skin
+            pts.append(srf + (d / np.linalg.norm(d)) * (lift - 0.45 * r)); rad.append(r)
+        out.append((pts, rad))
+    _CACHE["mane"] = out
+    return out
+
+def _crown_spikes():
+    if "crown" in _CACHE: return _CACHE["crown"]
+    out = []; C = np.array(CROWN_SPIKES["centre"], np.float32)
+    for ang in CROWN_SPIKES["angles"]:
+        a = np.radians(ang); d = np.array([np.sin(a), np.cos(a), 0.15], np.float32)
+        srf = _surface(C, d); ax = d / np.linalg.norm(d) + np.array([0, 0, 0.9], np.float32)
+        out.append(dict(base=tuple(srf - d / np.linalg.norm(d) * 1.5), axis=tuple(ax), bend=(0, 0, 1),
+                        L=CROWN_SPIKES["L"], r0=CROWN_SPIKES["r0"], r1=CROWN_SPIKES["r1"], curl=1.0, grooves=()))
+    _CACHE["crown"] = out
+    return out
+
+if FOREHEAD == "oni":
+    HORNS = ONI_HORNS
+    forehead_zone = dict(c=(0, 34, 130), r=(19, 15, 21))       # bald only round the third eye's mound
+elif FOREHEAD == "crown":
+    HORNS = CROWN_HORN
+    forehead_zone = dict(c=(0, 30, 146), r=(12, 10, 12))
+elif FOREHEAD == "kong":                                     # Marusan King Kong: no horns, the egg rises to a peak
+    HORNS = []
+    forehead_zone = dict(c=(0, 30, 146), r=(1, 1, 1))
+elif FOREHEAD == "kongster":                                 # Kong's egg + Bullmark monster: dorsal plates + stubby temple horns
+    HORNS = [dict(base=(sx * 25.5, 18.0, 153.5), axis=(sx * 0.55, 0.25, 0.8), bend=(sx * 0.3, 0.0, 1.0),
+                  L=18.0, r0=8.5, r1=3.0, curl=3.5, taper=1.0, grooves=(),
+                  rings=dict(pitch=2.7, amp=0.8)) for sx in (-1, 1)]   # PLUGS in the print; ringed like a ram's horn
+    forehead_zone = dict(c=(0, 30, 146), r=(1, 1, 1))
+elif FOREHEAD == "gomora":                                   # Bullmark Gomora: one crescent horn fused across the top
+    HORNS = []
+    forehead_zone = dict(c=(0, -2, 186), r=(46, 16, 22))       # smooth under the crescent
+elif FOREHEAD == "mane":
+    HORNS = MANE_HORNS
+    forehead_zone = dict(c=(0, 0, 168), r=(44, 50, 34))       # the locks ARE the hair: a smooth scalp under them
+
+def forehead_variant(f, P):
+    x, y, z = P[..., 0], P[..., 1], P[..., 2]
+    if FOREHEAD == "oni":
+        E = ONI_EYE
+        f = smin(f, ellipsoid(P, **E["mound"]), 3.0)
+        f = smax(f, -ellipsoid(P, (0, E["c"][1] + 2.5, E["c"][2]), E["socket"]), 1.2)
+        f = np.minimum(f, ellipsoid(P, E["c"], E["ball"]))
+        q = P - np.asarray(E["c"], np.float32)
+        lid = smax(ellipsoid(P, E["c"], E["lid"]), E["lid_z"] - q[..., 2], 1.2)
+        lid = np.maximum(lid, -2.0 - q[..., 1])
+        f = smin(f, lid, 1.0)
+    elif FOREHEAD == "crown":
+        for H in _crown_spikes():
+            f = smin(f, horn_sdf(P, H), 2.0)
+    elif FOREHEAD == "kongster":
+        if KONG_PLATES: f = smin(f, plates_sdf(P), 2.5)
+        # ripple rings in the skin round each horn root: rounded ridges, fading outward
+        for H in HORNS:
+            hb, ha, hu = horn_axes(H)
+            q = P - hb; along = q @ ha
+            radial = np.linalg.norm(q - along[..., None] * ha, axis=-1)
+            near = np.abs(along) < 9.0
+            for R, h in zip(SKIN_RINGS["radii"], SKIN_RINGS["heights"]):
+                bump = h * np.clip(1 - ((radial - R) / SKIN_RINGS["w"]) ** 2, 0, 1)
+                f = np.where(near, f - bump, f)
+    elif FOREHEAD == "gomora":
+        pts, rad = [], []
+        for t in np.linspace(-1, 1, 41):
+            pts.append(np.array([GOMORA["half"] * t, GOMORA["y"] + GOMORA["sweep"] * t * t,
+                                 GOMORA["z"] + GOMORA["rise"] * t * t], np.float32))
+            rad.append(GOMORA["r_mid"] - (GOMORA["r_mid"] - GOMORA["r_tip"]) * abs(t) ** 1.3)
+        d = None
+        for c, r in zip(pts, rad):
+            e = np.linalg.norm((P - c) * np.array([1, 1.0 / GOMORA["flat"], 1], np.float32), axis=-1) - r
+            d = e if d is None else smin(d, e, 2.5)
+        f = smin(f, d, 6.0)                                   # fused into the skull, not stuck on
+    elif FOREHEAD == "mane":
+        for pts, rad in _mane_paths():
+            d = None
+            for c, r in zip(pts, rad):
+                sph = np.linalg.norm(P - c, axis=-1) - r
+                d = sph if d is None else smin(d, sph, 3.0)
+            f = smin(f, d, 3.0)
+    return f
+
 def horn_axes(H):
+    if "axis" in H:                                   # a horn pointing anywhere (plug horns), curling toward `bend`
+        a = np.asarray(H["axis"], np.float32); a = a / np.linalg.norm(a)
+        u = np.asarray(H["bend"], np.float32); u = u - a * (u @ a); u = u / np.linalg.norm(u)
+        return np.array(H["base"], np.float32), a, u
     t = np.radians(H["lean"])
     return np.array(H["base"], np.float32), np.array([0, np.sin(t), np.cos(t)], np.float32), np.array([0, -np.cos(t), np.sin(t)], np.float32)
 
@@ -311,10 +539,22 @@ def horn_sdf(P, H):
     b, a, u = horn_axes(H); d = None
     for tt in np.linspace(0.0, 1.0, 16):
         c = b + a * H["L"] * tt + u * H["curl"] * tt ** 2
-        r = H["r1"] + (H["r0"] - H["r1"]) * (1 - tt) ** 0.85
+        r = H["r1"] + (H["r0"] - H["r1"]) * (1 - tt) ** H.get("taper", 0.85)
         sph = np.linalg.norm(P - c, axis=-1) - r
         d = sph if d is None else smin(d, sph, 2.0)
     return d
+
+def horn_rings(f, P, h, H):
+    """raised rings all the way up the horn, a sawtooth that swells slowly toward
+    the tip and steps back sharply. The horn is a plug printed base-down, tip-up:
+    the slow swell is the face that looks down (~20° off vertical), the sharp
+    step looks up — no overhang. Rings fade out near the root and the tip."""
+    b, a, u = horn_axes(H); s_along = (P - b) @ a
+    R = H["rings"]; L = H["L"]
+    t = np.mod(s_along / R["pitch"], 1.0)
+    saw = smoothstep(0.0, 0.75, t) * (1 - smoothstep(0.75, 1.0, t))
+    fade = smoothstep(1.0, 3.0, s_along) * (1 - smoothstep(0.7 * L, 0.9 * L, s_along))
+    return np.minimum(f, np.where(h < 2.0, h - R["amp"] * saw * fade, f))
 
 def horn_grooves(f, P, h, H):
     """ring grooves 0.9 wide × 0.6 deep. The tip-side wall of each faces DOWN in
@@ -325,7 +565,7 @@ def horn_grooves(f, P, h, H):
     q_u = (P - b - a * s_along[..., None]) @ u
     for si in H["grooves"]:
         depth = 0.6 * np.clip((si + 0.75 - s_along) / 0.6, 0.0, 1.0)
-        band = np.maximum.reduce([si - 0.45 - s_along, s_along - (si + 0.75), h - 1.0, q_u - 1.0])
+        band = np.maximum.reduce([si - 0.45 - s_along, s_along - (si + 0.75), h - 1.0, q_u - (99.0 if "axis" in H else 1.0)])
         f = np.maximum(f, np.minimum(-band, f + depth))
     return f
 
@@ -366,7 +606,7 @@ def fields(voxel, with_ears=True):
     h = 0.5 * voxel
     xs = np.arange(-86 + h, 86, voxel, dtype=np.float32)
     ys = np.arange(-106 + h, 92, voxel, dtype=np.float32)
-    zs = np.arange(-2 + h, 190, voxel, dtype=np.float32)
+    zs = np.arange(-2 + h, 204, voxel, dtype=np.float32)
     X, Y, Z = np.meshgrid(xs, ys, zs, indexing="ij")
     P = np.stack([X, Y, Z], axis=-1)
     f = field(P)
@@ -379,9 +619,23 @@ def fields(voxel, with_ears=True):
         Pl = P * np.array([1, -1, 1], np.float32)
         # the horn is solid, but only forward of its base plane (the skin):
         # the root sphere's inner half would otherwise be a blob in the hollow
+        # plug horns (axis horns, Sep 25) are tilted off the skin normal, so the
+        # plane test alone let the root sphere's back fill poke into the hollow
+        # (two 6 mm² islands on the face print). They are also filled only where
+        # the BARE head (no horns) is thinner than its wall: outside the skull or
+        # inside the skin wall — never in the hollow.
+        f_bare = None
+        if any("axis" in H for H in HORNS):
+            global _PROBING
+            _PROBING = True
+            try: f_bare = field(P)
+            finally: _PROBING = False
         for H in HORNS:
             b, a, u = horn_axes(H)
-            dist = np.where((horn_sdf(Pl, H) < 0.5) & (((Pl - b) @ a) > 1.5), 0.0, dist)
+            keep = (horn_sdf(Pl, H) < 0.5) & (((Pl - b) @ a) > 1.5)
+            if "axis" in H: keep &= f_bare > -(wall + 0.5 * voxel)
+            dist = np.where(keep, 0.0, dist)
+        del f_bare
         # the nose wall is 5 mm instead of 2.25 so the nostrils can be real
         # cavities: the step in the inner skin is a 2.75 mm ledge, connected
         # in-plane to the wall, not an island
@@ -461,6 +715,13 @@ def fields(voxel, with_ears=True):
     return xs, ys, zs, X, Y, Z, f, shell, dist
 
 def mesh_from(shellfield, xs, ys, zs, voxel, keep_largest=True):
+    # no grid sample may sit (almost) exactly on the surface: marching cubes
+    # then puts vertices of neighbouring edges within a hair of each other,
+    # distinct in memory but FUSED once the STL's float32 coordinates are
+    # re-merged — the surface pinches into hundreds of non-manifold edges
+    # (Sep 26: the face part came back with 543 of them and 698 "bodies").
+    eps = 1e-3
+    shellfield = np.where(np.abs(shellfield) < eps, np.where(shellfield < 0, -eps, eps), shellfield).astype(np.float32)
     verts, faces, _, _ = measure.marching_cubes(shellfield, level=0.0, spacing=(voxel, voxel, voxel))
     verts += np.array([xs[0], ys[0], zs[0]], np.float32)
     tm = trimesh.Trimesh(verts, faces, process=False)
