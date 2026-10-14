@@ -33,7 +33,7 @@ from `--slice` plus the AMS change estimate in `stats`.
 
 ## Catalogue
 
-Shapes (`text2print/shapes.py`): tray, platter, dish (round), coaster, cup, shade — woven; cup, bowl, vase, goblet — fabric;
+Shapes (`text2print/shapes.py`): tray, platter, dish (round), coaster, cup, shade, basket, catchall, hextile, and every round Profiled vessel (bowl, vase, goblet, custom, cachepot, sleeve, amphora via `Profiled.lattice`: ring follows the profile, course-to-course step <= LEAN 0.8 mm/mm both faces, fitted kinds grow outward) — woven; cup, bowl, vase, goblet — fabric;
 cup, bowl, vase, goblet, candle (solid bell + taper socket) — droop.
 Woven textures (`lattice.PATTERNS`): grid "Weave", twill, kagome, polar "Rose window" (round shapes only),
 ripple, selvedge, beat "Moiré", overunder, tartan. Fabric (`fabric.STITCHES`): zigzag, domes "Knit", wave;

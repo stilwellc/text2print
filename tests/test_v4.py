@@ -246,3 +246,31 @@ def test_real_slicer_counts_droop_course_changes(tmp_path):
     assert "error" not in r, r
     g = zipfile.ZipFile(tmp_path / "s" / "sliced.3mf").read("Metadata/plate_1.gcode").decode(errors="ignore")
     assert len(re.findall(r"^M620 S\dA", g, re.M)) == b.stats["swaps"]
+
+
+# ── woven on profiled vessels ────────────────────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("shape", ["vase", "bowl", "goblet", "custom", "cachepot", "sleeve", "amphora"])
+def test_woven_follows_the_silhouette_and_every_course_rests_on_the_last(shape):
+    S = SHAPES[shape]; v = S.resolve({}); nz = printer.nozzle(0.4)
+    reg = S.lattice(v, nz.rod_h)
+    xs = np.linspace(-reg.extent - 2, reg.extent + 2, 801)
+    def radii(i):                                     # outer and inner edge along +x at course i
+        inside = xs[(reg.sdf(reg.z(i))(xs, np.zeros_like(xs)) <= 0) & (xs >= 0)]
+        return inside.max(), inside.min()
+    tol = S.LEAN * nz.rod_h + 2 * (xs[1] - xs[0])      # sampling grid
+    prev = radii(0)
+    for i in range(1, reg.n):
+        cur = radii(i)
+        assert abs(cur[0] - prev[0]) <= tol
+        if i > reg.floor_courses and prev[1] > 1.0 and cur[1] > 1.0:   # both hollow: the inner face steps gently too
+            assert abs(cur[1] - prev[1]) <= tol
+        prev = cur
+    b = build.make(shape, "twill", draft=True)
+    _ok(b)
+
+
+def test_woven_sleeve_still_fits_its_glass():
+    S = SHAPES["sleeve"]; v = S.resolve({"liner": 70}); reg = S.lattice(v, printer.nozzle(0.4).rod_h)
+    xs = np.linspace(0, 60, 1201)
+    inside = xs[reg.sdf(reg.z(reg.n // 2))(xs, np.zeros_like(xs)) <= 0]
+    assert inside.min() >= 35.0                       # the glass (70 mm) slides in

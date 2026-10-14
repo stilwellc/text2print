@@ -125,8 +125,35 @@ class Vessel(Shape):
 
 
 class Profiled(Shape):
-    """Revolved silhouettes for the fabric family."""
+    """Revolved silhouettes: a wall for fabric/droop/halftone/..., or a woven ring that follows the silhouette."""
     kind = "bowl"
+    LEAN = 0.8                         # woven: a course may step at most 0.8 mm per mm (~39 deg) in or out of the
+                                       # one below — rod ends overhang on BOTH faces, so inward counts too
+
+    def lattice(self, v, rod_h):
+        prof, h, _ = self.profile(v)
+        fitted = self.kind in ("cachepot", "sleeve")         # inner size is the fit: the weave grows outward
+        wall = v.get("wall", 6.0)
+        nf = (lambda k: k + 1 - k % 2)(max(1, int(round(v.get("floor", 4) / rod_h))))
+        if self.kind == "sleeve":
+            nf = 0                                           # open tube: the glass is the floor
+        n = max(nf + 2, _odd_courses(h, rod_h)); fz = nf * rod_h
+        zc = (np.arange(n) + 0.5) * rod_h
+        r_in = np.array([max(prof(min(z, h)) - (SHELL if fitted else wall), 0.0) for z in zc])
+        for k in range(1, n):                                # every course rests on the one below
+            r_in[k] = min(max(r_in[k], r_in[k - 1] - self.LEAN * rod_h), r_in[k - 1] + self.LEAN * rod_h)
+        r_out = r_in + wall
+
+        def sdf_at(z):
+            k = min(n - 1, max(0, int(z / rod_h)))
+            ro, ri = r_out[k], r_in[k]
+            def f(x, y):
+                d = np.hypot(x, y)
+                if z < fz or ri < 5.0:                       # floor, or a stem too thin to hollow: solid
+                    return d - ro
+                return np.maximum(d - ro, ri - d)
+            return f
+        return Region(n, rod_h, sdf_at, float(r_out.max()), True, nf)
 
     def profile(self, v):
         if self.kind == "custom":
@@ -185,27 +212,31 @@ SHAPES = {s.key: s for s in [
         Param("diameter", "Diameter", 50, 160, 1, 90), Param("height", "Height", 30, 160, 1, 90),
         Param("wall", "Wall", 4, 16, 0.5, 8, family="lattice"),
         Param("floor", "Floor", 2, 10, 0.5, 4, family="lattice")], round=True),
-    Profiled("bowl", "Bowl", "Flared bowl", ("fabric", "droop", "halftone", "mix", "spiral", "shell"), [
+    Profiled("bowl", "Bowl", "Flared bowl", ("lattice", "fabric", "droop", "halftone", "mix", "spiral", "shell"), [
         Param("diameter", "Diameter", 80, 200, 1, 180), Param("height", "Height", 30, 120, 1, 70),
-        Param("base", "Base width", 55, 95, 1, 62, "%")], round=True),
-    Profiled("vase", "Vase", "Bellied vase with a narrowing neck", ("fabric", "droop", "halftone", "mix", "spiral", "shell"), [
+        Param("base", "Base width", 55, 95, 1, 62, "%"),
+        Param("wall", "Wall", 4, 16, 0.5, 6, family="lattice"), Param("floor", "Floor", 2, 10, 0.5, 4, family="lattice")], round=True),
+    Profiled("vase", "Vase", "Bellied vase with a narrowing neck", ("lattice", "fabric", "droop", "halftone", "mix", "spiral", "shell"), [
         Param("diameter", "Belly", 70, 180, 1, 120), Param("height", "Height", 80, 240, 1, 180),
-        Param("neck", "Neck", 55, 100, 1, 70, "%")], round=True),
+        Param("neck", "Neck", 55, 100, 1, 70, "%"),
+        Param("wall", "Wall", 4, 16, 0.5, 6, family="lattice"), Param("floor", "Floor", 2, 10, 0.5, 4, family="lattice")], round=True),
 ]}
 SHAPES["vase"].kind = "vase"
-_goblet = Profiled("goblet", "Goblet", "A cup on a stem and foot", ("fabric", "droop", "halftone", "mix", "spiral", "shell"), [
-    Param("diameter", "Diameter", 80, 150, 1, 120), Param("height", "Height", 90, 200, 1, 140)], round=True)
+_goblet = Profiled("goblet", "Goblet", "A cup on a stem and foot", ("lattice", "fabric", "droop", "halftone", "mix", "spiral", "shell"), [
+    Param("diameter", "Diameter", 80, 150, 1, 120), Param("height", "Height", 90, 200, 1, 140),
+        Param("wall", "Wall", 4, 16, 0.5, 6, family="lattice"), Param("floor", "Floor", 2, 10, 0.5, 4, family="lattice")], round=True)
 _goblet.kind = "goblet"
 _candle = Profiled("candle", "Candle holder", "A bell that narrows to a socket for a taper candle", ("droop",), [
     Param("diameter", "Base", 80, 160, 1, 120), Param("height", "Height", 80, 180, 1, 130),
     Param("socket", "Socket", 18, 26, 0.5, 23)], round=True)
 _candle.kind = "candle"; _candle.solid = True
 SHAPES["goblet"] = _goblet; SHAPES["candle"] = _candle
-_custom = Profiled("custom", "Your shape", "Draw the silhouette — five points from foot to rim", ("fabric", "droop", "halftone", "mix", "spiral", "shell"), [
+_custom = Profiled("custom", "Your shape", "Draw the silhouette — five points from foot to rim", ("lattice", "fabric", "droop", "halftone", "mix", "spiral", "shell"), [
     Param("diameter", "Widest", 60, 200, 1, 120), Param("height", "Height", 40, 220, 1, 150),
     Param("c0", "Foot", 20, 100, 1, 62, "%"), Param("c1", "Lower", 20, 100, 1, 92, "%"),
     Param("c2", "Middle", 20, 100, 1, 100, "%"), Param("c3", "Upper", 20, 100, 1, 74, "%"),
-    Param("c4", "Rim", 20, 100, 1, 80, "%")], round=True)
+    Param("c4", "Rim", 20, 100, 1, 80, "%"),
+        Param("wall", "Wall", 4, 16, 0.5, 6, family="lattice"), Param("floor", "Floor", 2, 10, 0.5, 4, family="lattice")], round=True)
 _custom.kind = "custom"
 SHAPES["custom"] = _custom
 
@@ -293,6 +324,7 @@ def _amphora(v):
     return _clamped(f, h)
 
 
+_WOVEN_PARAMS = [Param("wall", "Wall", 4, 16, 0.5, 6, family="lattice"), Param("floor", "Floor", 2, 10, 0.5, 4, family="lattice")]
 KIND_PROFILES = {"cachepot": _cachepot, "sleeve": _sleeve, "lantern": _lantern, "pendant": _pendant,
                  "puck": _puck, "amphora": _amphora}
 _WALL = ("fabric", "droop", "halftone", "mix", "spiral", "shell")
@@ -311,7 +343,9 @@ for key, name, blurb, params in [
         Param("diameter", "Belly", 80, 180, 1, 120), Param("height", "Height", 110, 240, 1, 200),
         Param("neck", "Neck", 30, 70, 1, 42, "%")]),
 ]:
-    _s = Profiled(key, name, blurb, _WALL, params, round=True); _s.kind = key
+    woven = key in ("cachepot", "sleeve", "amphora")
+    _s = Profiled(key, name, blurb, (("lattice",) if woven else ()) + _WALL, params + (_WOVEN_PARAMS if woven else []), round=True)
+    _s.kind = key
     SHAPES[key] = _s
 
 
