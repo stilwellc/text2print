@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import trimesh
 
-from . import bambu, droop, fabric, lattice, printer
+from . import bambu, droop, fabric, halftone, lattice, printer
 from .shapes import SHAPES
 
 # Bambu PLA Matte, approximate swatches (preview + 3MF colour only; the real colour is your spool)
@@ -28,7 +28,9 @@ DEFAULT_COLOURS = ["#8B3A2F", "#EDE3D1", "#C58A3F"]
 TEXTURES = {**{k: dict(family="lattice", **{kk: vv for kk, vv in v.items() if kk != "fn"})
                for k, v in lattice.PATTERNS.items()},
             **{k: dict(family="fabric", slots=1, swaps="none", **v) for k, v in fabric.STITCHES.items()},
-            **{k: dict(family="droop", slots=1, swaps="none", **v) for k, v in droop.STYLES.items()}}
+            **{k: dict(family="droop", slots=1, swaps="none", **v) for k, v in droop.STYLES.items()},
+            "halftone": dict(family="halftone", slots=2, swaps="layer", name="Halftone",
+                             blurb="Two colours alternate every layer; the one that ribs outward paints a picture")}
 
 # options each family offers in the picker: key -> (label, kind, choices, default)
 OPTIONS = {
@@ -37,6 +39,8 @@ OPTIONS = {
     "droop": [("density", "Density", "seg", [("sparse", "Sparse"), ("medium", "Medium"), ("dense", "Dense")], "medium"),
               ("length", "Loop length", "seg", [("short", "Short"), ("medium", "Medium"), ("long", "Long")], "medium")],
     "lattice": [],
+    "halftone": [("picture", "Picture", "seg", [(k, v["name"]) for k, v in halftone.PICTURES.items()], "flames"),
+                 ("band", "Layers per colour", "seg", [("1", "1 — sharpest"), ("2", "2 — half the changes")], "1")],
 }
 
 SWAP_SECONDS = 45          # P2S AMS filament change incl. flush (rough)
@@ -93,7 +97,9 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     S = SHAPES[shape]; T = TEXTURES[texture]; nz = printer.nozzle(nozzle); options = options or {}
     v = S.resolve(params or {}); warnings = []
     colours = list(colours or []) + DEFAULT_COLOURS[len(colours or []):]
-    if not nz.verified:
+    if T["family"] == "halftone" and nz.size in (0.4, 0.8):
+        warnings.append(f"{nz.size} mm uses the published halftone recipe; not yet printed on your P2S")
+    elif not nz.verified:
         warnings.append(f"{nz.size} mm nozzle settings are computed from the proven 0.4 recipe, not yet print-tested")
 
     if T["family"] == "lattice":
@@ -111,6 +117,19 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         over = printer.overrides(nz.size, "lattice", slots=len(parts))
         extra = dict(rods=rods.count(), courses=region.n, rod=f"{nz.rod_w:.2f} × {nz.rod_h:.2f} mm",
                      pitch=nz.pitch)
+    elif T["family"] == "halftone":
+        meshes, info = halftone.build(S, v, nz, picture_name=options.get("picture", "flames"),
+                                      image_path=options.get("image"), band=int(options.get("band", 1)))
+        merged = {}
+        for slot, mesh in sorted(meshes.items()):
+            merged.setdefault(colours[slot], []).append(mesh)
+        parts = [(f"colour {k}", trimesh.util.concatenate(ms), k, col) for k, (col, ms) in enumerate(merged.items(), 1)]
+        swaps = info["swaps"] if len(parts) > 1 else 0
+        over = printer.overrides(nz.size, "halftone", slots=len(parts), floor_layers=info["floor_layers"],
+                                 layer_h=info["layer_h"], line_w=info["line_w"])
+        extra = dict(ribs=info["ribs"], layers=info["layers"], line=info["line_w"])
+        if len(parts) == 1:
+            warnings.append("Both colours are the same — the picture only shows as rib texture.")
     elif T["family"] == "droop":
         mesh, info = droop.build(S, v, nz, style=texture, density=options.get("density", "medium"),
                                  length=options.get("length", "medium"), preview=True)
@@ -142,8 +161,10 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         vol = min(vol, skin + 0.15 * max(vol - skin, 0.0))
     stats = dict(size=[round(float(hi[0] - lo[0]), 1), round(float(hi[1] - lo[1]), 1), round(float(hi[2]), 1)],
                  triangles=int(sum(len(m.faces) for _, m, _, _ in parts)), colours=len(parts), swaps=int(swaps),
-                 grams_est=int(round(float(vol) * 1.26 + swaps * SWAP_GRAMS)), swap_minutes=round(swaps * SWAP_SECONDS / 60),
-                 layer_h=nz.layer_h, nozzle=nz.size, **extra)
+                 grams_est=int(round(float(vol) * 1.26 + swaps * SWAP_GRAMS)),
+                 grams_part=int(round(float(vol) * 1.26)), grams_purge=int(round(swaps * SWAP_GRAMS)), swap_minutes=round(swaps * SWAP_SECONDS / 60),
+                 layer_h=extra.pop("layer_h", None) or (halftone.RECIPE[nz.size][0] if T["family"] == "halftone" else nz.layer_h),
+                 nozzle=nz.size, **extra)
     if max(hi[0] - lo[0], hi[1] - lo[1]) > 2 * printer.SAFE_HALF + 1:
         warnings.append("wider than 200 mm — the prime tower may not fit beside it")
     preview = None

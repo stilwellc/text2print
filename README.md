@@ -32,6 +32,7 @@ From the command line:
 python -m text2print list                                     # shapes, textures, what fits what
 python -m text2print make tray twill --set width=117 --colours "#8B3A2F,#EDE3D1" --out ~/Downloads/tray --slice
 python -m text2print make vase wave --set height=200 --nozzle 0.6 --out ~/Downloads/vase
+python -m text2print make cup halftone --nozzle 0.8 --image flames.png --colours "#F3D34A,#C3302C" --out ~/Downloads/flames
 ```
 
 ## Textures
@@ -78,6 +79,15 @@ with an "As printed" switch for the flat strands the printer actually lays.
 
 Droop pieces choose a density and a loop length.
 
+**Halftone.** Two colours alternate every print layer, each layer one wide wavy line. Where the picture wants
+colour 1, its layers rib outward and colour 2's stay flat behind them, and the reverse elsewhere; the rib depth
+is the grey level. Built-in pictures: flames, fade, polka dots, chevron, waves, or your own image from the
+command line (`--image photo.png`). It prints at the nozzle's maximum layer height with one wide line
+(0.8 nozzle: 0.56 mm layers, 1.4 mm line; 0.4: 0.28 / 1.0), the recipe from kowafatcompany's
+[Fire Flame Vase](https://makerworld.com/en/models/3429731). The AMS changes every layer, so a 0.8 nozzle or
+"2 layers per colour" keeps the change count sane. Works on cup, vase, bowl and goblet; the rib depth shrinks
+where a wall flares so a rib never overhangs more than 60 % of its line.
+
 ## Shapes
 
 | Shape | Textures | Sizes |
@@ -86,11 +96,11 @@ Droop pieces choose a density and a loop length.
 | Platter | woven | the low, wide tray |
 | Round dish | woven (incl. Rose window) | diameter, height, dish, floor, top edge |
 | Coaster | woven | width, height, seat, floor, corner |
-| Cup | woven, fabric or droop | diameter, height (+ wall and floor for rods) |
+| Cup | woven, fabric, droop or halftone | diameter, height (+ wall and floor for rods) |
 | Lamp shade | woven | open cylinder: diameter, height, wall |
-| Bowl | fabric or droop | diameter, height, base width |
-| Vase | fabric or droop | belly, height, neck |
-| Goblet | fabric or droop | a cup on a stem and foot |
+| Bowl | fabric, droop or halftone | diameter, height, base width |
+| Vase | fabric, droop or halftone | belly, height, neck |
+| Goblet | fabric, droop or halftone | a cup on a stem and foot |
 | Candle holder | droop | a solid bell with a socket for a taper candle |
 
 ## Made for the Bambu Lab P2S
@@ -125,7 +135,7 @@ These are print-verified, and the tests enforce the geometric ones.
 ## Repo
 
 ```
-text2print/   shapes.py · lattice.py (woven rods) · droop.py (strands) · fabric.py + fabric_wall.py + fabric_presets.py (fabric)
+text2print/   shapes.py · lattice.py (woven rods) · droop.py (strands) · halftone.py · fabric.py + fabric_wall.py + fabric_presets.py (fabric)
               floors.py · build.py (pick -> project) · printer.py + data/ (P2S) · bambu.py (3MF + CLI slice)
 studio/       server.py + static/ (the picker)
 tests/        python -m pytest

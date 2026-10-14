@@ -1,6 +1,6 @@
 ---
 name: text2print
-description: Textured 3D prints for a Bambu Lab P2S, picked from a catalogue. Use when someone wants a woven, basket, lattice, crosshatch, knit, fabric, zigzag, wave, drooping, fringe, loop or curl-textured tray, platter, dish, coaster, cup, lamp shade, bowl or vase; asks to "pick a pattern / pick a shape"; or wants to open or extend the text2print studio. Produces a Bambu Studio project (one object, one part per AMS colour, P2S settings for the chosen nozzle).
+description: Textured 3D prints for a Bambu Lab P2S, picked from a catalogue. Use when someone wants a woven, basket, lattice, crosshatch, knit, fabric, zigzag, wave, drooping, fringe, loop, curl or two-colour halftone-picture tray, platter, dish, coaster, cup, lamp shade, bowl or vase; asks to "pick a pattern / pick a shape"; or wants to open or extend the text2print studio. Produces a Bambu Studio project (one object, one part per AMS colour, P2S settings for the chosen nozzle).
 ---
 
 # text2print — pick a shape, pick a texture
@@ -33,6 +33,10 @@ ripple, selvedge, beat "Moiré", overunder, tartan. Fabric (`fabric.STITCHES`): 
 options rim_loops and floor = solid | diamonds | lens. Droop (`droop.STYLES`): fringe, swag, curls, unraveled;
 options density = sparse | medium | dense, length = short | medium | long. `Build.preview` holds the strands hung
 by gravity (display only — strands pass through each other); the print files carry the flat strands.
+Halftone (`halftone.py`, texture "halftone" on cup/vase/bowl/goblet): options picture = flames|fade|dots|chevron|waves,
+band = 1|2 layers per colour, CLI `--image path` (dark = colour 1). Recipe `halftone.RECIPE`: layer = nozzle max
+(0.7 x nozzle), one line 2.5x (0.2/0.4) to 1.75x (0.8) the nozzle, 1 wall, 0 % infill. Colour flips every layer;
+rib swing = min(0.5, 0.6 - local wall lean) x line. Stats split grams_part and grams_purge.
 
 ## Laws (print-verified; tests enforce the geometric ones)
 

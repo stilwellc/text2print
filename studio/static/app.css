@@ -38,7 +38,8 @@ h2 { font-size: 15px; margin-bottom: 12px; }
   font-variant-numeric: tabular-nums; }
 .seg button[aria-checked="true"] { background: var(--ink); color: #fff; }
 .seg button:hover:not([aria-checked="true"]) { color: var(--ink); }
-.seg.small button { padding: 5px 12px; font-size: 13px; }
+.seg.small { flex-wrap: wrap; border-radius: 18px; }
+.seg.small button { padding: 5px 12px; font-size: 13px; white-space: nowrap; }
 
 /* layout */
 .app { display: grid; height: calc(100vh - 56px);

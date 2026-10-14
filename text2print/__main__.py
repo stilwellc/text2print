@@ -22,6 +22,9 @@ def main(argv=None):
     mk.add_argument("--nozzle", type=float, default=0.4)
     mk.add_argument("--colours", default="", help="comma-separated hex colours, one per slot")
     mk.add_argument("--rim-loops", action="store_true"); mk.add_argument("--floor", default="solid")
+    mk.add_argument("--option", action="append", default=[], metavar="KEY=VALUE",
+                    help="texture option, e.g. picture=dots, band=2, density=dense, length=long")
+    mk.add_argument("--image", help="halftone: your own picture (dark = colour 1), wrapped once around the wall")
     mk.add_argument("--out", default="."); mk.add_argument("--slice", action="store_true")
     mk.add_argument("--render", action="store_true")
     sub.add_parser("thumbs")
@@ -48,7 +51,8 @@ def main(argv=None):
         k, _, v = kv.partition("="); params[k.strip()] = float(v)
     colours = [c.strip() for c in a.colours.split(",") if c.strip()]
     b = build.make(a.shape, a.texture, params, nozzle=a.nozzle, colours=colours,
-                   options={"rim_loops": a.rim_loops, "floor": a.floor})
+                   options={"rim_loops": a.rim_loops, "floor": a.floor, "image": a.image,
+                            **dict(kv.split("=", 1) for kv in a.option)})
     out = pathlib.Path(a.out).expanduser(); out.mkdir(parents=True, exist_ok=True)
     stem = f"{a.shape}_{a.texture}"
     p3 = b.write_3mf(out / f"{stem}.3mf"); b.write_stls(out, stem)
