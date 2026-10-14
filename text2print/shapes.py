@@ -130,6 +130,8 @@ class Profiled(Shape):
 
     def profile(self, v):
         top, h = v["diameter"] / 2, v["height"]
+        if self.kind == "custom":
+            return custom_profile(v)
         if self.kind == "goblet":
             stem = top * 0.26; foot = top * 0.62
             def f(z):
@@ -197,6 +199,35 @@ _candle = Profiled("candle", "Candle holder", "A bell that narrows to a socket f
     Param("socket", "Socket", 18, 26, 0.5, 22.5)], round=True)
 _candle.kind = "candle"; _candle.solid = True
 SHAPES["goblet"] = _goblet; SHAPES["candle"] = _candle
+_custom = Profiled("custom", "Your shape", "Draw the silhouette — five points from foot to rim", ("fabric", "droop", "halftone", "mix"), [
+    Param("diameter", "Widest", 60, 200, 1, 120), Param("height", "Height", 40, 220, 1, 150),
+    Param("c0", "Foot", 20, 100, 1, 62, "%"), Param("c1", "Lower", 20, 100, 1, 92, "%"),
+    Param("c2", "Middle", 20, 100, 1, 100, "%"), Param("c3", "Upper", 20, 100, 1, 74, "%"),
+    Param("c4", "Rim", 20, 100, 1, 80, "%")], round=True)
+_custom.kind = "custom"
+SHAPES["custom"] = _custom
+
+
+def custom_profile(v):
+    """Monotone cubic (Fritsch-Carlson) through five radii at 0/25/50/75/100 % height, then clamped so the wall
+    never leans outward faster than ~42 deg (printable without supports) and never thinner than 12 mm radius."""
+    R = v["diameter"] / 2; h = v["height"]
+    xs = np.array([0, 0.25, 0.5, 0.75, 1.0]) * h
+    ys = np.array([max(12.0, R * v[f"c{i}"] / 100.0) for i in range(5)])
+    d = np.diff(ys) / np.diff(xs)
+    m = np.zeros(5); m[0], m[-1] = d[0], d[-1]
+    for i in range(1, 4):
+        m[i] = 0.0 if d[i - 1] * d[i] <= 0 else 2 / (1 / d[i - 1] + 1 / d[i])
+    zf = np.linspace(0, h, int(h / 0.25) + 1); rf = np.empty_like(zf)
+    for k, z in enumerate(zf):
+        i = min(3, int(z / (h / 4))); t = (z - xs[i]) / (xs[i + 1] - xs[i]); hh = xs[i + 1] - xs[i]
+        rf[k] = ((2 * t ** 3 - 3 * t ** 2 + 1) * ys[i] + (t ** 3 - 2 * t ** 2 + t) * hh * m[i]
+                 + (-2 * t ** 3 + 3 * t ** 2) * ys[i + 1] + (t ** 3 - t ** 2) * hh * m[i + 1])
+    for k in range(1, len(rf)):                                   # overhang law: outward lean <= 0.9 mm per mm
+        rf[k] = min(rf[k], rf[k - 1] + 0.9 * (zf[k] - zf[k - 1]))
+    rf = np.maximum(rf, 12.0)
+    rmax = float(rf.max())
+    return (lambda z: float(np.interp(z, zf, rf))), h, rmax
 _shade = Vessel("shade", "Lamp shade", "Open cylinder — light through the weave", ("lattice",), [
     Param("diameter", "Diameter", 80, 200, 1, 140), Param("height", "Height", 60, 180, 1, 120),
     Param("wall", "Wall", 4, 14, 0.5, 6)], round=True)
