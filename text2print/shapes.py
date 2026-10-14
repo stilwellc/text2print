@@ -177,19 +177,19 @@ SHAPES = {s.key: s for s in [
         Param("width", "Width", 70, 140, 1, 100), Param("height", "Height", 5, 16, 0.5, 8),
         Param("dish", "Seat", 0, 120, 1, 76), Param("floor", "Floor", 2, 12, 0.5, 5.6),
         Param("corner", "Corner", 0, 40, 1, 16), Param("pillow", "Top edge", 0, 4, 0.5, 2)]),
-    Vessel("cup", "Cup", "Straight-walled vessel with a floor", ("lattice", "fabric", "droop"), [
+    Vessel("cup", "Cup", "Straight-walled vessel with a floor", ("lattice", "fabric", "droop", "halftone"), [
         Param("diameter", "Diameter", 50, 160, 1, 90), Param("height", "Height", 30, 160, 1, 90),
         Param("wall", "Wall", 4, 16, 0.5, 8, family="lattice"),
         Param("floor", "Floor", 2, 10, 0.5, 4, family="lattice")], round=True),
-    Profiled("bowl", "Bowl", "Flared bowl", ("fabric", "droop"), [
+    Profiled("bowl", "Bowl", "Flared bowl", ("fabric", "droop", "halftone"), [
         Param("diameter", "Diameter", 80, 200, 1, 180), Param("height", "Height", 30, 120, 1, 70),
         Param("base", "Base width", 55, 95, 1, 62, "%")], round=True),
-    Profiled("vase", "Vase", "Bellied vase with a narrowing neck", ("fabric", "droop"), [
+    Profiled("vase", "Vase", "Bellied vase with a narrowing neck", ("fabric", "droop", "halftone"), [
         Param("diameter", "Belly", 70, 180, 1, 120), Param("height", "Height", 80, 240, 1, 180),
         Param("neck", "Neck", 55, 100, 1, 70, "%")], round=True),
 ]}
 SHAPES["vase"].kind = "vase"
-_goblet = Profiled("goblet", "Goblet", "A cup on a stem and foot", ("fabric", "droop"), [
+_goblet = Profiled("goblet", "Goblet", "A cup on a stem and foot", ("fabric", "droop", "halftone"), [
     Param("diameter", "Diameter", 80, 150, 1, 120), Param("height", "Height", 90, 200, 1, 140)], round=True)
 _goblet.kind = "goblet"
 _candle = Profiled("candle", "Candle holder", "A bell that narrows to a socket for a taper candle", ("droop",), [

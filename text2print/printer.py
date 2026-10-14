@@ -61,7 +61,7 @@ def _per_extruder(base, key, value):
     return [value] * len(cur) if isinstance(cur, list) else value
 
 
-def overrides(size, family, slots=1, floor_layers=0, wall_speed=None, solid=False) -> dict:
+def overrides(size, family, slots=1, floor_layers=0, wall_speed=None, solid=False, layer_h=None, line_w=None) -> dict:
     """Slicer settings for a texture family on this nozzle. family = 'lattice' | 'fabric'."""
     n = nozzle(size); base = base_config(size)
     lw = f"{n.line_w:.2f}"
@@ -83,6 +83,14 @@ def overrides(size, family, slots=1, floor_layers=0, wall_speed=None, solid=Fals
                      "bridge_speed": "50", "outer_wall_speed": "100", "inner_wall_speed": "150",
                      "initial_layer_speed": "35"}.items():
             o[k] = _per_extruder(base, k, v)
+    elif family == "halftone":
+        # one wide line per layer at the nozzle's max layer height (the published 0.4/0.8 recipe)
+        w = f"{line_w:.2f}"
+        o.update({"layer_height": f"{layer_h:.2f}", "initial_layer_print_height": f"{layer_h:.2f}",
+                  "line_width": w, "outer_wall_line_width": w, "inner_wall_line_width": w,
+                  "initial_layer_line_width": w, "top_surface_line_width": w, "internal_solid_infill_line_width": w,
+                  "wall_loops": "1", "bottom_shell_layers": str(max(floor_layers, 3)), "detect_thin_wall": "1",
+                  "wall_generator": "arachne", "spiral_mode": "0"})
     elif family == "droop":
         # a plain 2-loop wall + single-line strands into air. Print-verified: the strands only droop if they are
         # laid FAST and stay molten — no overhang slow-down, fan <= 20 %, nozzle +5 C

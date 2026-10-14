@@ -10,6 +10,7 @@ OUT = pathlib.Path(__file__).resolve().parent.parent / "studio" / "static" / "th
 FABRIC_TONE = "#D2B48C"     # fabric relief reads in a light tone under raking light
 SHAPE_LOOK = {"tray": "twill", "platter": "grid", "dish": "polar", "coaster": "selvedge", "cup": "grid",
               "shade": "kagome", "bowl": "zigzag", "vase": "wave", "goblet": "swag", "candle": "curls"}
+HALFTONE_COLOURS = ["#F3D34A", "#C3302C"]
 SAMPLE = {"lattice": ("coaster", {"width": 70, "height": 8, "dish": 0, "corner": 12, "pillow": 0}),
           "lattice_round": ("dish", {"diameter": 70, "height": 9, "dish": 0, "pillow": 0}),
           "fabric": ("cup", {"diameter": 60, "height": 46})}
@@ -29,7 +30,11 @@ def render_all(only=None):
     for key, t in build.TEXTURES.items():
         if only and f"texture_{key}" not in only:
             continue
-        if t["family"] == "droop":                         # a small cup wearing the strands, raking light
+        if t["family"] == "halftone":
+            b = build.make("cup", key, {"diameter": 80, "height": 90}, nozzle=0.8, colours=HALFTONE_COLOURS)
+            render([(m, c) for _, m, _, c in b.parts], OUT / f"texture_{key}.png", size=360,
+                   view=(1.0, -0.9, 0.25), zoom=1.1)
+        elif t["family"] == "droop":                         # a small cup wearing the strands, raking light
             b = build.make("cup", key, {"diameter": 60, "height": 90}, colours=[FABRIC_TONE])
             render([(m, c) for _, m, _, c in b.preview], OUT / f"texture_{key}.png", size=360,
                    view=(1.0, -0.9, 0.3), zoom=1.15, rake=True)

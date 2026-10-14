@@ -83,7 +83,7 @@ function pickShape(key) {
 
 function renderTextures() {
   const sh = shapeOf(state.shape);
-  const groups = [["lattice", "Woven rods"], ["fabric", "Printed fabric"], ["droop", "Droop"]].filter(([f]) => sh.families.includes(f));
+  const groups = [["lattice", "Woven rods"], ["fabric", "Printed fabric"], ["droop", "Droop"], ["halftone", "Halftone"]].filter(([f]) => sh.families.includes(f));
   const kids = [];
   for (const [fam, label] of groups) {
     if (groups.length > 1) kids.push(el("div", { class: "group-label" }, label));
@@ -116,6 +116,7 @@ function renderColours() {
   }, el("span", { class: "chip", style: `background:${state.colours[i]}` }), el("span", { class: "name" }, nameOfColour(state.colours[i])),
      el("span", { class: "slot" }, tex.slots > 1 ? `AMS ${i + 1}` : "AMS 1"))));
   $("colourHint").textContent = tex.slots === 1 ? "One colour — no AMS changes."
+    : tex.family === "halftone" ? "Colour 1 paints the picture, colour 2 the background. The AMS changes every layer — pick strong contrast."
     : tex.swaps === "layer" ? "Colours mix inside every course, so the AMS changes about once per layer. Pick the same colour twice for a one-colour print."
     : "Colour follows rod direction: one AMS change per course. Pick the same colour twice for a one-colour print.";
 }
@@ -164,7 +165,7 @@ function changed(newShape = false) {
 async function requestBuild() {
   if (inflight) { pending = true; return; }
   inflight = true; pending = false;
-  $("status").hidden = false; $("statusText").textContent = { fabric: "Knitting…", droop: "Spinning strands…" }[textureOf(state.texture).family] || "Weaving…";
+  $("status").hidden = false; $("statusText").textContent = { fabric: "Knitting…", droop: "Spinning strands…", halftone: "Screening…" }[textureOf(state.texture).family] || "Weaving…";
   try {
     const res = await fetch("/api/build", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shape: state.shape, texture: state.texture, nozzle: state.nozzle, params: state.params,
@@ -190,10 +191,11 @@ function renderPrint(d) {
   const rows = [["Size", `${fmt(s.size[0])} × ${fmt(s.size[1])} × ${fmt(s.size[2], 1)} mm`]];
   if (s.rods) rows.push(["Rods", `${fmt(s.rods)} · ${s.courses} courses`]);
   if (s.stitches) rows.push(["Stitches around", fmt(s.stitches)]);
+  if (s.ribs) rows.push(["Ribs × layers", `${fmt(s.ribs)} × ${fmt(s.layers)}`]);
   if (s.strands) rows.push(["Strands", `${fmt(s.strands)} · up to ${fmt(s.reach)} mm out`]);
   rows.push(["Colours", String(s.colours)]);
   if (s.swaps) rows.push(["AMS changes", `${fmt(s.swaps)} · ≈ ${fmt(s.swap_minutes)} min`]);
-  rows.push(["Filament", `≈ ${fmt(s.grams_est)} g`]);
+  rows.push(["Filament", s.grams_purge ? `≈ ${fmt(s.grams_part)} g + ${fmt(s.grams_purge)} g purge` : `≈ ${fmt(s.grams_est)} g`]);
   $("stats").replaceChildren(...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
   $("dims").replaceChildren(`${fmt(s.size[0])} × ${fmt(s.size[1])} × ${fmt(s.size[2], 1)} mm`,
     el("span", { class: "tris" }, ` · ${fmt(s.triangles / 1e6, 2)} M triangles`));
@@ -203,16 +205,19 @@ function renderPrint(d) {
   $("dl3mf").href = `/api/job/${d.id}/download`; $("dlStl").href = `/api/job/${d.id}/stls`;
   const noz = CAT.nozzles.find((n) => n.size === s.nozzle);
   const notes = [...d.warnings];
-  if (tex.swaps === "layer" && s.colours > 1) notes.push("This pattern changes colour about once per layer — expect a long print, or pick one colour.");
+  if (tex.swaps === "layer" && s.colours > 1 && tex.family !== "halftone") notes.push("This pattern changes colour about once per layer — expect a long print, or pick one colour.");
+  if (tex.family === "halftone" && s.swaps > 400) notes.push(`${fmt(s.swaps)} colour changes — a bigger nozzle or 2 layers per colour cuts that a lot.`);
   notes.push({
     lattice: "No supports, no infill — the rods are the object. Print on a clean plate, no brim.",
     fabric: "Vase mode off. The layer height must stay at " + noz.layer + " mm — the pattern is built on it.",
+    halftone: `Prints at ${s.layer_h} mm layers with one ${s.line} mm line — keep those, the picture is built on them.`,
     droop: "Glossy or translucent PETG/PLA shows the strands best. Don't slow overhangs down or raise the fan — the strands only droop while molten.",
   }[tex.family]);
   $("notes").replaceChildren(...notes.map((n) => el("li", {}, n)));
   const set = [["Printer", CAT.printer.name], ["Nozzle", `${s.nozzle} mm`], ["Layer height", `${s.layer_h} mm`],
     ...({ lattice: [["Rod", s.rod], ["Rod spacing", `${s.pitch} mm`], ["Walls", "rods only"], ["Infill", "0%"]],
           fabric: [["Walls", "2 loops"], ["Infill", "0%"], ["Top layers", "0"]],
+          halftone: [["Line width", `${s.line} mm, 1 wall`], ["Infill", "0%"], ["Colour changes", "every layer"]],
           droop: [["Walls", "2 loops, strands 1 line"], ["Overhang slow-down", "off"], ["Fan", "≤ 20%"], ["Nozzle", "+5 °C"]] }[tex.family]),
     ["Supports", "none"], ["Filament", "Bambu PLA Matte"]];
   $("settings").replaceChildren(...set.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
