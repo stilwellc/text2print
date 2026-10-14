@@ -207,7 +207,18 @@ class Build:
         return out
 
 
-LID_SKIP = ("lid", "lid_fit", "lid_colour", "zones", "zone_style", "course_rows", "purge_piece", "floor", "rim_loops",
+def lid_textures():
+    """What a lid can look like: match the piece, plain, or any wall/woven look that makes sense on a short cap
+    (not droop: strands would point up once the lid is flipped on; not fuzzy/litho/flat)."""
+    out = [dict(key="match", name="Match the piece", family="match"), dict(key="plain", name="Plain", family="plain")]
+    for k, t in TEXTURES.items():
+        if t["family"] in ("lattice", "fabric", "halftone", "spiral") or k == "voronoi":
+            out.append(dict(key=k, name=t["name"], family=t["family"]))
+    return out
+
+
+LID_KNOBS = [("knob", "Knob"), ("button", "Flat button"), ("none", "None")]
+LID_SKIP = ("lid", "lid_fit", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "zones", "zone_style", "course_rows", "purge_piece", "floor", "rim_loops",
             "purge", "handles")
 
 
@@ -219,6 +230,8 @@ def _cap_or_plain(lid_parts, assembled, *a):
     except Exception as e:                                   # never lose the lid: fall back to the plain plate
         warnings.append(f"The lid is plain: its texture couldn't be built ({type(e).__name__}).")
         return lid_parts, assembled
+    if cap and a[-2].get("lid", {}).get("note"):
+        warnings.append(a[-2]["lid"]["note"])
     return cap if cap else (lid_parts, assembled)
 
 
@@ -246,8 +259,26 @@ def _lid_cap(shape, S, T, texture, v, nz, colours, options, parts, ls, t_plate, 
         cap_tex, cap_opts, cap_cols = "mix", {"bands": [dict(texture="plain", share=100, slot=0)]}, [top_col]
     if options.get("lid_colour") and len(set(cap_cols)) == 1:
         cap_cols = [colours[int(options["lid_colour"]) - 1]]
+    pick = options.get("lid_texture") or "match"                # the Lid section: any look, colours, height
+    if pick == "plain":
+        cap_tex, cap_opts = "mix", {"bands": [dict(texture="plain", share=100, slot=0)]}
+    elif pick != "match" and pick in TEXTURES:
+        cap_tex, cap_opts = pick, {}
+    if pick != "match":
+        cap_cols = [c for c in (options.get("lid_colours") or []) if isinstance(c, str) and c.startswith("#")] or cap_cols
+        two = cap_tex != "mix" and TEXTURES[cap_tex].get("slots", 1) >= 2
+        if not two:
+            cap_cols = cap_cols[:1]
+        elif len(cap_cols) < 2:                                 # a woven/halftone lid needs a second colour
+            other = [c for c in colours if c != cap_cols[0]]
+            cap_cols = cap_cols + (other[:1] or cap_cols[:1])
+    elif options.get("lid_colours"):
+        lc = list(options["lid_colours"])
+        cap_cols = (lc + lc)[:max(1, len(set(cap_cols)))] if len(set(cap_cols)) > 1 else lc[:1]
     lat = TEXTURES[cap_tex]["family"] == "lattice"
     Hs = float(min(14.0, max(8.0, round(0.12 * top))))
+    if options.get("lid_height"):
+        Hs = float(min(40.0, max(5.0, float(options["lid_height"]))))
     if not getattr(S, "round", False):                          # same outline: tray, basket, catch-all, platter
         cap_shape, cp = shape, dict(v, height=Hs, handles=0)
         if lat and "dish" in v:
@@ -256,7 +287,10 @@ def _lid_cap(shape, S, T, texture, v, nz, colours, options, parts, ls, t_plate, 
             cp.update(floor=4)
     else:
         cap_shape = "cup"
-        if lat:
+        if lat and fam != "lattice":                            # a woven lid on a fabric/halftone/... piece
+            prof, h_, _ = S.profile(v)
+            cp = dict(diameter=2 * prof(h_), height=Hs, wall=6.0, floor=4)
+        elif lat:
             reg = S.lattice(v, nz.rod_h); xs = np.linspace(0, reg.extent + 6, 3000)
             ins = xs[reg.sdf(reg.z(reg.n - 1))(xs, np.zeros_like(xs)) <= 0]
             ro = float(ins.max()); wall = float(min(16.0, max(4.0, ro - ins.min())))
@@ -264,6 +298,14 @@ def _lid_cap(shape, S, T, texture, v, nz, colours, options, parts, ls, t_plate, 
         else:
             prof, h_, _ = S.profile(v)
             cp = dict(diameter=2 * prof(h_), height=Hs)
+    if not compatible(cap_shape, cap_tex):                    # e.g. Rose window on a square tray
+        stats.setdefault("lid", {})["note"] = f"{TEXTURES[cap_tex]['name']} doesn't fit this outline — plain lid."
+        cap_tex, cap_opts, cap_cols = "mix", {"bands": [dict(texture="plain", share=100, slot=0)]}, cap_cols[:1]
+        lat = False
+    if not getattr(S, "round", False) and TEXTURES[cap_tex]["family"] == "lattice" and fam != "lattice":
+        cp.setdefault("wall", 9.0); cp.setdefault("floor", 4.0)
+        if "dish" in v:
+            cp.update(dish=0, pillow=0, floor=Hs)
     cap = make(cap_shape, cap_tex, cp, nz.size, cap_cols, cap_opts, draft=draft, _raw=True)
     cparts = [(n_, m_, s_, c_) for n_, m_, s_, c_ in cap.parts]
     # the cap's floor (= the lid's top) thickness: where a vertical probe near the centre leaves the solid
@@ -278,9 +320,11 @@ def _lid_cap(shape, S, T, texture, v, nz, colours, options, parts, ls, t_plate, 
     F = max(F, 0.8)
     plug, foot = extras.plug_of(ls["lid"], t_plate)
     adds = [plug.translate([0, 0, Hs - t_plate]), extras.prism(foot, F - 0.3, Hs + 0.1)]
-    boss_h = max(F, extras.LID_T) + 0.01
-    adds.append(m3d.Manifold.cylinder(boss_h, extras.KNOB_HOLE / 2 + 3.5, extras.KNOB_HOLE / 2 + 3.5, 48))
-    cuts = [m3d.Manifold.cylinder(boss_h + 2, extras.KNOB_HOLE / 2, extras.KNOB_HOLE / 2, 48).translate([0, 0, -1])]
+    knob_style = options.get("lid_knob", "knob")
+    boss_h = max(F, extras.LID_T) + 0.01; cuts = []
+    if knob_style != "none":
+        adds.append(m3d.Manifold.cylinder(boss_h, extras.KNOB_HOLE / 2 + 3.5, extras.KNOB_HOLE / 2 + 3.5, 48))
+        cuts = [m3d.Manifold.cylinder(boss_h + 2, extras.KNOB_HOLE / 2, extras.KNOB_HOLE / 2, 48).translate([0, 0, -1])]
     if style == "magnets" and open_r:                           # pedestal over the land, magnet pockets in its face
         M = extras.MAGNET; clear = ls["clearance"]
         r_in = open_r - M["land"] - clear; r_out = open_r - clear; n_ = max(96, int(2 * math.pi * r_out / 1.2))
@@ -302,16 +346,19 @@ def _lid_cap(shape, S, T, texture, v, nz, colours, options, parts, ls, t_plate, 
                 if piece is not None and len(piece.faces):
                     rest.append(("graft", piece, 1 + i % 2, cap_cols[i % 2]))
             grafted = rest
-    kc = cap_cols[0] if len(set(cap_cols)) == 1 else top_col
-    lid_parts = [("Lid", m_, s_, c_) for _, m_, s_, c_ in grafted] + [("Knob", ls["knob"], 1, kc)]
+    kc = cap_cols[0] if len(set(cap_cols)) == 1 else (cap_cols[0] if pick != "match" else top_col)
+    knob_m = None if knob_style == "none" else (extras.button(ls["knob"]) if knob_style == "button" else ls["knob"])
+    lid_parts = [("Lid", m_, s_, c_) for _, m_, s_, c_ in grafted] + ([("Knob", knob_m, 1, kc)] if knob_m is not None else [])
     flip = trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0])
     assembled = []
     for _, m_, s_, c_ in grafted:                               # flipped: plane z = Hs lands on the piece's rim
         a_ = m_.copy(); a_.apply_transform(flip); a_.apply_translation([0, 0, top + Hs]); assembled.append(("Lid", a_, s_, c_))
-    kb = ls["knob"].copy(); kb.apply_transform(flip)
-    kb.apply_translation([0, 0, top + Hs - kb.bounds[0][2] - (extras.LID_T + 0.6)])
-    assembled.append(("Knob", kb, 1, kc))
-    stats.setdefault("lid", {}).update(cap=TEXTURES[cap_tex]["name"] if cap_tex != "mix" else "Plain", cap_h=Hs)
+    if knob_m is not None:
+        kb = knob_m.copy(); kb.apply_transform(flip)
+        kb.apply_translation([0, 0, top + Hs - kb.bounds[0][2] - (extras.LID_T + 0.6)])
+        assembled.append(("Knob", kb, 1, kc))
+    stats.setdefault("lid", {}).update(cap=TEXTURES[cap_tex]["name"] if cap_tex != "mix" else "Plain", cap_h=Hs,
+                                       knob=knob_style)
     return lid_parts, assembled
 
 
@@ -360,10 +407,15 @@ def _geom_transitions(parts, over, ranges):
         on = np.cumsum(d)[:-1] > 0
         present[col] = present.get(col, np.zeros(len(mids), bool)) | on
     cols = list(present); seq = []
-    for k in range(len(mids)):
-        here = [c for c in cols if present[c][k]]
-        if seq and seq[-1] in here:
+    layers_ = [[c for c in cols if present[c][k]] for k in range(len(mids))]
+    for k, here in enumerate(layers_):
+        here = list(here)
+        if seq and seq[-1] in here:                             # start with the colour already loaded
             here.remove(seq[-1]); here.insert(0, seq[-1])
+        nxt = next((L for L in layers_[k + 1:] if L), [])       # ...and end on one the next layer needs
+        tail = [c for c in here[1:] if c in nxt]
+        if tail and len(here) > 2:
+            here.remove(tail[0]); here.append(tail[0])
         seq.extend(here)
     return [(x, y) for x, y in zip(seq, seq[1:]) if x != y]
 
@@ -776,6 +828,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
             lid_parts, assembled = _cap_or_plain(lid_parts, assembled, shape, S, T, texture, v, nz, colours, options,
                                                  parts, ls, t_plate, style, open_r, top, draft, stats, warnings)
     if lid_parts:
+        stats["colours"] = len({c for _, _, _, c in parts + lid_parts})   # the lid's own filaments count too
         probe = Build(shape, texture, nz.size, v, T["family"], parts, stats, over, extras=lid_parts)
         if probe.lid_shares_plate() and len({c for _, _, _, c in parts + lid_parts}) > 1:
             transitions = _geom_transitions(parts + lid_parts, over, ranges); swaps = len(transitions)

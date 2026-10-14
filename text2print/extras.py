@@ -350,3 +350,12 @@ def prism(polys, z0, z1):
     ms = [trimesh.creation.extrude_polygon(p, z1 - z0) for p in polys]
     m = trimesh.util.concatenate(ms); m.apply_translation([0, 0, z0])
     return _m3d(m)
+
+
+def button(knob):
+    """A low flat button with the same press-fit peg as the knob: 3 mm cap, 1 mm chamfer."""
+    import manifold3d as m3d
+    r = max(9.0, float(np.abs(knob.vertices[:, :2]).max()) * 0.9)
+    cap = m3d.Manifold.cylinder(3.0, r, r - 1.0, 64)
+    peg = m3d.Manifold.cylinder(LID_T + 0.6, (KNOB_HOLE - 0.15) / 2, (KNOB_HOLE - 0.15) / 2, 48).translate([0, 0, 2.99])
+    return _tm(cap + peg)

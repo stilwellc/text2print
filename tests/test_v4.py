@@ -444,3 +444,61 @@ def test_plate_wide_change_count_includes_the_lid():
                    colours=["#8B3A2F", "#EDE3D1"], draft=True)
     plain = build.make("cup", "twill", {"diameter": 70, "height": 50}, colours=["#8B3A2F", "#EDE3D1"], draft=True)
     assert b.stats["swaps"] >= plain.stats["swaps"]
+
+
+# ── the Lid section: any look, colours, height and knob ─────────────────────────────────────────────────
+@pytest.mark.parametrize("shape,texture,opts,cap,cols", [
+    ("cup", "zigzag", {"lid_texture": "twill", "lid_colours": ["#2E4E7E", "#EDE3D1"]}, "Twill", {"#2E4E7E", "#EDE3D1"}),
+    ("tray", "zigzag", {"lid_texture": "halftone", "lid_colours": ["#F3D34A", "#C3302C"]}, "Halftone", {"#F3D34A", "#C3302C"}),
+    ("basket", "twill", {"lid_texture": "domes", "lid_colours": ["#EDE3D1"]}, "Knit", {"#EDE3D1"}),
+    ("cup", "halftone", {"lid_texture": "plain", "lid_colours": ["#2E4E7E"]}, "Plain", {"#2E4E7E"}),
+    ("tray", "twill", {"lid_texture": "polar"}, "Plain", None),                      # doesn't fit a square: plain + note
+])
+def test_lid_section_picks_any_look(shape, texture, opts, cap, cols):
+    b = build.make(shape, texture, options={"lid": "slip", **opts}, colours=["#8B3A2F", "#EDE3D1"], draft=True)
+    assert b.stats["lid"]["cap"] == cap
+    lid = [(m, c) for n, m, _, c in b.extras if n == "Lid"]
+    assert all(m.is_watertight for m, _ in lid)
+    if cols:
+        assert {c for _, c in lid} == cols
+    if texture == "twill" and opts.get("lid_texture") == "polar":
+        assert any("doesn't fit" in w for w in b.warnings)
+
+
+def test_lid_height_and_knob_styles():
+    tall = build.make("cup", "zigzag", options={"lid": "slip", "lid_height": 24, "lid_knob": "none"}, draft=True)
+    assert tall.stats["lid"]["cap_h"] == 24 and not any(n == "Knob" for n, *_ in tall.extras)
+    btn = build.make("cup", "zigzag", options={"lid": "slip", "lid_knob": "button"}, draft=True)
+    knob = [m for n, m, _, _ in btn.extras if n == "Knob"][0]
+    assert knob.is_watertight and knob.bounds[1][2] - knob.bounds[0][2] < 7.0      # low button + peg
+
+
+def test_studio_catalogue_lists_lid_looks():
+    from studio import server
+    c = server.app.test_client().get("/api/catalogue").get_json()
+    keys = [t["key"] for t in c["lid"]["textures"]]
+    assert keys[:2] == ["match", "plain"] and "twill" in keys and "fringe" not in keys and "fuzzy" not in keys
+
+
+def test_one_part_objects_carry_their_filament_at_object_level(tmp_path):
+    import re
+    b = build.make("cup", "zigzag", {"diameter": 70, "height": 50}, options={"lid": "slip", "lid_texture": "plain",
+                   "lid_colours": ["#2E4E7E"]}, colours=["#8B3A2F"], draft=True)
+    ms = zipfile.ZipFile(b.write_3mf(tmp_path / "k.3mf")).read("Metadata/model_settings.config").decode()
+    for ob in re.findall(r'<object id="\d+">(.*?)</object>', ms, re.S):
+        obj_ext = re.search(r'^    <metadata key="extruder" value="(\d)"/>', ob, re.M).group(1)
+        part_ext = re.findall(r'<part .*?key="extruder" value="(\d)"', ob, re.S)[0]
+        assert obj_ext == part_ext                     # the knob is blue, not filament 1
+
+
+@pytest.mark.slicer
+def test_real_slicer_counts_a_three_colour_lid(tmp_path):
+    if not bambu.slicer_available():
+        pytest.skip("Bambu Studio not installed")
+    import re
+    b = build.make("cup", "zigzag", {"diameter": 70, "height": 50}, options={"lid": "slip", "lid_texture": "twill",
+                   "lid_colours": ["#2E4E7E", "#EDE3D1"]}, colours=["#8B3A2F"])
+    r = bambu.slice_project(b.write_3mf(tmp_path / "l.3mf"), tmp_path / "s")
+    assert "error" not in r, r
+    g = zipfile.ZipFile(tmp_path / "s" / "sliced.3mf").read("Metadata/plate_1.gcode").decode(errors="ignore")
+    assert len(re.findall(r"^M620 S\dA", g, re.M)) == b.stats["swaps"]
