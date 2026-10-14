@@ -92,16 +92,12 @@ def overrides(size, family, slots=1, floor_layers=0, wall_speed=None, solid=Fals
                   "wall_loops": "1", "bottom_shell_layers": str(max(floor_layers, 3)), "detect_thin_wall": "1",
                   "wall_generator": "arachne", "spiral_mode": "0"})
     elif family == "droop":
-        # a plain 2-loop wall + single-line strands into air. Print-verified: the strands only droop if they are
-        # laid FAST and stay molten — no overhang slow-down, fan <= 20 %, nozzle +5 C
-        temp = [str(int(t) + 5) for t in base["nozzle_temperature"]]
+        # a plain 2-loop wall + single-line strands into air. The strands only droop if laid FAST and molten, so the
+        # overhang slow-down is off (process level); fan and temperature are per filament (filament_settings)
         o.update({"wall_loops": "2", "bottom_shell_layers": str(max(floor_layers, 3)), "detect_thin_wall": "1",
                   "wall_generator": "arachne", "top_shell_layers": "5" if solid else "0",
                   "sparse_infill_density": "15%" if solid else "0%", "sparse_infill_pattern": "gyroid",
-                  "enable_overhang_speed": _per_extruder(base, "enable_overhang_speed", "0"),
-                  "fan_max_speed": ["20"], "fan_min_speed": ["10"], "overhang_fan_speed": ["20"],
-                  "additional_cooling_fan_speed": ["0"], "slow_down_for_layer_cooling": ["0"],
-                  "nozzle_temperature": temp, "nozzle_temperature_initial_layer": list(base["nozzle_temperature_initial_layer"])})
+                  "enable_overhang_speed": _per_extruder(base, "enable_overhang_speed", "0")})
     else:
         # printed fabric: a 2-loop shell, solid floor, mid-air zigzag layers — slow outer wall, full fan
         o.update({"wall_loops": "2", "bottom_shell_layers": str(max(floor_layers, 3)), "detect_thin_wall": "0",
@@ -109,3 +105,24 @@ def overrides(size, family, slots=1, floor_layers=0, wall_speed=None, solid=Fals
         if wall_speed:
             o["outer_wall_speed"] = _per_extruder(base, "outer_wall_speed", str(wall_speed))
     return o
+
+
+DROOP_FILAMENT = {"fan_max_speed": "20", "fan_min_speed": "10", "overhang_fan_speed": "20",
+                  "additional_cooling_fan_speed": "0", "slow_down_for_layer_cooling": "0"}
+
+
+def filament_settings(size, kinds):
+    """Per-filament settings, one entry per AMS slot used. kinds: "droop" | "normal" per slot. Droop slots run a
+    low fan and +5 C so their strands stay molten long enough to fall; the other slots keep the stock cooling."""
+    base = base_config(size)
+    first = lambda k: (base[k][0] if isinstance(base.get(k), list) else base.get(k))
+    out = {}
+    for key in list(DROOP_FILAMENT) + ["nozzle_temperature"]:
+        vals = []
+        for kind in kinds:
+            if key == "nozzle_temperature":
+                t = int(first("nozzle_temperature")); vals.append(str(t + 5 if kind == "droop" else t))
+            else:
+                vals.append(DROOP_FILAMENT[key] if kind == "droop" else str(first(key)))
+        out[key] = vals
+    return out
