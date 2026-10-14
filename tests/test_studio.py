@@ -31,7 +31,7 @@ def test_build_mesh_and_download(client):
 
 
 def test_incompatible_pick_is_a_clear_400(client):
-    r = client.post("/api/build", json={"shape": "tray", "texture": "zigzag"})
+    r = client.post("/api/build", json={"shape": "tile", "texture": "zigzag"})
     assert r.status_code == 400 and "doesn't fit" in r.get_json()["error"]
 
 

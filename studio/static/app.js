@@ -136,7 +136,7 @@ function renderSizes() {
   const custom = sh.key === "custom";
   $("curve").hidden = !custom;
   if (custom) renderCurve(sh);
-  $("sizes").replaceChildren(...sh.params.filter((p) => (!p.family || p.family === fam) && !(custom && curveKeys.includes(p.key))).map((p) => {
+  $("sizes").replaceChildren(...sh.params.filter((p) => (!p.family || (p.family.startsWith("!") ? p.family.slice(1) !== fam : p.family === fam)) && !(custom && curveKeys.includes(p.key))).map((p) => {
     const val = state.params[p.key] ?? p.default;
     const num = el("input", { type: "number", class: "exact", min: p.lo, max: p.hi, step: p.step, value: val, "aria-label": `${p.label} in ${p.unit}` });
     const input = el("input", { type: "range", min: p.lo, max: p.hi, step: p.step, value: val, id: `p_${p.key}`, "aria-label": p.label });

@@ -79,6 +79,56 @@ class Region:
         return self._sdf_at(z)
 
 
+# ── non-round plans for the wall families ─────────────────────────────────────
+# Every wall family (fabric, droop, halftone, vase mode, shell, mix) builds a ROUND vessel from a radius per height.
+# A rounded square, rectangle or hexagon reuses all of it: build the round piece with the same circumference as the
+# outline (R_eq = perimeter / 2 pi), then map it on — angle -> distance along the outline, (r - R_eq) -> offset
+# along the outline's outward normal. Stitch spacing and wall thickness survive; floors scale in from the wall.
+
+class Outline:
+    def __init__(self, sdf, extent, n=4096):
+        import skimage.measure as skm
+        g = np.linspace(-extent - 3, extent + 3, 700); X, Y = np.meshgrid(g, g, indexing="ij")
+        c = max(skm.find_contours(sdf(X, Y), 0.0), key=len)
+        P = np.column_stack([np.interp(c[:, 0], np.arange(len(g)), g), np.interp(c[:, 1], np.arange(len(g)), g)])
+        if np.cross(P[1] - P[0], P[2] - P[0]) < 0 or _signed_area(P) < 0:
+            P = P[::-1]
+        if _signed_area(P) < 0:
+            P = P[::-1]
+        k0 = int(np.argmin(np.abs(np.arctan2(P[:, 1], P[:, 0])) + (P[:, 0] < 0) * 10))   # start on the +x axis
+        P = np.roll(P, -k0, axis=0)
+        seg = np.hypot(*np.diff(np.vstack([P, P[:1]]), axis=0).T); s_ = np.concatenate([[0], np.cumsum(seg)])
+        self.L = float(s_[-1]); t = np.linspace(0, self.L, n, endpoint=False)
+        Pc = np.vstack([P, P[:1]])
+        C = np.column_stack([np.interp(t, s_, Pc[:, 0]), np.interp(t, s_, Pc[:, 1])])
+        T = np.roll(C, -1, axis=0) - np.roll(C, 1, axis=0)
+        w = max(1, int(1.5 / (self.L / n)))                              # smooth normals over ~3 mm of outline
+        k = np.ones(2 * w + 1) / (2 * w + 1)
+        T = np.column_stack([np.convolve(np.r_[T[-w:, 0], T[:, 0], T[:w, 0]], k, "valid"),
+                             np.convolve(np.r_[T[-w:, 1], T[:, 1], T[:w, 1]], k, "valid")])
+        T /= np.linalg.norm(T, axis=1)[:, None]
+        self.C, self.N, self.n = C, np.column_stack([T[:, 1], -T[:, 0]]), n
+        self.R = self.L / (2 * math.pi)
+
+    def warp(self, mesh, band=4.0):
+        """Map a round piece built at radius R onto this outline (in place)."""
+        V = mesh.vertices; r = np.hypot(V[:, 0], V[:, 1])
+        th = np.mod(np.arctan2(V[:, 1], V[:, 0]), 2 * math.pi)
+        f = th / (2 * math.pi) * self.n; i0 = np.floor(f).astype(int) % self.n; i1 = (i0 + 1) % self.n; a = (f - np.floor(f))[:, None]
+        C = self.C[i0] * (1 - a) + self.C[i1] * a; N = self.N[i0] * (1 - a) + self.N[i1] * a
+        N /= np.linalg.norm(N, axis=1)[:, None]
+        off = r - self.R
+        wall = C + off[:, None] * N
+        inner = (np.clip(r / max(self.R - band, 1e-6), 0, 1))[:, None] * (C - band * N)
+        XY = np.where((off >= -band)[:, None], wall, inner)
+        mesh.vertices = np.column_stack([XY, V[:, 2]])
+        return mesh
+
+
+def _signed_area(P):
+    return 0.5 * float(np.sum(P[:, 0] * np.roll(P[:, 1], -1) - np.roll(P[:, 0], -1) * P[:, 1]))
+
+
 class Block(Shape):
     """Rounded-square or round block with a spherical dish dipped in and a pillowed top edge (tray family)."""
 
@@ -101,6 +151,16 @@ class Block(Shape):
                 return outer if r <= 0 else np.maximum(outer, r - np.hypot(x, y))
             return f
         return Region(n, rod_h, sdf_at, half, self.round, nf)
+
+    def outline(self, v):
+        if self.round:
+            return None
+        half = v["width"] / 2; corner = max(v.get("corner", 0.0), 6.0)
+        return Outline(lambda x, y: _rounded_square(x, y, half, corner), half)
+
+    def profile(self, v):                                 # wall families: a straight-sided low vessel
+        o = self.outline(v); R = o.R if o else v["diameter"] / 2
+        return (lambda z: R), v["height"], R
 
 
 class Vessel(Shape):
@@ -192,22 +252,22 @@ class Profiled(Shape):
 
 
 SHAPES = {s.key: s for s in [
-    Block("tray", "Tray", "Rounded square with a round dish dipped in", ("lattice",), [
+    Block("tray", "Tray", "Rounded square with a round dish dipped in", ("lattice", "fabric", "droop", "halftone", "mix", "spiral", "shell"), [
         Param("width", "Width", 60, 200, 1, 117), Param("height", "Height", 12, 60, 0.5, 33),
-        Param("dish", "Dish", 0, 184, 1, 94), Param("floor", "Floor", 2, 20, 0.5, 10.4),
-        Param("corner", "Corner", 0, 50, 1, 20), Param("pillow", "Top edge", 0, 10, 0.5, 6)]),
-    Block("platter", "Platter", "Low, wide tray for the table", ("lattice",), [
+        Param("dish", "Dish", 0, 184, 1, 94, family="lattice"), Param("floor", "Floor", 2, 20, 0.5, 10.4, family="lattice"),
+        Param("corner", "Corner", 0, 50, 1, 20), Param("pillow", "Top edge", 0, 10, 0.5, 6, family="lattice")]),
+    Block("platter", "Platter", "Low, wide tray for the table", ("lattice", "fabric", "droop", "halftone", "mix", "spiral", "shell"), [
         Param("width", "Width", 100, 200, 1, 160), Param("height", "Height", 10, 40, 0.5, 24),
-        Param("dish", "Dish", 0, 184, 1, 130), Param("floor", "Floor", 2, 14, 0.5, 5.6),
-        Param("corner", "Corner", 0, 60, 1, 28), Param("pillow", "Top edge", 0, 10, 0.5, 6)]),
-    Block("dish", "Round dish", "A round block with a bowl in it", ("lattice",), [
+        Param("dish", "Dish", 0, 184, 1, 130, family="lattice"), Param("floor", "Floor", 2, 14, 0.5, 5.6, family="lattice"),
+        Param("corner", "Corner", 0, 60, 1, 28), Param("pillow", "Top edge", 0, 10, 0.5, 6, family="lattice")]),
+    Block("dish", "Round dish", "A round block with a bowl in it", ("lattice", "fabric", "droop", "halftone", "mix", "spiral", "shell"), [
         Param("diameter", "Diameter", 60, 200, 1, 130), Param("height", "Height", 12, 60, 0.5, 28),
-        Param("dish", "Dish", 0, 184, 1, 104), Param("floor", "Floor", 2, 20, 0.5, 6.4),
-        Param("pillow", "Top edge", 0, 10, 0.5, 5)], round=True),
-    Block("coaster", "Coaster", "Thin tile with a shallow seat for a glass", ("lattice",), [
+        Param("dish", "Dish", 0, 184, 1, 104, family="lattice"), Param("floor", "Floor", 2, 20, 0.5, 6.4, family="lattice"),
+        Param("pillow", "Top edge", 0, 10, 0.5, 5, family="lattice")], round=True),
+    Block("coaster", "Coaster", "Thin tile with a shallow seat for a glass", ("lattice", "fabric", "halftone", "shell"), [
         Param("width", "Width", 70, 140, 1, 100), Param("height", "Height", 5, 16, 0.5, 8),
-        Param("dish", "Seat", 0, 120, 1, 76), Param("floor", "Floor", 2, 12, 0.5, 5.6),
-        Param("corner", "Corner", 0, 40, 1, 16), Param("pillow", "Top edge", 0, 4, 0.5, 2)]),
+        Param("dish", "Seat", 0, 120, 1, 76, family="lattice"), Param("floor", "Floor", 2, 12, 0.5, 5.6, family="lattice"),
+        Param("corner", "Corner", 0, 40, 1, 16), Param("pillow", "Top edge", 0, 4, 0.5, 2, family="lattice")]),
     Vessel("cup", "Cup", "Straight-walled vessel with a floor", ("lattice", "fabric", "droop", "halftone", "mix", "spiral", "shell"), [
         Param("diameter", "Diameter", 50, 160, 1, 90), Param("height", "Height", 30, 160, 1, 90),
         Param("wall", "Wall", 4, 16, 0.5, 8, family="lattice"),
@@ -397,6 +457,14 @@ class Box(Shape):
             return f
         return Region(n, rod_h, sdf_at, max(W, D) / 2, False, nf)
 
+    def outline(self, v):
+        W, D = v["width"], v["depth"]; corner = max(v.get("corner", 12.0), 6.0)
+        return Outline(lambda x, y: sd_round_rect(x, y, W / 2, D / 2, corner), max(W, D) / 2)
+
+    def profile(self, v):
+        R = self.outline(v).R
+        return (lambda z: R), v["height"], R
+
 
 class HexTile(Shape):
     """Hexagonal tile: woven (a hex coaster / wall tile) or a flat lithophane panel."""
@@ -409,6 +477,13 @@ class HexTile(Shape):
     def footprint(self, v):
         return lambda x, y: sd_hex(x, y, v["width"], 3.0)
 
+    def outline(self, v):
+        return Outline(lambda x, y: sd_hex(x, y, v["width"], 6.0), v["width"] / 2 * 1.16)
+
+    def profile(self, v):
+        R = self.outline(v).R
+        return (lambda z: R), v["height"], R
+
 
 class Tile(Shape):
     """Flat rectangular panel (lithophane photo tile)."""
@@ -417,14 +492,14 @@ class Tile(Shape):
         return lambda x, y: sd_round_rect(x, y, v["width"] / 2, v["depth"] / 2, 4.0)
 
 
-SHAPES["basket"] = Box("basket", "Basket", "A rounded-rectangle woven basket, with handle slots if you like", ("lattice",), [
+SHAPES["basket"] = Box("basket", "Basket", "A rounded-rectangle basket, with handle slots if you like", ("lattice", "fabric", "droop", "halftone", "mix", "spiral", "shell"), [
     Param("width", "Width", 100, 200, 1, 180), Param("depth", "Depth", 70, 160, 1, 120), Param("height", "Height", 40, 140, 1, 90),
-    Param("wall", "Wall", 6, 16, 0.5, 9), Param("floor", "Floor", 2, 10, 0.5, 4), Param("corner", "Corner", 4, 40, 1, 18),
+    Param("wall", "Wall", 6, 16, 0.5, 9, family="lattice"), Param("floor", "Floor", 2, 10, 0.5, 4, family="lattice"), Param("corner", "Corner", 4, 40, 1, 18),
     Param("handles", "Handle slots", 0, 1, 1, 1, "")])
-SHAPES["catchall"] = Box("catchall", "Catch-all", "A low rounded-rectangle valet tray", ("lattice",), [
+SHAPES["catchall"] = Box("catchall", "Catch-all", "A low rounded-rectangle valet tray", ("lattice", "fabric", "droop", "halftone", "mix", "spiral", "shell"), [
     Param("width", "Width", 100, 200, 1, 170), Param("depth", "Depth", 60, 150, 1, 110), Param("height", "Height", 14, 50, 0.5, 28),
-    Param("wall", "Wall", 6, 16, 0.5, 9), Param("floor", "Floor", 2, 10, 0.5, 4), Param("corner", "Corner", 4, 40, 1, 20)])
-SHAPES["hextile"] = HexTile("hextile", "Hex tile", "A hexagonal tile — woven, or a lithophane for the wall", ("lattice", "flat"), [
-    Param("width", "Flat to flat", 60, 200, 1, 120), Param("height", "Thickness", 4, 20, 0.5, 8, family="lattice")])
+    Param("wall", "Wall", 6, 16, 0.5, 9, family="lattice"), Param("floor", "Floor", 2, 10, 0.5, 4, family="lattice"), Param("corner", "Corner", 4, 40, 1, 20)])
+SHAPES["hextile"] = HexTile("hextile", "Hex tile", "A hexagonal tile — textured, woven, or a lithophane for the wall", ("lattice", "flat", "fabric", "halftone", "shell"), [
+    Param("width", "Flat to flat", 60, 200, 1, 120), Param("height", "Thickness", 4, 20, 0.5, 8, family="!flat")])
 SHAPES["tile"] = Tile("tile", "Photo tile", "A flat lithophane panel — one colour or full-colour CMYK", ("flat",), [
     Param("width", "Width", 60, 200, 1, 150), Param("depth", "Height", 60, 200, 1, 100)])

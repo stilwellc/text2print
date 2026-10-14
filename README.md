@@ -155,10 +155,10 @@ third colour or mix colours inside a course. Mixes work on cup, vase, bowl and g
 
 | Shape | Textures | Sizes |
 |---|---|---|
-| Tray | woven | width, height, dish, floor, corner, top edge |
-| Platter | woven | the low, wide tray |
-| Round dish | woven (incl. Rose window) | diameter, height, dish, floor, top edge |
-| Coaster | woven | width, height, seat, floor, corner |
+| Tray | woven, fabric, droop, halftone, mix, vase mode, shell | width, height, dish, floor, corner, top edge |
+| Platter | woven, fabric, droop, halftone, mix, vase mode, shell | the low, wide tray |
+| Round dish | woven (incl. Rose window), fabric, droop, halftone, mix, vase mode, shell | diameter, height, dish, floor, top edge |
+| Coaster | woven, fabric, halftone, shell | width, height, seat, floor, corner |
 | Cup | woven, fabric, droop or halftone | diameter, height (+ wall and floor for rods) |
 | Lamp shade | woven | open cylinder: diameter, height, wall |
 | Bowl | woven, fabric, droop or halftone | diameter, height, base width |
@@ -172,9 +172,9 @@ third colour or mix colours inside a course. Mixes work on cup, vase, bowl and g
 | Pendant shade | fabric, droop, shell | top plate with a 40 mm hole for an E27 socket ring |
 | Puck lamp | fabric, shell, halftone | collar pocket for a 59 × 18 mm LED puck, with a cable notch |
 | Amphora | woven, fabric, vase mode, shell | tall belly and neck that never lean past 45° |
-| Basket | woven | rounded box with two arched handle holes |
-| Catch-all | woven | low rounded tray |
-| Hex tile | woven, flat | hexagon: lattice tile or backlit picture |
+| Basket | woven, fabric, droop, halftone, mix, vase mode, shell | rounded box with two arched handle holes |
+| Catch-all | woven, fabric, droop, halftone, mix, vase mode, shell | low rounded tray |
+| Hex tile | woven, flat, fabric, halftone, shell | hexagon: lattice tile or backlit picture |
 | Tile | flat | rounded rectangle for lithophanes and CMYK |
 
 **Woven vessels.** Woven rods work on every round silhouette, not just the cup: bowl, vase, goblet, your drawn
@@ -183,6 +183,13 @@ steps more than 0.8 mm per mm (about 39°) in or out of the one below, because r
 Cachepot and sleeve keep their fitted inner size and the weave grows outward. A woven 180 mm vase slices at about
 14 h 40 min and 260 g in two colours. Rose window turns into stacked hoops on curved walls, because its rings
 sit at fixed radii.
+
+**Square, rectangular and hex pieces.** The wall textures work on the tray, platter, coaster, basket, catch-all
+and hex tile too. They build a round piece with the same circumference as the outline, then map it on: distance
+around the circle becomes distance along the outline, and every offset from the wall follows the outline's
+normal. Stitch spacing and wall thickness come out the same as on a round piece. Basket handle slots are cut
+through any wall texture except vase mode, which can't print a hole in its single wall. Non-round wall pieces have
+no lid yet. Dish, floor, top edge and wall sizes stay woven-only.
 
 **Fittings.** The lamp, lantern, pendant, cachepot and candle shapes carry their hardware fit. The collar,
 plinth, foot ring or crush ribs print in the floor colour, and the app adds the safety copy: LED pucks and

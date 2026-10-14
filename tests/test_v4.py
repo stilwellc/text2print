@@ -334,3 +334,42 @@ def test_droop_plain_bands_are_minimal(style):
     assert min(zs) < 12.0                                         # strands start near the foot (short loops there)
     assert max(zs) > 80.0 - 1.0 - 4 * nz.layer_h - 2 * gap - 1.0  # ...and run to just under the rim
     assert all(z - bu >= droop.CLEAR - 1e-6 for _, _, bu, z, *_ in spots)
+
+
+# ── wall textures on non-round plans ─────────────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("shape,texture", [("tray", "zigzag"), ("platter", "halftone"), ("dish", "domes"), ("coaster", "wave"),
+                                           ("basket", "fringe"), ("catchall", "mix"), ("hextile", "voronoi"), ("tray", "pleats")])
+def test_wall_textures_follow_the_outline(shape, texture):
+    b = build.make(shape, texture, draft=True)
+    _ok(b)
+    v = b.params; W = v.get("width", v.get("diameter")); D = v.get("depth", W if shape != "hextile" else W * 1.1547)
+    x, y, _ = b.stats["size"]
+    reach = 2 * (b.stats.get("reach") or 0) + 10
+    assert W - 2 <= x <= W + reach and D - 6 <= y <= D + reach
+
+
+def test_outline_keeps_the_circumference_and_wall_thickness():
+    o = SHAPES["basket"].outline(SHAPES["basket"].resolve({}))
+    assert abs(2 * math.pi * o.R - o.L) < 1e-6
+    import trimesh
+    ring = trimesh.creation.annulus(o.R - 1.0, o.R, height=5.0, sections=2048)
+    o.warp(ring)
+    # a 1 mm round wall stays ~1 mm thick on every side of the rectangle
+    for x in (0.0, 30.0):
+        ys = ring.vertices[np.abs(ring.vertices[:, 0] - x) < 0.3][:, 1]
+        top = np.sort(ys[ys > 0])
+        assert top[-1] - top[0] == pytest.approx(1.0, abs=0.15)
+
+
+def test_basket_handles_cut_through_wall_textures():
+    b = build.make("basket", "zigzag", draft=True)
+    _ok(b)
+    W, H = b.params["width"], b.params["height"]
+    assert not _solid_at(b, [W / 2, 0, H - 20]) and not _solid_at(b, [-W / 2, 0, H - 20])
+    spiral = build.make("basket", "pleats", draft=True)
+    assert any("handle" in w for w in spiral.warnings)
+
+
+def test_non_round_wall_pieces_skip_lids():
+    b = build.make("tray", "zigzag", options={"lid": "slip"}, draft=True)
+    assert not b.extras and any("lid" in w.lower() for w in b.warnings)

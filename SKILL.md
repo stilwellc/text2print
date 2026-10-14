@@ -57,7 +57,10 @@ Fur (`droop.fur`): one-layer hair slabs 2 lines wide bridged to a sacrificial sh
 Fittings (`fittings.py`): pendant E27 40 mm hole, puck 59x18 collar + cable notch, lantern 41x17 tealight
 plinth, cachepot foot ring (pot 3-7 in + 5 mm), candle 23 mm bore + 6 crush ribs; added solids are a separate
 floor-colour part (never unioned into fabric walls), cuts are booleans; `NOTES` = safety copy.
-Footprints: basket (rounded box + arched handle holes), catchall, hextile, tile.
+Footprints: basket (rounded box + arched handle holes), catchall, hextile, tile. Non-round plans for the
+wall families: `shapes.Outline` (contour -> arc-length samples + smoothed normals); the shape's profile() is the
+round radius R = perimeter/2pi; build.make warps every part/preview with Outline.warp (angle -> arc length,
+r - R -> along the normal; floors scale in from 4 mm inside the wall). Basket handles: build._cut_handles.
 Mix (`compose.py`, texture "mix" on cup/vase/bowl/goblet): options {"bands": [{texture, share, slot, slot2?, options}]}
 bottom-up; textures from `compose.MIXABLE` (plain + fabric + halftone + droop; never lattice or candle). One layer
 height (nozzle standard) and the fabric shell for all bands; each band emits per-layer contours, same-colour runs
