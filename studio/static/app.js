@@ -199,6 +199,8 @@ function renderColours() {
      el("span", { class: "slot" }, `AMS ${i + 1}`))));
   $("colourHint").textContent = isMix() ? (n === 1 ? "One colour — no AMS changes. Give a band another colour in Bands."
       : "Each band picks its AMS slot. Changes happen where bands meet, and every layer inside a halftone band.")
+    : zonesOn() && n > 1 && tex.family === "droop" && (state.options.zone_style ?? "courses") === "courses"
+      ? "Courses, like woven: each row of strands and the wall it hangs from take the next colour — one AMS change per course. More rows per colour, fewer changes."
     : zonesOn() && n > 1 ? (state.options.zone_style === "stripes" ? "Stripes repeat the colours up the piece — one AMS change per stripe." : "Colours stack in bands from the bottom — one AMS change where each band starts.")
     : zonesOn() ? "One colour — add colours under Finish › Colours."
     : tex.slots === 1 ? "One colour — no AMS changes."
@@ -257,6 +259,8 @@ function renderFinish() {
     if (ONLY[o.key] && !ONLY[o.key].includes(state.texture)) return false;
     if (o.key === "zones") return zonesOn();
     if (o.key === "zone_style") return zonesOn() && parseInt(state.options.zones || "1", 10) > 1;
+    if (o.key === "course_rows") return zonesOn() && parseInt(state.options.zones || "1", 10) > 1
+      && (state.options.zone_style ?? "courses") === "courses" && state.texture !== "fur";
     return true;
   });
   const kids = shown.flatMap((o) => optionControl(o, after));

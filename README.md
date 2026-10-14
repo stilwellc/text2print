@@ -99,7 +99,11 @@ with an "As printed" switch for the flat strands the printer actually lays.
 | Curls | Small loops in drifting columns that settle into coils |
 | Unraveled | A wild mix of short and long loops, as if the wall is coming apart |
 
-Droop pieces choose a density and a loop length.
+Droop pieces choose a density and a loop length. With 2–4 colours they default to **Courses**, the woven idea
+applied to strands: each row of loops and the wall it hangs from take the next colour, so the colours stripe up the
+piece like rod courses and the AMS changes once per course. Colour boundaries only fall between rows, never through
+a strand, and the hung preview keeps every strand in its row's colour. *Rows per colour* (1–4) widens the stripes
+and divides the changes. Bands and Stripes are still there.
 
 **Halftone.** Two colours alternate every print layer, each layer one wide wavy line. Where the picture wants
 colour 1, its layers rib outward and colour 2's stay flat behind them, and the reverse elsewhere; the rib depth

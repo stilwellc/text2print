@@ -48,7 +48,10 @@ OPTIONS = {
     "fabric": [("rim_loops", "Loop edge at the rim", "toggle", None, False),
                ("floor", "Floor", "seg", [("solid", "Solid"), ("diamonds", "Diamonds"), ("lens", "Eyes")], "solid")] + ZONES,
     "droop": [("density", "Density", "seg", [("sparse", "Sparse"), ("medium", "Medium"), ("dense", "Dense")], "medium"),
-              ("length", "Loop length", "seg", [("short", "Short"), ("medium", "Medium"), ("long", "Long")], "medium")] + ZONES,
+              ("length", "Loop length", "seg", [("short", "Short"), ("medium", "Medium"), ("long", "Long")], "medium"),
+              ZONES[0],
+              ("zone_style", "Colour layout", "seg", [("courses", "Courses"), ("bands", "Bands"), ("stripes", "Stripes")], "courses"),
+              ("course_rows", "Rows per colour", "seg", [("1", "1"), ("2", "2"), ("3", "3"), ("4", "4")], "1")],
     "lattice": [("colour_by", "Colour by", "seg", [("direction", "Rod direction"), ("height", "Height")], "direction")] + ZONES,
     "shell": [("cell", "Cell size", "seg", [("small", "Small"), ("medium", "Medium"), ("large", "Large")], "medium"),
               ("noise", "Fuzzy pattern", "seg", [(k, v) for k, v in shell.NOISE.items()], "perlin"),
@@ -181,6 +184,17 @@ class Build:
         for name, m, s, _ in self.parts:
             p = folder / f"{stem}_{s}_{name.split()[0].lower()}.stl"; m.export(p); out.append(p)
         return out
+
+
+def _course_edges(starts, gap, top, n, rows=1):
+    """Woven-style colour for droop: each strand row (course) and the wall it hangs from take the next colour.
+    `starts` are cut-safe row boundaries; keep every `rows`-th one at least rows x row-gap apart."""
+    picked, last = [], -1e9
+    for z in starts:
+        if z - last >= rows * gap - 1e-6 and 0 < z < top:
+            picked.append(z); last = z
+    edges = [0.0] + picked + [top]
+    return edges, [0] + [(i + 1) % n for i in range(len(picked))]
 
 
 def _png_data_url(rgba, max_px=480):
@@ -329,7 +343,8 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
             warnings.append("Both colours are the same — the picture only shows as rib texture.")
     elif T["family"] == "droop":
         mesh, info = droop.build(S, v, nz, style=texture, density=options.get("density", "medium"),
-                                 length=options.get("length", "medium"), preview=True, draft=draft)
+                                 length=options.get("length", "medium"), preview=True, draft=draft,
+                                 aligned=int(options.get("zones", 1) or 1) > 1 and options.get("zone_style", "courses") == "courses")
         parts = [("colour 1", mesh, 1, colours[0])]; swaps = 0
         over = printer.overrides(nz.size, "droop", slots=1, floor_layers=info["floor_layers"], solid=info["solid"])
         per_filament = printer.filament_settings(nz.size, ["fur" if texture == "fur" else "droop"])
@@ -359,7 +374,11 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         top = max(float(m.bounds[1][2]) for _, m, _, _ in parts)
         grid = nz.rod_h if T["family"] == "lattice" else (fabric.fabric_preset(nz.size, diameter=100)["fabric"]["layer_h"]
                                                            if T["family"] == "fabric" else nz.layer_h)
-        edges, zone_of = extras.zone_edges(top, zones, grid, options.get("zone_style", "bands"))
+        style_z = options.get("zone_style", "courses" if T["family"] == "droop" else "bands")
+        if T["family"] == "droop" and style_z == "courses" and texture != "fur" and info.get("courses"):
+            edges, zone_of = _course_edges(info["courses"], info["course_gap"], top, zones, int(options.get("course_rows", 1) or 1))
+        else:
+            edges, zone_of = extras.zone_edges(top, zones, grid, "stripes" if style_z == "courses" else style_z)
         if T["family"] == "lattice":
             pieces = [(p_, zi) for p_, zi in zip(extras.split_by_bodies([m for _, m, _, _ in parts], edges), zone_of)]
         else:                                              # split each part on its own (fittings overlap the wall)
@@ -418,7 +437,20 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
             m.apply_translation([0, 0, -zmin])
     if T["family"] == "droop" and info.get("draped") is not None:
         dm = info["draped"]; dm.apply_translation([0, 0, -zmin])
-        if zoned and len({c for _, _, _, c in parts}) > 1:
+        if zoned and len({c for _, _, _, c in parts}) > 1 and info.get("drape_pieces"):
+            wall_m, hung = info["drape_pieces"]                     # each hung strand keeps its anchor's colour
+            dcol = {}
+            for piece, zi in zip(extras.split_by_height(wall_m, edges, draft=True), zone_of):
+                if piece is not None:
+                    dcol.setdefault(colours[zi], []).append(piece)
+            for z0, rib in hung:
+                zi = zone_of[max(0, min(len(zone_of) - 1, int(np.searchsorted(edges, z0 + 1e-6, side="right") - 1)))]
+                dcol.setdefault(colours[zi], []).append(rib)
+            for ms in dcol.values():
+                for m_ in ms:
+                    m_.apply_translation([0, 0, -zmin])
+            preview = [(f"colour {k}", trimesh.util.concatenate(ms), k, col) for k, (col, ms) in enumerate(dcol.items(), 1)]
+        elif zoned and len({c for _, _, _, c in parts}) > 1:
             pieces = extras.split_by_height(dm, edges, draft=True)
             dcol = {}
             for piece, zi in zip(pieces, zone_of):
