@@ -31,7 +31,7 @@ def save_image(raw: bytes) -> str:
     if len(raw) > MAX_IMAGE:
         raise ValueError("image is larger than 8 MB")
     im = Image.open(io.BytesIO(raw)); im.load()
-    im = im.convert("L"); im.thumbnail((1600, 1600))
+    im = im.convert("RGB"); im.thumbnail((1600, 1600))          # keep colour: CMYK lithophanes need it
     buf = io.BytesIO(); im.save(buf, format="PNG")
     key = hashlib.sha1(buf.getvalue()).hexdigest()[:16]
     IMAGES.mkdir(parents=True, exist_ok=True); (IMAGES / f"{key}.png").write_bytes(buf.getvalue())

@@ -129,9 +129,11 @@ class Profiled(Shape):
     kind = "bowl"
 
     def profile(self, v):
-        top, h = v["diameter"] / 2, v["height"]
         if self.kind == "custom":
             return custom_profile(v)
+        if self.kind in KIND_PROFILES:
+            return KIND_PROFILES[self.kind](v)
+        top, h = v["diameter"] / 2, v["height"]
         if self.kind == "goblet":
             stem = top * 0.26; foot = top * 0.62
             def f(z):
@@ -179,27 +181,27 @@ SHAPES = {s.key: s for s in [
         Param("width", "Width", 70, 140, 1, 100), Param("height", "Height", 5, 16, 0.5, 8),
         Param("dish", "Seat", 0, 120, 1, 76), Param("floor", "Floor", 2, 12, 0.5, 5.6),
         Param("corner", "Corner", 0, 40, 1, 16), Param("pillow", "Top edge", 0, 4, 0.5, 2)]),
-    Vessel("cup", "Cup", "Straight-walled vessel with a floor", ("lattice", "fabric", "droop", "halftone", "mix"), [
+    Vessel("cup", "Cup", "Straight-walled vessel with a floor", ("lattice", "fabric", "droop", "halftone", "mix", "spiral", "shell"), [
         Param("diameter", "Diameter", 50, 160, 1, 90), Param("height", "Height", 30, 160, 1, 90),
         Param("wall", "Wall", 4, 16, 0.5, 8, family="lattice"),
         Param("floor", "Floor", 2, 10, 0.5, 4, family="lattice")], round=True),
-    Profiled("bowl", "Bowl", "Flared bowl", ("fabric", "droop", "halftone", "mix"), [
+    Profiled("bowl", "Bowl", "Flared bowl", ("fabric", "droop", "halftone", "mix", "spiral", "shell"), [
         Param("diameter", "Diameter", 80, 200, 1, 180), Param("height", "Height", 30, 120, 1, 70),
         Param("base", "Base width", 55, 95, 1, 62, "%")], round=True),
-    Profiled("vase", "Vase", "Bellied vase with a narrowing neck", ("fabric", "droop", "halftone", "mix"), [
+    Profiled("vase", "Vase", "Bellied vase with a narrowing neck", ("fabric", "droop", "halftone", "mix", "spiral", "shell"), [
         Param("diameter", "Belly", 70, 180, 1, 120), Param("height", "Height", 80, 240, 1, 180),
         Param("neck", "Neck", 55, 100, 1, 70, "%")], round=True),
 ]}
 SHAPES["vase"].kind = "vase"
-_goblet = Profiled("goblet", "Goblet", "A cup on a stem and foot", ("fabric", "droop", "halftone", "mix"), [
+_goblet = Profiled("goblet", "Goblet", "A cup on a stem and foot", ("fabric", "droop", "halftone", "mix", "spiral", "shell"), [
     Param("diameter", "Diameter", 80, 150, 1, 120), Param("height", "Height", 90, 200, 1, 140)], round=True)
 _goblet.kind = "goblet"
 _candle = Profiled("candle", "Candle holder", "A bell that narrows to a socket for a taper candle", ("droop",), [
     Param("diameter", "Base", 80, 160, 1, 120), Param("height", "Height", 80, 180, 1, 130),
-    Param("socket", "Socket", 18, 26, 0.5, 22.5)], round=True)
+    Param("socket", "Socket", 18, 26, 0.5, 23)], round=True)
 _candle.kind = "candle"; _candle.solid = True
 SHAPES["goblet"] = _goblet; SHAPES["candle"] = _candle
-_custom = Profiled("custom", "Your shape", "Draw the silhouette — five points from foot to rim", ("fabric", "droop", "halftone", "mix"), [
+_custom = Profiled("custom", "Your shape", "Draw the silhouette — five points from foot to rim", ("fabric", "droop", "halftone", "mix", "spiral", "shell"), [
     Param("diameter", "Widest", 60, 200, 1, 120), Param("height", "Height", 40, 220, 1, 150),
     Param("c0", "Foot", 20, 100, 1, 62, "%"), Param("c1", "Lower", 20, 100, 1, 92, "%"),
     Param("c2", "Middle", 20, 100, 1, 100, "%"), Param("c3", "Upper", 20, 100, 1, 74, "%"),
@@ -233,3 +235,162 @@ _shade = Vessel("shade", "Lamp shade", "Open cylinder — light through the weav
     Param("wall", "Wall", 4, 14, 0.5, 6)], round=True)
 _shade.open_top_bottom = True
 SHAPES["shade"] = _shade
+
+
+
+# ── fitted shapes (see fittings.py) ───────────────────────────────────────────
+def _clamped(fn, h, rmin=12.0, lean=0.9):
+    """Sample fn on 0.25 mm steps and clamp so the wall never leans out faster than `lean` mm per mm."""
+    zf = np.linspace(0, h, int(h / 0.25) + 1); rf = np.array([max(rmin, fn(z)) for z in zf])
+    for k in range(1, len(rf)):
+        rf[k] = min(rf[k], rf[k - 1] + lean * (zf[k] - zf[k - 1]))
+    return (lambda z: float(np.interp(z, zf, rf))), h, float(rf.max())
+
+
+SHELL = 1.0     # the fabric shell at 0.4; fitted sizes are inner sizes, so the wall goes outside them
+
+
+def _cachepot(v):
+    rid = (v["pot"] * 25.4 + 5.0) / 2; h = v["pot"] * 25.4 * 0.92 + v["extra"]
+    R0 = rid + SHELL
+    return _clamped(lambda z: R0 + 0.06 * z, h)                     # a slight flare (~3.5 deg)
+
+
+def _sleeve(v):
+    R = v["liner"] / 2 + 1.0 + SHELL
+    return (lambda z: R), v["height"], R
+
+
+def _lantern(v):
+    R = v["diameter"] / 2; h = v["height"]
+    return _clamped(lambda z: R * (0.86 + 0.14 * math.sin(math.pi * min(z / h, 1.0))), h)
+
+
+def _pendant(v):
+    R = v["diameter"] / 2; h = v["height"]; r0 = 38.0
+    return _clamped(lambda z: r0 + (R - r0) * math.sin(0.5 * math.pi * min(z / h, 1.0)) ** 0.9, h, lean=0.85)
+
+
+def _puck(v):
+    R = v["diameter"] / 2; h = v["height"]; foot = 29.85 + 3.0
+    def f(z):
+        t = min(z / h, 1.0)
+        if z < 20:
+            return foot
+        return foot + (R - foot) * math.sin(math.pi * min((z - 20) / (h * 0.75), 1.0) * 0.5) ** 0.8 - (R - foot) * 0.35 * max(0, t - 0.75) / 0.25
+    return _clamped(f, h)
+
+
+def _amphora(v):
+    belly = v["diameter"] / 2; h = v["height"]; neck = belly * v["neck"] / 100.0; foot = belly * 0.5
+    def f(z):
+        t = min(max(z / h, 0), 1)
+        if t < 0.38:
+            return foot + (belly - foot) * math.sin(0.5 * math.pi * t / 0.38) ** 0.8
+        if t < 0.86:
+            return neck + (belly - neck) * (0.5 + 0.5 * math.cos(math.pi * (t - 0.38) / 0.48))
+        return neck + (belly - neck) * 0.25 * ((t - 0.86) / 0.14) ** 1.5         # flared lip
+    return _clamped(f, h)
+
+
+KIND_PROFILES = {"cachepot": _cachepot, "sleeve": _sleeve, "lantern": _lantern, "pendant": _pendant,
+                 "puck": _puck, "amphora": _amphora}
+_WALL = ("fabric", "droop", "halftone", "mix", "spiral", "shell")
+for key, name, blurb, params in [
+    ("cachepot", "Cachepot", "Covers a 3–8 in nursery pot; no water, so any texture works", [
+        Param("pot", "Nursery pot", 3, 7, 1, 6, "in"), Param("extra", "Extra height", 0, 40, 1, 8)]),
+    ("sleeve", "Glass sleeve", "Slips over a jar, bottle or test tube — the glass holds the water", [
+        Param("liner", "Glass diameter", 15, 120, 0.5, 70), Param("height", "Height", 30, 240, 1, 110)]),
+    ("lantern", "Tealight lantern", "A tealight pocket in a weighted plinth", [
+        Param("diameter", "Diameter", 60, 140, 1, 84), Param("height", "Height", 50, 160, 1, 96)]),
+    ("pendant", "Pendant shade", "Hangs from an E27 cord set — the collar has a 40 mm hole", [
+        Param("diameter", "Mouth", 120, 200, 1, 180), Param("height", "Height", 90, 220, 1, 150)]),
+    ("puck", "LED puck lamp", "Sits over Bambu's LED Lamp Kit puck — no mains wiring", [
+        Param("diameter", "Widest", 90, 190, 1, 130), Param("height", "Height", 90, 220, 1, 160)]),
+    ("amphora", "Amphora", "Narrow foot, full belly, slim neck and a flared lip", [
+        Param("diameter", "Belly", 80, 180, 1, 120), Param("height", "Height", 110, 240, 1, 200),
+        Param("neck", "Neck", 30, 70, 1, 42, "%")]),
+]:
+    _s = Profiled(key, name, blurb, _WALL, params, round=True); _s.kind = key
+    SHAPES[key] = _s
+
+
+
+# ── non-round footprints (woven) and flat tiles ───────────────────────────────
+def sd_round_rect(x, y, hx, hy, r):
+    r = min(r, hx, hy); qx, qy = np.abs(x) - (hx - r), np.abs(y) - (hy - r)
+    return np.hypot(np.maximum(qx, 0), np.maximum(qy, 0)) + np.minimum(np.maximum(qx, qy), 0) - r
+
+
+def sd_hex(x, y, flat, r=0.0):
+    """Hexagon with flat-to-flat `flat` (flat sides top and bottom), corners rounded by r (iq's sdHexagon)."""
+    k = (-0.8660254, 0.5, 0.57735027)
+    R = flat / 2 - r
+    px, py = np.abs(x), np.abs(y)
+    px, py = py, px                                         # rotate 90 deg: flat sides on +/-y
+    d = np.minimum(k[0] * px + k[1] * py, 0.0)
+    px = px - 2 * d * k[0]; py = py - 2 * d * k[1]
+    cx = np.clip(px, -k[2] * R, k[2] * R)
+    return np.hypot(px - cx, py - R) * np.sign(py - R) - r
+
+
+class Box(Shape):
+    """Rounded-rectangle woven box: a basket (deep, optional handle slots with 45 deg arched tops) or a catch-all."""
+
+    def lattice(self, v, rod_h):
+        W, D, H, wall, corner = v["width"], v["depth"], v["height"], v["wall"], v.get("corner", 12)
+        nf = max(1, int(round(v["floor"] / rod_h))); nf += 1 - nf % 2
+        n = max(nf + 2, _odd_courses(H, rod_h)); top = n * rod_h; fz = nf * rod_h
+        handles = v.get("handles", 0) > 0
+        hw = min(32.0, D / 2 - wall - 6)                           # hand slot: 14 mm straight, then a 45 deg pointed arch
+        hz1 = top - 6.0; hz0 = hz1 - (14.0 + hw)
+        if hz0 < fz + 10:
+            handles = False
+
+        def sdf_at(z):
+            def f(x, y):
+                outer = sd_round_rect(x, y, W / 2, D / 2, corner)
+                if z < fz:
+                    return outer
+                pocket = sd_round_rect(x, y, W / 2 - wall, D / 2 - wall, max(corner - wall, 2.0))
+                d = np.maximum(outer, -pocket)
+                if handles and hz0 <= z <= hz1:
+                    half = min(hw, hz1 - z)                     # straight below, 45 deg arch closing on top
+                    if half > 2.0:
+                        slot = np.maximum(np.abs(y) - half, (W / 2 - wall - 1.0) - np.abs(x))
+                        d = np.maximum(d, -slot)
+                return d
+            return f
+        return Region(n, rod_h, sdf_at, max(W, D) / 2, False, nf)
+
+
+class HexTile(Shape):
+    """Hexagonal tile: woven (a hex coaster / wall tile) or a flat lithophane panel."""
+
+    def lattice(self, v, rod_h):
+        F, H = v["width"], v["height"]
+        n = _odd_courses(H, rod_h)
+        return Region(n, rod_h, lambda z: (lambda x, y: sd_hex(x, y, F, 4.0)), F / 2 * 1.16, False, n)
+
+    def footprint(self, v):
+        return lambda x, y: sd_hex(x, y, v["width"], 3.0)
+
+
+class Tile(Shape):
+    """Flat rectangular panel (lithophane photo tile)."""
+
+    def footprint(self, v):
+        return lambda x, y: sd_round_rect(x, y, v["width"] / 2, v["depth"] / 2, 4.0)
+
+
+SHAPES["basket"] = Box("basket", "Basket", "A rounded-rectangle woven basket, with handle slots if you like", ("lattice",), [
+    Param("width", "Width", 100, 200, 1, 180), Param("depth", "Depth", 70, 160, 1, 120), Param("height", "Height", 40, 140, 1, 90),
+    Param("wall", "Wall", 6, 16, 0.5, 9), Param("floor", "Floor", 2, 10, 0.5, 4), Param("corner", "Corner", 4, 40, 1, 18),
+    Param("handles", "Handle slots", 0, 1, 1, 1, "")])
+SHAPES["catchall"] = Box("catchall", "Catch-all", "A low rounded-rectangle valet tray", ("lattice",), [
+    Param("width", "Width", 100, 200, 1, 170), Param("depth", "Depth", 60, 150, 1, 110), Param("height", "Height", 14, 50, 0.5, 28),
+    Param("wall", "Wall", 6, 16, 0.5, 9), Param("floor", "Floor", 2, 10, 0.5, 4), Param("corner", "Corner", 4, 40, 1, 20)])
+SHAPES["hextile"] = HexTile("hextile", "Hex tile", "A hexagonal tile — woven, or a lithophane for the wall", ("lattice", "flat"), [
+    Param("width", "Flat to flat", 60, 200, 1, 120), Param("height", "Thickness", 4, 20, 0.5, 8, family="lattice")])
+SHAPES["tile"] = Tile("tile", "Photo tile", "A flat lithophane panel — one colour or full-colour CMYK", ("flat",), [
+    Param("width", "Width", 60, 200, 1, 150), Param("depth", "Height", 60, 200, 1, 100)])
