@@ -1235,6 +1235,66 @@ tm = cut_floor(tm, cutters)   # raises if any piece would fall out of the print
   `text_cutters` adds stencil bridges through enclosed counters (o, e, p...) automatically, and `cut_floor` refuses to return geometry with loose islands — a through-cut word/logo without bridges detaches on the bed.
 - Tests: `tests/test_zigzag_fabric.py`, `tests/test_floor_cuts.py`.
 
+### Woven Rod Lattice (printed basketry) — `textures/rodweave.py`
+
+**Triggers:** the user wants a tray, dish, platter, coaster, tile, bowl or block that is "woven", "basket", "stacked rods",
+"lattice", "crosshatch", or shows a reference print built from stacked parallel lines in two colours (rust/cream rods,
+rod ends stepping around curves). PRINT-VERIFIED Oct 2026 (Bambu P2S, 0.4 nozzle, PLA, AMS 2 colours) — Collin: "came out really good".
+
+The object is a stack of **courses**: each course is a set of parallel rounded beads (1.68 wide x 0.80 tall = 4 lines x 4
+layers at 0.2 mm, pitch 3.6), the next course runs in another direction, every rod bridges <2 mm across the rods beneath
+it. No supports, no infill, no walls — the rods ARE the object. Colour follows direction (X -> filament 1, Y -> 2) so the
+AMS swaps once per course. Do not build this in CadQuery; use the module:
+
+```python
+import sys; sys.path.insert(0, ".")
+from textures import rodweave as rw
+
+# the printed tray/platter family: rounded-square block, spherical dish, pillowed top, FLAT bottom, twill rhythm
+rust, cream = rw.block(size=117, height=33, floor_t=10.4, corner_r=20, dip_d=94, ease_top_r=6, twill_skip=4)
+rw.export_bambu("woven_tray_2color.3mf", [(rust, rw.RUST), (cream, rw.CREAM)], title="woven tray")   # + STLs
+print(rw.slice_cli("woven_tray_2color.3mf", "slice_out/tray"))    # {'time','grams','layers'} via Bambu CLI
+
+# a pattern tile: outline + height -> [(mesh, colour)]; group/export the same way
+rods = rw.PATTERNS["selvedge"](rw.RoundedSquare(90, 14), height=12)     # polar wants rw.Circle(90)
+rw.export_bambu("tile_selvedge_2color.3mf", rods, title="selvedge tile")
+```
+
+**Pattern catalogue** (`rw.PATTERNS[name](outline, height)`; renders in `pattern_sampler.py`, print-ready tiles in
+`pattern_export.py` -> ~/Downloads/woven_tray/patterns/). Collin's keepers: kagome, polar, ripple, selvedge, beat, overunder, tartan.
+
+| name | what it is | swap cost |
+|---|---|---|
+| `grid` | the base X/Y weave (+ `twill_skip`: alternate courses skip every Nth rod, gap drifts) | per course |
+| `kagome` | three directions 0/60/120 cycling — triangular/hex openings; 3 colours or two directions on one spool | per course |
+| `polar` | ring courses alternating with spokes that halve toward the centre (rose window) — round pieces | per course |
+| `ripple` | sine rods (antiphase neighbours) against straight cross rods — reed/honeycomb; amp <= 0.8 so rods don't touch | per course |
+| `selvedge` | base grid + U-turn loops joining rod pairs at the outline — a woven hem, not cut ends | per course |
+| `beat` | X pitch vs Y pitch x1.18 — large moiré bands from spacing alone (needs a big piece to read) | per course |
+| `helix` / `ombre` | rotate 6°/course; thin rods on a fixed nested grid (both cut by Collin, kept in code) | per course |
+| `overunder` | TRUE over-under: both directions share a 2-course band and undulate in Z; supported at every crossing | per LAYER in 2 colours |
+| `tartan` | colour runs along both axes (3/1 x 2/2) — plaid on every face | per LAYER in 2 colours |
+
+**Laws (each one cost a failed slice or a rejected build):**
+- ONE object with ONE PART PER COLOUR. Two objects (one per colour) have empty layers every other course and Bambu
+  refuses to slice ("can't be printed for empty layer between…"). Fallback import: both STLs -> "load as single object with multiple parts".
+- Meshes centred on XY=0 — `tools/bambu_3mf.py` places by object centre; off-centre meshes fail "no object fully inside" (-50).
+- The base config carries a 200x200 bed and the prime tower at plate centre: `rod_overrides()` sets the real 256 bed and
+  parks the tower at (216,216) width 30. Anything >190 mm fails without it; the tower would sit on the object.
+- A course may never reach past the course below it: flat full-size bottom, NO outward steps, no fringe/lip (Collin
+  rejected both a brush fringe and a river-stone bottom). The top pillow (`ease_top_r`) is fine — it only shrinks going up.
+- Every rod span is an "overhang wall" to the slicer; stock P2S overhang 4/4 = 10 mm/s doubled the print time. The
+  overrides run overhang/bridge at 50, walls 100/150. Spans are <2 mm bridges — trivial for PLA.
+- Colour fade = swaps: speckle fade across the full height is one swap per LAYER (~160 on a 32 mm piece); confine it to an 8-course band to stay ~35.
+- Rod beads come from `rw.bead()` (sweep with rounded caps, winding forced outward); the slicer prints each course as a
+  narrow line, two wide layers, a narrow line — that is what gives the soft round profile. Nothing square anywhere,
+  including plan corners (rounded square outline) and the dish (spherical).
+- CLI slice recipe: `BambuStudio --slice 0 --export-3mf "$ABS/sliced.3mf" project.3mf` run from the output dir
+  (`--outputdir` breaks the export; `--load-filament-ids` is not allowed with 3MF input). The CLI ignores part->filament
+  assignment, so numbers are single-colour and the swap count is only visible in the GUI.
+- Print card (P2S 0.4): 0.20 layers, 4 wall loops, 0% infill, 0 top/bottom shells, thin-wall ON, arachne, seam aligned,
+  no brim, clean PEI; one object/two parts; map AMS slot 1 rust, 2 cream; check the object list shows part 2 on filament 2.
+
 ### Common Pitfalls
 
 - **Hollowing: prefer boolean subtraction over `.shell()`**. `.shell()` is fragile. It fails on tapered bodies, lofted shapes, unions of multiple primitives, and anything with many fillets. Only reach for `.shell()` when the body is a single simple primitive (one `.box()` or `.cylinder()`) with a uniform wall thickness on all sides. If in doubt, use boolean subtraction.
