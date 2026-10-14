@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import trimesh
 
-from . import bambu, droop, fabric, halftone, lattice, printer
+from . import bambu, compose, droop, fabric, halftone, lattice, printer
 from .shapes import SHAPES
 
 # Bambu PLA Matte, approximate swatches (preview + 3MF colour only; the real colour is your spool)
@@ -30,7 +30,9 @@ TEXTURES = {**{k: dict(family="lattice", **{kk: vv for kk, vv in v.items() if kk
             **{k: dict(family="fabric", slots=1, swaps="none", **v) for k, v in fabric.STITCHES.items()},
             **{k: dict(family="droop", slots=1, swaps="none", **v) for k, v in droop.STYLES.items()},
             "halftone": dict(family="halftone", slots=2, swaps="layer", name="Halftone",
-                             blurb="Two colours alternate every layer; the one that ribs outward paints a picture")}
+                             blurb="Two colours alternate every layer; the one that ribs outward paints a picture"),
+            "mix": dict(family="mix", slots=4, swaps="band", name="Mix",
+                        blurb="Stack textures in bands up the wall — fabric, droop, halftone and plain")}
 
 # options each family offers in the picker: key -> (label, kind, choices, default)
 OPTIONS = {
@@ -39,6 +41,7 @@ OPTIONS = {
     "droop": [("density", "Density", "seg", [("sparse", "Sparse"), ("medium", "Medium"), ("dense", "Dense")], "medium"),
               ("length", "Loop length", "seg", [("short", "Short"), ("medium", "Medium"), ("long", "Long")], "medium")],
     "lattice": [],
+    "mix": [],
     "halftone": [("picture", "Picture", "seg", [(k, v["name"]) for k, v in halftone.PICTURES.items()], "flames"),
                  ("band", "Layers per colour", "seg", [("1", "1 — sharpest"), ("2", "2 — half the changes")], "1")],
 }
@@ -117,6 +120,21 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         over = printer.overrides(nz.size, "lattice", slots=len(parts))
         extra = dict(rods=rods.count(), courses=region.n, rod=f"{nz.rod_w:.2f} × {nz.rod_h:.2f} mm",
                      pitch=nz.pitch)
+    elif T["family"] == "mix":
+        meshes, prev, info = compose.build(S, v, nz, options.get("bands") or compose.PRESETS[compose.DEFAULT_PRESET]["bands"])
+        merged, mprev = {}, {}
+        for slot in sorted(meshes):
+            merged.setdefault(colours[slot], []).append(meshes[slot]); mprev.setdefault(colours[slot], []).append(prev[slot])
+        parts = [(f"colour {k}", trimesh.util.concatenate(ms), k, col) for k, (col, ms) in enumerate(merged.items(), 1)]
+        mix_preview = [(f"colour {k}", trimesh.util.concatenate(mprev[col]), k, col) for k, col in enumerate(merged, 1)]
+        swaps = info["swaps"] if len(parts) > 1 else 0
+        over = printer.overrides(nz.size, "droop" if info["droop"] else "fabric", slots=len(parts),
+                                 floor_layers=info["floor_layers"])
+        extra = dict(layers=info["layers"], bands=len(info["bands"]))
+        if info["strands"]:
+            extra.update(strands=info["strands"], reach=info["reach"])
+            warnings.append("The mix has droop strands, so the whole print runs at the droop fan (20 %) — fabric bands "
+                            "bridge a little softer than on their own.")
     elif T["family"] == "halftone":
         meshes, info = halftone.build(S, v, nz, picture_name=options.get("picture", "flames"),
                                       image_path=options.get("image"), band=int(options.get("band", 1)))
@@ -168,6 +186,10 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     if max(hi[0] - lo[0], hi[1] - lo[1]) > 2 * printer.SAFE_HALF + 1:
         warnings.append("wider than 200 mm — the prime tower may not fit beside it")
     preview = None
+    if T["family"] == "mix" and info["strands"]:            # the drape switch only matters when strands exist
+        preview = mix_preview
+        for _, m, _, _ in preview:
+            m.apply_translation([0, 0, -zmin])
     if T["family"] == "droop":
         dm = info["draped"]; dm.apply_translation([0, 0, -zmin])
         preview = [("colour 1", dm, 1, colours[0])]

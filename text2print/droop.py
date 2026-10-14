@@ -61,14 +61,16 @@ def _ribbon(theta_c, chord, bulge, z0, height, width, r_of_z, embed, power, lean
     return m
 
 
-def _rows(style, r_of_z, height, nz, density, length, seed=11):
+def _rows(style, r_of_z, height, nz, density, length, seed=11, z_range=None):
     """Strand placements (theta, chord, bulge, z0, tall, lean, width) honouring the laws above."""
     sp = _SPEC[style]; lh, lw = nz.layer_h, nz.line_w
     tall = min(4, sp["tall"]); strand_h = tall * lh; width = sp["width"] * lw
     gap = max(sp["row"], tall + 1) * lh                      # rows a full strand + a layer apart: never intersect
     bulge_max = sp["bulge"][1] * length
-    z_lo = max(sp["zone"][0] * height, bulge_max + 4.0)      # the droop must not reach the bed
-    z_hi = sp["zone"][1] * height - strand_h
+    if z_range is None:
+        z_range = (sp["zone"][0] * height, sp["zone"][1] * height)
+    z_lo = max(z_range[0], bulge_max + 4.0)                   # the droop must not reach the bed
+    z_hi = z_range[1] - strand_h
     out = []
     if style == "curls":
         # tiers of coil columns; each next loop drifts 40 % of a chord sideways (partial overlap -> a coil)

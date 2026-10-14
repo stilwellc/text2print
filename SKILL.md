@@ -37,6 +37,12 @@ Halftone (`halftone.py`, texture "halftone" on cup/vase/bowl/goblet): options pi
 band = 1|2 layers per colour, CLI `--image path` (dark = colour 1). Recipe `halftone.RECIPE`: layer = nozzle max
 (0.7 x nozzle), one line 2.5x (0.2/0.4) to 1.75x (0.8) the nozzle, 1 wall, 0 % infill. Colour flips every layer;
 rib swing = min(0.5, 0.6 - local wall lean) x line. Stats split grams_part and grams_purge.
+Mix (`compose.py`, texture "mix" on cup/vase/bowl/goblet): options {"bands": [{texture, share, slot, slot2?, options}]}
+bottom-up; textures from `compose.MIXABLE` (plain + fabric + halftone + droop; never lattice or candle). One layer
+height (nozzle standard) and the fabric shell for all bands; each band emits per-layer contours, same-colour runs
+become staircase solids, a same-colour neighbour reaches 1/4 layer down and is unioned (never coplanar); droop
+strands union into their band's colour (a strand adding a body raises). Any droop band -> droop cooling for the
+whole print. Presets in `compose.PRESETS`.
 
 ## Laws (print-verified; tests enforce the geometric ones)
 

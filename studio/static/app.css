@@ -168,3 +168,22 @@ h2 { font-size: 15px; margin-bottom: 12px; }
   .viewbtns { right: 12px; bottom: 12px; }
   .viewbtns #spinBtn, .viewbtns #resetBtn { display: none; }
 }
+
+/* mix bands */
+.bands { display: grid; gap: 8px; margin-top: 10px; }
+.band { display: grid; grid-template-columns: 1fr auto auto; gap: 8px 10px; align-items: center; padding: 10px 10px 12px;
+  border-radius: 12px; background: var(--card); border: 1px solid var(--line); }
+.band select { font: inherit; font-size: 13.5px; padding: 6px 8px; border-radius: 9px; border: 1px solid var(--line-strong);
+  background: var(--panel); color: var(--ink); min-width: 0; }
+.band .chips { display: flex; gap: 4px; }
+.band .chip-btn { width: 24px; height: 24px; border-radius: 50%; border: 1px solid rgba(0,0,0,.14); padding: 0; position: relative; }
+.band .chip-btn span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 10.5px; font-weight: 600;
+  color: rgba(255,255,255,.92); text-shadow: 0 0 2px rgba(0,0,0,.45); }
+.band .x { border: 0; background: none; color: var(--faint); font-size: 18px; line-height: 1; padding: 2px 4px; }
+.band .x:hover { color: var(--ink); }
+.band .x:disabled { visibility: hidden; }
+.band .share { grid-column: 1 / -1; display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+.band .share input { width: 100%; accent-color: var(--ink); margin: 0; }
+.band .share output { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; min-width: 34px; text-align: right; }
+.band .sub { grid-column: 1 / -1; }
+.add { margin-top: 8px; width: 100%; padding: 9px; border-style: dashed; }

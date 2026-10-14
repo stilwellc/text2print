@@ -14,7 +14,8 @@ const el = (tag, attrs = {}, ...kids) => {
 const fmt = (n, d = 0) => Number(n).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
 
 let CAT = null;
-const state = { shape: null, texture: null, nozzle: 0.4, params: {}, colours: [], options: {} };
+const state = { shape: null, texture: null, nozzle: 0.4, params: {}, colours: [], options: {}, bands: null };
+const MAX_SLOTS = 4;
 let job = null;
 let draped = true;               // droop pieces: show strands hung as gravity will hang them
 
@@ -32,7 +33,8 @@ function readUrl() {
   if (q.get("c")) state.colours = q.get("c").split(",").map((h) => "#" + h.replace("#", ""));
   const optKeys = Object.values(CAT.options).flat().map((o) => o.key);
   for (const [k, v] of q) {
-    if (optKeys.includes(k)) state.options[k] = v === "1" ? true : v === "0" ? false : v;
+    if (k === "mix") { try { state.bands = JSON.parse(v); } catch (e) { /* ignore a bad link */ } }
+    else if (optKeys.includes(k)) state.options[k] = v === "1" ? true : v === "0" ? false : v;
     else if (!["shape", "texture", "nozzle", "c"].includes(k)) state.params[k] = parseFloat(v);
   }
 }
@@ -40,12 +42,19 @@ function writeUrl() {
   const q = new URLSearchParams({ shape: state.shape, texture: state.texture, nozzle: state.nozzle });
   const sh = shapeOf(state.shape);
   for (const p of sh.params) if (state.params[p.key] !== undefined && state.params[p.key] !== p.default) q.set(p.key, state.params[p.key]);
-  q.set("c", state.colours.slice(0, textureOf(state.texture).slots).map((h) => h.replace("#", "")).join(","));
+  q.set("c", state.colours.slice(0, slotCount()).map((h) => h.replace("#", "")).join(","));
+  if (isMix()) q.set("mix", JSON.stringify(state.bands));
   for (const o of familyOptions()) {
     const v = state.options[o.key] ?? o.default;
     if (v !== o.default) q.set(o.key, v === true ? "1" : v === false ? "0" : v);
   }
   history.replaceState(null, "", "?" + q.toString());
+}
+
+const isMix = () => textureOf(state.texture).family === "mix";
+function slotCount() {
+  if (!isMix()) return textureOf(state.texture).slots;
+  return Math.max(1, ...state.bands.flatMap((b) => b.texture === "halftone" ? [b.slot + 1, (b.slot2 ?? 1) + 1] : [b.slot + 1]));
 }
 
 // ── picker ─────────────────────────────────────────────────────────────────────
@@ -83,7 +92,7 @@ function pickShape(key) {
 
 function renderTextures() {
   const sh = shapeOf(state.shape);
-  const groups = [["lattice", "Woven rods"], ["fabric", "Printed fabric"], ["droop", "Droop"], ["halftone", "Halftone"]].filter(([f]) => sh.families.includes(f));
+  const groups = [["lattice", "Woven rods"], ["fabric", "Printed fabric"], ["droop", "Droop"], ["halftone", "Halftone"], ["mix", "Mix"]].filter(([f]) => sh.families.includes(f));
   const kids = [];
   for (const [fam, label] of groups) {
     if (groups.length > 1) kids.push(el("div", { class: "group-label" }, label));
@@ -111,11 +120,14 @@ function renderSizes() {
 function renderColours() {
   const tex = textureOf(state.texture);
   while (state.colours.length < 3) state.colours.push(CAT.colours[state.colours.length]);
-  $("colours").replaceChildren(...Array.from({ length: tex.slots }, (_, i) => el("button", {
+  const n = slotCount();
+  $("colours").replaceChildren(...Array.from({ length: n }, (_, i) => el("button", {
     class: "swatch-btn", onclick: (e) => openPalette(i, e.currentTarget),
   }, el("span", { class: "chip", style: `background:${state.colours[i]}` }), el("span", { class: "name" }, nameOfColour(state.colours[i])),
-     el("span", { class: "slot" }, tex.slots > 1 ? `AMS ${i + 1}` : "AMS 1"))));
-  $("colourHint").textContent = tex.slots === 1 ? "One colour — no AMS changes."
+     el("span", { class: "slot" }, `AMS ${i + 1}`))));
+  $("colourHint").textContent = isMix() ? (n === 1 ? "One colour — no AMS changes. Give a band another colour in Bands."
+      : "Each band picks its AMS slot. Changes happen where bands meet, and every layer inside a halftone band.")
+    : tex.slots === 1 ? "One colour — no AMS changes."
     : tex.family === "halftone" ? "Colour 1 paints the picture, colour 2 the background. The AMS changes every layer — pick strong contrast."
     : tex.swaps === "layer" ? "Colours mix inside every course, so the AMS changes about once per layer. Pick the same colour twice for a one-colour print."
     : "Colour follows rod direction: one AMS change per course. Pick the same colour twice for a one-colour print.";
@@ -127,7 +139,7 @@ function openPalette(slot, anchor) {
   pop.replaceChildren(...Object.entries(CAT.palette).map(([n, hex]) => el("button", {
     style: `background:${hex}`, title: n, "aria-label": n, "aria-checked": String(hex.toLowerCase() === state.colours[slot].toLowerCase()),
     onmouseenter: () => { name.textContent = n; },
-    onclick: () => { state.colours[slot] = hex; pop.hidden = true; renderColours(); changed(); },
+    onclick: () => { state.colours[slot] = hex; pop.hidden = true; renderColours(); renderBands(); changed(); },
   })), name);
   pop.hidden = false;
   const top = Math.min(r.bottom + 8, innerHeight - pop.offsetHeight - 12);
@@ -154,7 +166,50 @@ function renderFinish() {
   }));
 }
 
-function renderAll() { renderShapes(); renderTextures(); renderSizes(); renderColours(); renderFinish(); }
+function renderBands() {
+  $("mixSec").hidden = !isMix();
+  if (!isMix()) return;
+  const M = CAT.mix;
+  seg($("mixPresets"), M.presets.map((p) => [p.key, p.name]), state.mixPreset,
+    (k) => { state.mixPreset = k; state.bands = structuredClone(M.presets.find((p) => p.key === k).bands); renderBands(); renderColours(); changed(); });
+  const total = state.bands.reduce((a, b) => a + b.share, 0);
+  const edit = () => { state.mixPreset = null; renderBands(); renderColours(); changed(); };
+  const chip = (b, key) => {
+    const i = b[key] ?? 0;
+    return el("button", { class: "chip-btn", style: `background:${state.colours[i]}`, title: `AMS ${i + 1} — click to change`,
+      onclick: () => { b[key] = (i + 1) % MAX_SLOTS; edit(); } }, el("span", {}, String(i + 1)));
+  };
+  const rows = state.bands.map((b, idx) => {
+    const sel = el("select", { "aria-label": "Band texture" }, ...M.textures.map((t) => {
+      const o = el("option", { value: t.key }, t.name); if (t.key === b.texture) o.selected = true; return o; }));
+    sel.addEventListener("change", () => { b.texture = sel.value; b.options = {}; if (b.texture === "halftone" && b.slot2 === undefined) b.slot2 = (b.slot + 1) % MAX_SLOTS; edit(); });
+    const out = el("output", {}, `${Math.round(100 * b.share / total)}%`);
+    const range = el("input", { type: "range", min: 3, max: 90, step: 1, value: b.share, "aria-label": "Band height" });
+    range.addEventListener("input", () => { b.share = +range.value; out.textContent = `${Math.round(100 * b.share / state.bands.reduce((a, x) => a + x.share, 0))}%`; state.mixPreset = null; writeUrl(); changed(); });
+    const kids = [sel, el("div", { class: "chips" }, chip(b, "slot"), ...(b.texture === "halftone" ? [chip(b, "slot2")] : [])),
+      el("button", { class: "x", title: "Remove band", "aria-label": "Remove band", disabled: state.bands.length < 2 ? "" : null,
+        onclick: () => { state.bands.splice(idx, 1); edit(); } }, "×"),
+      el("div", { class: "share" }, range, out)];
+    const fam = M.textures.find((t) => t.key === b.texture).family;
+    if (fam === "droop" || b.texture === "halftone") {
+      const key = fam === "droop" ? "density" : "picture";
+      const choices = fam === "droop" ? M.droop_options : M.pictures;
+      const box = el("div", { class: "seg small sub" });
+      seg(box, choices, (b.options || {})[key] ?? (fam === "droop" ? "medium" : "flames"), (v) => { b.options = { ...(b.options || {}), [key]: v }; edit(); });
+      kids.push(box);
+    }
+    return el("div", { class: "band" }, ...kids);
+  });
+  $("bands").replaceChildren(...rows.reverse());
+  $("addBand").disabled = state.bands.length >= 6;
+}
+$("addBand").addEventListener("click", () => {
+  const top = state.bands[state.bands.length - 1];
+  state.bands.push({ texture: "plain", share: 15, slot: top ? top.slot : 0 }); state.mixPreset = null;
+  renderBands(); renderColours(); changed();
+});
+
+function renderAll() { renderShapes(); renderTextures(); renderBands(); renderSizes(); renderColours(); renderFinish(); }
 
 // ── building ───────────────────────────────────────────────────────────────────
 let timer = null, inflight = false, pending = false, reframe = true;
@@ -165,11 +220,11 @@ function changed(newShape = false) {
 async function requestBuild() {
   if (inflight) { pending = true; return; }
   inflight = true; pending = false;
-  $("status").hidden = false; $("statusText").textContent = { fabric: "Knitting…", droop: "Spinning strands…", halftone: "Screening…" }[textureOf(state.texture).family] || "Weaving…";
+  $("status").hidden = false; $("statusText").textContent = { fabric: "Knitting…", droop: "Spinning strands…", halftone: "Screening…", mix: "Stacking bands…" }[textureOf(state.texture).family] || "Weaving…";
   try {
     const res = await fetch("/api/build", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shape: state.shape, texture: state.texture, nozzle: state.nozzle, params: state.params,
-        colours: state.colours.slice(0, textureOf(state.texture).slots), options: state.options }) });
+        colours: state.colours.slice(0, slotCount()), options: isMix() ? { bands: state.bands } : state.options }) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Build failed");
     if (!pending) {
@@ -191,6 +246,7 @@ function renderPrint(d) {
   const rows = [["Size", `${fmt(s.size[0])} × ${fmt(s.size[1])} × ${fmt(s.size[2], 1)} mm`]];
   if (s.rods) rows.push(["Rods", `${fmt(s.rods)} · ${s.courses} courses`]);
   if (s.stitches) rows.push(["Stitches around", fmt(s.stitches)]);
+  if (s.bands) rows.push(["Bands × layers", `${s.bands} × ${fmt(s.layers)}`]);
   if (s.ribs) rows.push(["Ribs × layers", `${fmt(s.ribs)} × ${fmt(s.layers)}`]);
   if (s.strands) rows.push(["Strands", `${fmt(s.strands)} · up to ${fmt(s.reach)} mm out`]);
   rows.push(["Colours", String(s.colours)]);
@@ -210,6 +266,7 @@ function renderPrint(d) {
   notes.push({
     lattice: "No supports, no infill — the rods are the object. Print on a clean plate, no brim.",
     fabric: "Vase mode off. The layer height must stay at " + noz.layer + " mm — the pattern is built on it.",
+    mix: "One layer height and one wall for every band. Vase mode off; keep the project's layer height — the bands are built on it.",
     halftone: `Prints at ${s.layer_h} mm layers with one ${s.line} mm line — keep those, the picture is built on them.`,
     droop: "Glossy or translucent PETG/PLA shows the strands best. Don't slow overhangs down or raise the fan — the strands only droop while molten.",
   }[tex.family]);
@@ -217,6 +274,7 @@ function renderPrint(d) {
   const set = [["Printer", CAT.printer.name], ["Nozzle", `${s.nozzle} mm`], ["Layer height", `${s.layer_h} mm`],
     ...({ lattice: [["Rod", s.rod], ["Rod spacing", `${s.pitch} mm`], ["Walls", "rods only"], ["Infill", "0%"]],
           fabric: [["Walls", "2 loops"], ["Infill", "0%"], ["Top layers", "0"]],
+          mix: [["Walls", "2 loops"], ["Infill", "0%"], ["Bands", `${s.bands}`]],
           halftone: [["Line width", `${s.line} mm, 1 wall`], ["Infill", "0%"], ["Colour changes", "every layer"]],
           droop: [["Walls", "2 loops, strands 1 line"], ["Overhang slow-down", "off"], ["Fan", "≤ 20%"], ["Nozzle", "+5 °C"]] }[tex.family]),
     ["Supports", "none"], ["Filament", "Bambu PLA Matte"]];
@@ -343,6 +401,7 @@ renderer.setAnimationLoop(() => { resize(); controls.update(); renderer.render(s
   state.shape = CAT.defaults.shape; state.texture = CAT.defaults.texture; state.nozzle = CAT.defaults.nozzle;
   state.colours = [...CAT.colours];
   readUrl();
+  if (!state.bands) { state.mixPreset = CAT.mix.default; state.bands = structuredClone(CAT.mix.presets.find((p) => p.key === CAT.mix.default).bands); }
   if (!fits(shapeOf(state.shape), textureOf(state.texture))) state.texture = CAT.textures.find((t) => fits(shapeOf(state.shape), t)).key;
   renderNozzles(); renderAll(); changed(true);
 })();

@@ -30,7 +30,13 @@ def render_all(only=None):
     for key, t in build.TEXTURES.items():
         if only and f"texture_{key}" not in only:
             continue
-        if t["family"] == "halftone":
+        if t["family"] == "mix":
+            from . import compose
+            b = build.make("vase", key, {"diameter": 90, "height": 120}, colours=HALFTONE_COLOURS,
+                           options={"bands": compose.PRESETS["flame"]["bands"]})
+            render([(m, c) for _, m, _, c in b.preview], OUT / f"texture_{key}.png", size=360,
+                   view=(1.0, -0.9, 0.3), zoom=1.1)
+        elif t["family"] == "halftone":
             b = build.make("cup", key, {"diameter": 80, "height": 90}, nozzle=0.8, colours=HALFTONE_COLOURS)
             render([(m, c) for _, m, _, c in b.parts], OUT / f"texture_{key}.png", size=360,
                    view=(1.0, -0.9, 0.25), zoom=1.1)
