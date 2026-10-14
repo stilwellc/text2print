@@ -23,8 +23,8 @@ for k in range(16):                                                             
 sock = cyl(1.7, 12.0)   # 6 mm deep from the base
 for c in cuts + [sock]: plug = plug.difference(c, engine="manifold")
 # catchlight: a 1.3 mm bead sitting 0.5 mm proud, upper-outer at 45°
-ang = np.radians(135); rr = 3.4; zz = SKIRT + np.sqrt(R * R - rr * rr)
-cl = trimesh.creation.icosphere(subdivisions=4, radius=1.3); n = np.array([rr * np.cos(ang), rr * np.sin(ang), zz - SKIRT]); n /= np.linalg.norm(n)
+ang = np.radians(135); rr = 4.0; zz = SKIRT + np.sqrt(R * R - rr * rr)   # off the pupil rim (r 2.7): grazing it pinched the mesh on reload (Sep 26)
+cl = trimesh.creation.icosphere(subdivisions=4, radius=1.1); n = np.array([rr * np.cos(ang), rr * np.sin(ang), zz - SKIRT]); n /= np.linalg.norm(n)
 cl.apply_translation(np.array([rr * np.cos(ang), rr * np.sin(ang), zz]) - n * 0.8)
 plug = plug.union(cl, engine="manifold")
 plug.export("sofubi_ape_eye.stl")

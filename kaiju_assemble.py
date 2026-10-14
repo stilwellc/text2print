@@ -4,7 +4,7 @@ looking at, not printing."""
 import json, numpy as np, trimesh, kaiju_head as K
 T = {k: np.array(v) for k, v in json.load(open("split_transforms.json")).items()}
 parts = []
-for name in ("base", "face", "cap", "ear_left", "ear_right"):
+for name in ("base", "face", "cap", "ear_left", "ear_right", "horn_left", "horn_right"):
     m = trimesh.load(f"sofubi_ape_{name}.stl", force="mesh"); m.apply_transform(np.linalg.inv(T[name])); parts.append(m)
 for sx in (-1, 1):
     for fg, down in ((K.fang_up, True), (K.fang_lo, False)):

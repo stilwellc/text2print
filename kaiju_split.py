@@ -28,7 +28,7 @@ Y_CUT   = 14.0      # face | cap at the skull's widest line (world y): forward o
 PIN_R, HOLE_R, BOSS_R, PIN_L = 3.0, 3.2, 6.5, 18.0
 BASE_PINS = [(-50, -20), (50, -20), (0, 50)]              # (x, world y) on the collar wall at z = 24
 NECK_PINS = [(-30, -14), (30, -14), (0, 34)]              # (x, world y) on the neck wall at z = 42
-HEAD_PINS = [(-40.8, 131.7), (40.8, 131.7), (-40.8, 72.3), (40.8, 72.3)]   # (x, z) on the skull wall at the y cut
+HEAD_PINS = [(-40.8, 131.7), (40.8, 131.7), (-40.8, 72.3), (40.8, 72.3), (0.0, 178.0)]   # (x, z) on the skull wall at the y cut; the 5th rides the egg peak (Sep 25)
 
 def cyl_z(X, Y, Z, x, y, z0, z1, r):
     return np.maximum(np.sqrt((X - x) ** 2 + (Y - y) ** 2) - r, np.maximum(z0 - Z, Z - z1))
@@ -172,10 +172,57 @@ for sx, foot in ((-1, foot_l), (1, foot_r)):
 # ── cap ribs: the inside of the skull dome is a wide, flat-ish ceiling when the
 #    cap prints back-up. Two 2 mm ribs from the cut plane to the inner apex
 #    turn it into four short bridges. Hidden inside.
-for rib in (np.maximum.reduce([np.abs(X) - 0.6, Y_CUT - Y, 88.0 - Z, Z - 150.0]),
-            np.maximum.reduce([np.abs(Z - 108.0) - 0.6, Y_CUT - Y, np.abs(X) - 48.0])):   # 1.2 mm = 3 perimeters, enough to anchor bridges
+for rib in (np.maximum.reduce([np.abs(X) - 0.6, Y_CUT - Y, 88.0 - Z, Z - 190.0]),     # to the egg's inner apex (Sep 25: was 150)
+            np.maximum.reduce([np.abs(Z - 108.0) - 0.6, Y_CUT - Y, np.abs(X) - 48.0]),
+            np.maximum.reduce([np.abs(Z - 148.0) - 0.6, Y_CUT - Y, np.abs(X) - 44.0])):   # the egg's taller dome gets a second cross rib
     shell_ribbed = np.maximum(rib, f + 0.5)
     head_minus_ears = np.minimum(head_minus_ears, shell_ribbed)
+
+# ── the temple horns: PLUGS (Sep 25). Like the ears: each horn is the solid
+#    beyond a plane across the horn S_ROOT mm up its axis, within a cylinder
+#    footprint round the axis; the head gets the matching opening and keeps a
+#    flat-topped stump. The plug prints ROOT DOWN (flat face on the bed, tip
+#    up); its taper outruns the curl, the rings are shingled. Registration is a
+#    1 mm locating nub on the stump into a 1.3 mm recess in the plug base
+#    (a 9.8 mm bridge in the plug — short). Glue only: a pin would need a boss
+#    hanging into the face's hollow, which prints in mid-air.
+NUB_R, NUB_H, RECESS_R, RECESS_H = 4.6, 1.0, 4.9, 1.3
+# Sep 26 fix: a FIXED root plane cut straight through the forehead wall on each
+# horn's uphill side (the skin there rises above the plane) — a hole into the
+# hollow, and the plug carried a sliver of shell. Now the plane sits 0.8 mm
+# above the highest skin inside the footprint, the stump under it is SOLID
+# (skin to plane, never the hollow), and the plug is cut from the solid horn.
+horn_plugs = []
+for H in K.HORNS:
+    hb, ha, hu = K.horn_axes(H)
+    ctr = hb + ha * 6.0
+    ix = np.where(np.abs(xs - ctr[0]) < 26)[0]; iy = np.where(np.abs(-ys - ctr[1]) < 26)[0]; iz = np.where(np.abs(zs - ctr[2]) < 26)[0]
+    sl = (slice(ix[0], ix[-1] + 1), slice(iy[0], iy[-1] + 1), slice(iz[0], iz[-1] + 1))
+    Pl = np.stack([X[sl], -Y[sl], Z[sl]], axis=-1)                       # sculpt frame
+    K._PROBING = True
+    try: fb = K.field(np.stack([X[sl], Y[sl], Z[sl]], axis=-1))       # the bare head (no horns), world in
+    finally: K._PROBING = False
+    q = Pl - hb; s_ax = q @ ha
+    radial = np.linalg.norm(q - s_ax[..., None] * ha, axis=-1)
+    FOOT_R = H["r0"] + 0.5
+    in_foot = radial < FOOT_R
+    S_ROOT = float(s_ax[in_foot & (fb < 0)].max()) + 0.8
+    foot = radial - FOOT_R
+    opening = np.maximum(S_ROOT - s_ax, foot)
+    stump = np.maximum.reduce([foot, s_ax - S_ROOT, -6.0 - s_ax, -fb - (K.wall + 0.25)])   # skin-to-plane, solid, never in the hollow
+    nub = np.maximum(radial - NUB_R, np.maximum(S_ROOT - 0.5 - s_ax, s_ax - (S_ROOT + NUB_H)))
+    hm = head_minus_ears[sl]
+    hm = np.maximum(hm, -opening); hm = np.minimum(hm, stump); hm = np.minimum(hm, nub)
+    head_minus_ears[sl] = hm
+    hs = K.horn_sdf(Pl, H)
+    horn = K.horn_rings(hs, Pl, hs, H) if "rings" in H else hs
+    recess = np.maximum(radial - RECESS_R, np.maximum(S_ROOT - 1.0 - s_ax, s_ax - (S_ROOT + RECESS_H)))
+    plug_sub = np.maximum(np.maximum(horn, np.maximum(S_ROOT - s_ax, foot)), -recess)
+    plug = np.full(X.shape, 1.0, np.float32); plug[sl] = plug_sub
+    up = np.array([ha[0], -ha[1], ha[2]], float)
+    print(f"horn at x {hb[0]:+.1f}: root plane s = {S_ROOT:.2f} mm")
+    horn_plugs.append(("horn_left" if hb[0] < 0 else "horn_right", plug, up))
+    del Pl, fb, q, s_ax, radial
 
 # ── the seams: flat butt joints, pinned, with a chamfered V at the visible line
 # A tongue-and-groove was tried and rejected: both big parts print standing
@@ -208,6 +255,8 @@ parts = {
     "ear_left":  (np.maximum(ear_field(-1), -cyl_x(X, Y, Z, -(X_ROOT + 9), -(X_ROOT - 1), EAR_PIN_Y, EAR_PIN_Z, HOLE_R)), (-1, 0, 0)),
     "ear_right": (np.maximum(ear_field( 1), -cyl_x(X, Y, Z, X_ROOT - 1, X_ROOT + 9, EAR_PIN_Y, EAR_PIN_Z, HOLE_R)), (1, 0, 0)),
 }
+for name, fld, up in horn_plugs:
+    parts[name] = (fld, tuple(up))
 report = {}
 for name, (fld, up) in parts.items():
     tm = K.mesh_from(fld, xs, ys, zs, VOXEL)
@@ -218,7 +267,11 @@ for name, (fld, up) in parts.items():
     import manifold3d as m3d
     mm = trimesh.Trimesh(tm.vertices, tm.faces, process=True)
     st = m3d.Manifold(m3d.Mesh(vert_properties=np.asarray(mm.vertices, np.float32), tri_verts=np.asarray(mm.faces, np.int32))).status()
-    report[name] = {"manifold3d": str(st), "mm": [round(float(v), 1) for v in tm.extents], "g": round(g), "faces": len(tm.faces), "watertight": bool(tm.is_watertight), "overhang": oh}
+    rl = trimesh.load(f"sofubi_ape_{name}.stl", force="mesh", process=True)     # the file AS A SLICER READS IT
+    _, ec = np.unique(np.sort(rl.edges, axis=1), axis=0, return_counts=True)
+    nb = len(rl.split(only_watertight=False)); nm = int((ec > 2).sum()); bd = int((ec == 1).sum())
+    print(f"   reload: watertight={rl.is_watertight} bodies={nb} non-manifold={nm} boundary={bd}" + ("" if (nb == 1 and nm == 0 and bd == 0) else "   <<< BROKEN"))
+    report[name] = {"reload_bodies": nb, "reload_nonmanifold": nm, "reload_boundary": bd, "manifold3d": str(st), "mm": [round(float(v), 1) for v in tm.extents], "g": round(g), "faces": len(tm.faces), "watertight": bool(tm.is_watertight), "overhang": oh}
     print(f"{name:5} {tm.extents[0]:6.1f} x {tm.extents[1]:6.1f} x {tm.extents[2]:6.1f} mm  {g:4.0f} g  {len(tm.faces):>9,} faces  manifold3d={st}  overhang >45° {oh['>45']}%  >70° {oh['>70']}%")
 
 pin = trimesh.creation.cylinder(radius=PIN_R, height=PIN_L, sections=48); pin.apply_translation((0, 0, PIN_L / 2))
