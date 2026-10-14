@@ -12,6 +12,7 @@ SMALL = {"cup": {"diameter": 60, "height": 70}, "bowl": {"diameter": 100, "heigh
          "candle": {"diameter": 90, "height": 90}}
 
 
+@pytest.mark.full
 @pytest.mark.parametrize("shape", list(SMALL))
 @pytest.mark.parametrize("style", list(droop.STYLES))
 def test_every_shape_and_style_is_one_watertight_body(shape, style):
@@ -48,10 +49,10 @@ def test_strands_are_one_extrusion_except_swag():
 
 def test_droop_slicer_settings_keep_strands_molten():
     b = build.make("cup", "fringe", SMALL["cup"])
-    o = b.overrides
-    assert set(o["enable_overhang_speed"]) == {"0"} and o["fan_max_speed"] == ["20"]
+    o, f = b.overrides, b.per_filament
+    assert set(o["enable_overhang_speed"]) == {"0"} and f["fan_max_speed"] == ["20"]
     base = printer.base_config(0.4)["nozzle_temperature"][0]
-    assert int(o["nozzle_temperature"][0]) == int(base) + 5
+    assert int(f["nozzle_temperature"][0]) == int(base) + 5
 
 
 def test_candle_holder_is_solid_with_infill_and_a_socket():

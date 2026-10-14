@@ -21,6 +21,11 @@ cd ~/Dev/text2print
 Deep-link the studio to a pick for the user: `/?shape=tray&texture=twill&nozzle=0.4&width=117&c=8B3A2F,EDE3D1`.
 In Python: `from text2print import build; b = build.make("tray", "twill", {"width": 117}); b.write_3mf(path)`.
 
+More CLI: `sampler --nozzle 0.4 --slice` (test plates) · `verify <texture> <nozzle> ok|fail --note` (records a print;
+drives the Printed badges and warnings) · `make ... --option zones=3 --option lid=lid`.
+Options worth knowing: zones 1-4 + zone_style bands|stripes (fabric, droop; lattice with colour_by=height),
+lid=lid (+ lid_colour) on cup/vase/bowl/dish/tray/custom, purge=lean, picture/--image for halftone.
+
 Deliver to ~/Downloads/<project>/ (Collin's rule): the .3mf, the per-colour STLs, a render, and the numbers
 from `--slice` plus the AMS change estimate in `stats`.
 
@@ -62,6 +67,12 @@ whole print. Presets in `compose.PRESETS`.
   apart, strands never intersect in the mesh (`_never_touch`), strand faces on the 1/4-layer grid and wall
   rings on the 3/4-layer grid (coplanar unions leave slivers). Print: overhang slow-down OFF, fan <= 20 %,
   nozzle +5 C — slow strands freeze and don't droop. Verify with a G-code layer plot: one line out, one back.
+- Bambu CLI facts (verified Oct 14): it honours part->AMS slot when every per-filament list is n_fil long (the
+  writer pads them); layer ranges live in Metadata/layer_config_ranges.xml keyed by build position, must include
+  layer_height, must NOT include line widths or extruder; the prime tower needs identical ranges on every object.
+- Colour zones split on layer boundaries (woven: whole rods by centre, never cut). Lids: 0.25 mm slip fit, 6 mm
+  plug, printed top-face down; knob press-fits (6.0 hole / 5.85 peg).
+- Reliefs (garland, drips, melt) ramp every underside at <= 45 deg; test enforces it.
 - Only the 0.4 nozzle is print-verified. 0.2/0.6/0.8 are computed from it — say so.
 
 ## Extending

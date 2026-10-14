@@ -28,6 +28,7 @@ def test_path_bead_is_watertight_and_outward():
     assert m.is_watertight and m.volume > 0
 
 
+@pytest.mark.full
 @pytest.mark.parametrize("shape,pattern", [(s, p) for s in SMALL for p in lattice.PATTERNS if build.compatible(s, p)])
 def test_every_shape_and_pattern_builds_printable_parts(shape, pattern):
     b = build.make(shape, pattern, SMALL[shape])
