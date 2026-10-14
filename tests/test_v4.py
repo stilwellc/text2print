@@ -1,4 +1,5 @@
 """Research top-12 features: fittings, halftone economy, vase mode, shell textures, fur, lid styles, footprints, flat."""
+import math
 import zipfile
 
 import numpy as np
@@ -274,3 +275,50 @@ def test_woven_sleeve_still_fits_its_glass():
     xs = np.linspace(0, 60, 1201)
     inside = xs[reg.sdf(reg.z(reg.n // 2))(xs, np.zeros_like(xs)) <= 0]
     assert inside.min() >= 35.0                       # the glass (70 mm) slides in
+
+
+# ── woven bands in a mix ─────────────────────────────────────────────────────────────────────────────────
+from text2print import compose as _compose
+
+
+@pytest.mark.parametrize("bands", [
+    _compose.PRESETS["basket"]["bands"],
+    [dict(texture="grid", share=50, slot=0, slot2=1), dict(texture="fringe", share=50, slot=1)],     # woven at the bottom
+    [dict(texture="zigzag", share=50, slot=0), dict(texture="polar", share=50, slot=1, slot2=0)],   # woven on top
+    [dict(texture="plain", share=30, slot=0), dict(texture="ripple", share=40, slot=0, slot2=1),
+     dict(texture="beat", share=30, slot=1, slot2=0)],                                             # woven on woven
+])
+def test_woven_bands_mix(bands):
+    b = build.make("cup", "mix", {"diameter": 70, "height": 70}, options={"bands": bands},
+                   colours=["#8B3A2F", "#EDE3D1"], draft=True)
+    _ok(b)
+    assert any(r[2].get("wall_loops") == str(printer.nozzle(0.4).rod_lines) for r in b.ranges)
+    assert b.overrides["overhang_totally_speed"][0] == "50"
+
+
+def test_woven_band_changes_colour_once_per_course_and_starts_on_a_45_degree_collar():
+    nz = printer.nozzle(0.4); S = SHAPES["cup"]; v = S.resolve({"diameter": 70, "height": 70})
+    bands = _compose.PRESETS["basket"]["bands"]
+    parts, _, info = _compose.build(S, v, nz, bands, draft=True)
+    z0, z1 = info["bands"][0][1], info["bands"][0][1] + info["bands"][1][1]
+    woven = [s_ for a, b_, s_ in info["layer_slots"] if z0 - 1e-6 <= a and b_ <= z1 + 1e-6]
+    changes = sum(1 for x, y in zip(woven, woven[1:]) if x != y)
+    courses = round((z1 - z0) / nz.rod_h)
+    assert courses / 2 < changes < courses                     # rod courses alternate; collar and cap don't
+    # collar: wall below -> ring, never wider than 45 deg
+    shell = _compose.fabric_preset(0.4, diameter=70, stitch="zigzag")["fabric"]["shell_t"]
+    ramp = int(math.ceil(((6.0 - shell) / 2 + 0.5) / nz.rod_h))
+    assert ramp * nz.rod_h >= (6.0 - shell) / 2               # rise >= run on each face
+
+
+@pytest.mark.slicer
+def test_real_slicer_counts_woven_mix_changes(tmp_path):
+    if not bambu.slicer_available():
+        pytest.skip("Bambu Studio not installed")
+    import re
+    b = build.make("cup", "mix", {"diameter": 60, "height": 50}, options={"bands": _compose.PRESETS["basket"]["bands"]},
+                   colours=["#8B3A2F", "#EDE3D1"])
+    r = bambu.slice_project(b.write_3mf(tmp_path / "w.3mf"), tmp_path / "s")
+    assert "error" not in r, r
+    g = zipfile.ZipFile(tmp_path / "s" / "sliced.3mf").read("Metadata/plate_1.gcode").decode(errors="ignore")
+    assert len(re.findall(r"^M620 S\dA", g, re.M)) == b.stats["swaps"]

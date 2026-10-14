@@ -140,7 +140,12 @@ skirt* (wave foot, dense fringe, plain neck), *Flame foot* (halftone flames unde
 Bands print at the nozzle's standard layer height, except halftone bands, which keep their 0.28 mm (0.4
 nozzle) recipe through a Bambu layer range. The AMS changes where two colours meet (and every layer inside a
 halftone band). A fuzzy band paints fuzzy skin onto its stretch of wall. Droop bands get their own low-fan, +5 °C filament settings; give a droop band its own colour slot
-and the rest of the piece keeps full cooling. Woven rods can't join a mix — they are the whole object, not a wall. Mixes work on cup, vase, bowl and goblet.
+and the rest of the piece keeps full cooling. Woven bands join a mix too: Weave, Twill, Ripple, Moiré and Rose window. A woven band is a ring of rods centred
+on the wall, one colour per rod direction (one AMS change per course). It starts on a solid collar that widens
+from the thin wall below at 45°, or on a solid floor if it is the bottom band, and ends on a cap that narrows back
+to the wall for the band above. Its layers print with four wall loops and woven bridge speeds. Preset: *Basket
+band* (plain foot, twill middle, plain neck). Kagome, Over-under and Tartan stay whole-piece only: they need a
+third colour or mix colours inside a course. Mixes work on cup, vase, bowl and goblet.
 
 ```bash
 # mixes are easiest in the studio; every mix is a shareable link (/?shape=vase&texture=mix&mix=[...])

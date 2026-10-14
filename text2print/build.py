@@ -36,7 +36,7 @@ TEXTURES = {**{k: dict(family="lattice", **{kk: vv for kk, vv in v.items() if kk
             "flatlitho": dict(family="flat", slots=1, swaps="none", **flat.STYLES["litho"]),
             "cmyk": dict(family="flat", slots=4, swaps="layer", **flat.STYLES["cmyk"]),
             "mix": dict(family="mix", slots=4, swaps="band", name="Mix",
-                        blurb="Stack textures in bands up the wall — fabric, droop, halftone and plain")}
+                        blurb="Stack textures in bands up the wall — woven, fabric, droop, halftone and plain")}
 
 ZONES = [("zones", "Colours", "seg", [("1", "1"), ("2", "2"), ("3", "3"), ("4", "4")], "1"),
          ("zone_style", "Colour layout", "seg", [("bands", "Bands"), ("stripes", "Stripes")], "bands")]
@@ -270,6 +270,10 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         swaps = len(transitions)
         over = printer.overrides(nz.size, "droop" if info["droop"] else "fabric", slots=len(parts),
                                  floor_layers=info["floor_layers"])
+        if info.get("woven"):                                     # rod spans are short bridges: woven speeds
+            lat = printer.overrides(nz.size, "lattice", slots=len(parts))
+            over.update({k: lat[k] for k in ("overhang_3_4_speed", "overhang_4_4_speed", "overhang_totally_speed",
+                                             "bridge_speed", "wall_generator", "detect_thin_wall", "detect_overhang_wall")})
         ranges = info["ranges"]
         if ranges and ranges[0][0] < 1e-6:                       # bottom band is halftone: its grid starts the print
             over["initial_layer_print_height"] = ranges[0][2]["layer_height"]

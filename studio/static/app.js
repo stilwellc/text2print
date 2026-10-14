@@ -20,6 +20,8 @@ const FAMILY_NAMES = { lattice: "Woven", fabric: "Fabric", droop: "Droop", halft
 const ONLY = { folds: ["pleats", "flutes", "twist", "lowpoly", "ribs"], turn: ["twist", "lowpoly"], cell: ["voronoi"],
   noise: ["fuzzy"], fuzzy_bands: ["fuzzy"], picture: ["litho", "halftone", "flatlitho", "cmyk"], length: ["fringe", "swag", "curls", "unraveled", "fur"] };
 const IMAGE_TEXTURES = ["halftone", "litho", "flatlitho", "cmyk"];
+// mix bands with two colour slots: halftone (picture/background) and woven (one colour per rod direction)
+const twoSlot = (t) => t === "halftone" || (CAT && CAT.mix.textures.find((x) => x.key === t)?.family === "lattice");
 
 let CAT = null;
 const state = { shape: null, texture: null, nozzle: 0.4, params: {}, colours: [], options: {}, bands: null, mixPreset: null, family: null };
@@ -40,7 +42,7 @@ const zonesOn = () => {
 function slotCount() {
   if (!isMix() && zonesOn()) return Math.max(1, parseInt(state.options.zones || "1", 10));
   if (!isMix()) return textureOf(state.texture).slots;
-  return Math.max(1, ...state.bands.flatMap((b) => b.texture === "halftone" ? [b.slot + 1, (b.slot2 ?? 1) + 1] : [b.slot + 1]));
+  return Math.max(1, ...state.bands.flatMap((b) => twoSlot(b.texture) ? [b.slot + 1, (b.slot2 ?? 1) + 1] : [b.slot + 1]));
 }
 
 // ── url state ──────────────────────────────────────────────────────────────────
@@ -198,7 +200,7 @@ function renderColours() {
   }, el("span", { class: "chip", style: `background:${state.colours[i]}` }), el("span", { class: "name" }, nameOfColour(state.colours[i])),
      el("span", { class: "slot" }, `AMS ${i + 1}`))));
   $("colourHint").textContent = isMix() ? (n === 1 ? "One colour — no AMS changes. Give a band another colour in Bands."
-      : "Each band picks its AMS slot. Changes happen where bands meet, and every layer inside a halftone band.")
+      : "Each band picks its AMS slot. Changes happen where bands meet, every layer inside a halftone band, and every course inside a woven band.")
     : zonesOn() && n > 1 && tex.family === "droop" && (state.options.zone_style ?? "courses") === "courses"
       ? "Courses, like woven: each row of strands and the wall it hangs from take the next colour — one AMS change per course. More rows per colour, fewer changes."
     : zonesOn() && n > 1 ? (state.options.zone_style === "stripes" ? "Stripes repeat the colours up the piece — one AMS change per stripe." : "Colours stack in bands from the bottom — one AMS change where each band starts.")
@@ -292,14 +294,17 @@ function renderBands() {
       onclick: () => { b[key] = (i + 1) % MAX_SLOTS; edit(); } }, el("span", {}, String(i + 1)));
   };
   const rows = state.bands.map((b, idx) => {
-    const sel = el("select", { "aria-label": "Band texture" }, ...M.textures.map((t) => {
-      const o = el("option", { value: t.key }, t.name); if (t.key === b.texture) o.selected = true; return o; }));
-    sel.addEventListener("change", () => { b.texture = sel.value; b.options = {}; if (b.texture === "halftone" && b.slot2 === undefined) b.slot2 = (b.slot + 1) % MAX_SLOTS; edit(); });
+    const groups = {};
+    for (const t of M.textures) (groups[t.family] ||= []).push(t);
+    const sel = el("select", { "aria-label": "Band texture" }, ...Object.entries(groups).map(([fam, ts]) =>
+      el("optgroup", { label: fam === "plain" ? "Plain" : (FAMILY_NAMES[fam] || fam) }, ...ts.map((t) => {
+        const o = el("option", { value: t.key }, t.name); if (t.key === b.texture) o.selected = true; return o; }))));
+    sel.addEventListener("change", () => { b.texture = sel.value; b.options = {}; if (twoSlot(b.texture) && b.slot2 === undefined) b.slot2 = (b.slot + 1) % MAX_SLOTS; edit(); });
     const out = el("output", {}, `${Math.round(100 * b.share / total)}%`);
     const range = el("input", { type: "range", min: 3, max: 90, step: 1, value: b.share, "aria-label": "Band height" });
     range.addEventListener("input", () => { b.share = +range.value; out.textContent = `${Math.round(100 * b.share / state.bands.reduce((a, x) => a + x.share, 0))}%`; state.mixPreset = null; changed(false, true); });
     range.addEventListener("change", () => changed());
-    const kids = [sel, el("div", { class: "chips" }, chip(b, "slot"), b.texture === "halftone" ? chip(b, "slot2") : null),
+    const kids = [sel, el("div", { class: "chips" }, chip(b, "slot"), twoSlot(b.texture) ? chip(b, "slot2") : null),
       el("button", { class: "x", title: "Remove band", "aria-label": "Remove band", disabled: state.bands.length < 2, onclick: () => { state.bands.splice(idx, 1); edit(); } }, "×"),
       el("div", { class: "share" }, range, out)];
     const fam = M.textures.find((t) => t.key === b.texture).family;
