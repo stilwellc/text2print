@@ -13,7 +13,11 @@
 <body>
 <header class="top">
   <div class="brand">text2print</div>
-  <div class="printer"><span class="dot"></span><span id="printerName">Bambu Lab P2S</span></div>
+  <button class="printer" id="printerBtn" aria-haspopup="dialog"><span class="dot" id="printerDot"></span><span id="printerName">Bambu Lab P2S</span></button>
+  <nav class="topnav">
+    <button class="ghost" id="savedBtn" aria-haspopup="dialog">Saved</button>
+    <button class="ghost" id="platesBtn" aria-haspopup="dialog">Test plates</button>
+  </nav>
   <div class="nozzle">
     <span class="label">Nozzle</span>
     <div class="seg" id="nozzles" role="radiogroup" aria-label="Nozzle"></div>
@@ -28,6 +32,7 @@
     </section>
     <section>
       <h2>Pattern</h2>
+      <div class="seg small tabs" id="families" role="tablist" aria-label="Texture family"></div>
       <div id="textures"></div>
     </section>
     <section id="mixSec" hidden>
@@ -39,6 +44,7 @@
     </section>
     <section>
       <h2>Size</h2>
+      <div id="curve" class="curve" hidden></div>
       <div id="sizes" class="sizes"></div>
     </section>
     <section>
@@ -58,8 +64,10 @@
     <div class="dims" id="dims"></div>
     <div class="viewbtns">
       <div class="seg small" id="dropView" role="radiogroup" aria-label="Preview" hidden></div>
-      <button class="ghost" id="spinBtn" aria-pressed="false">Spin</button>
-      <button class="ghost" id="resetBtn">Reset view</button>
+      <button class="ghost icon" id="spinBtn" aria-pressed="false" title="Spin" aria-label="Spin">
+        <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M15.5 6.5A6.5 6.5 0 1 0 16.5 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M16.5 3.5v3.5H13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Spin</span></button>
+      <button class="ghost icon" id="resetBtn" title="Reset view" aria-label="Reset view">
+        <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><rect x="3.5" y="3.5" width="13" height="13" rx="3" fill="none" stroke="currentColor" stroke-width="1.6"/><circle cx="10" cy="10" r="2" fill="currentColor"/></svg><span>Reset view</span></button>
     </div>
     <div class="error" id="error" hidden></div>
   </section>
@@ -71,10 +79,12 @@
     <div class="slice" id="slice"></div>
     <div class="actions">
       <button class="primary" id="openBtn">Open in Bambu Studio</button>
+      <button class="secondary" id="sendBtn" hidden>Send to printer</button>
       <button class="secondary" id="sliceBtn">Get exact print time</button>
       <div class="links">
         <a id="dl3mf" href="#">Download .3mf</a>
         <a id="dlStl" href="#">STLs</a>
+        <button class="linkbtn" id="saveBtn">Save design</button>
       </div>
     </div>
     <ul class="notes" id="notes"></ul>
@@ -84,6 +94,10 @@
     </details>
   </aside>
 </main>
+
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" hidden>
+  <div class="sheet-card" id="sheetCard"></div>
+</div>
 <div class="toast" id="toast" hidden></div>
 <div class="popover" id="palette" hidden></div>
 <script type="module" src="/static/app.js"></script>
