@@ -53,7 +53,8 @@ OPTIONS = {
               ZONES[0],
               ("zone_style", "Colour layout", "seg", [("courses", "Courses"), ("bands", "Bands"), ("stripes", "Stripes")], "courses"),
               ("course_rows", "Rows per colour", "seg", [("1", "1"), ("2", "2"), ("3", "3"), ("4", "4")], "1")],
-    "lattice": [("colour_by", "Colour by", "seg", [("direction", "Rod direction"), ("height", "Height")], "direction")] + ZONES,
+    "lattice": [("colour_by", "Colour by", "seg", [("direction", "Rod direction"), ("height", "Height")], "direction"),
+                ("course_group", "Courses per colour", "seg", [("1", "1"), ("2", "2"), ("3", "3"), ("4", "4")], "1")] + ZONES,
     "shell": [("cell", "Cell size", "seg", [("small", "Small"), ("medium", "Medium"), ("large", "Large")], "medium"),
               ("noise", "Fuzzy pattern", "seg", [(k, v) for k, v in shell.NOISE.items()], "perlin"),
               ("fuzzy_bands", "Fuzzy where", "seg", [("all", "Everywhere"), ("thirds", "Bands"), ("stripes", "Stripes")], "all"),
@@ -100,6 +101,8 @@ class Build:
     draft: bool = False
     extras: list = field(default_factory=list)          # lid + knob: [(name, mesh, slot, colour)] in print orientation
     assembled: list = field(default_factory=list)       # the same, placed on the piece for the viewer
+    lid_plate: str = "same"                              # "same": lid beside the piece; "own": its own project
+    tower: bool = True                                   # prime tower for multi-colour prints
 
     @property
     def colours(self):
@@ -114,7 +117,7 @@ class Build:
 
     def lid_shares_plate(self):
         """Do the lid, knob (and coaster) fit on the piece's plate? Same rule write_3mf uses."""
-        if not self.extras:
+        if not self.extras or self.lid_plate == "own":
             return False
         half = max(np.abs(m.bounds[:, :2]).max() for _, m, _, _ in self.parts)
         groups = {}
@@ -139,7 +142,7 @@ class Build:
             groups.setdefault(n, []).append((m, c))
         extra_halves = [max(float(np.abs(m.bounds[:, :2]).max()) for m, _ in g) for g in groups.values()]
         row = 2 * half + sum(2 * h + 8 for h in extra_halves)
-        if self.extras and row + 16 <= printer.BED:
+        if self.extras and row + 16 <= printer.BED and self.lid_plate != "own":
             x = 8 + half; objects[0]["position"] = (x, printer.BED / 2); x += half + 8
             for (n, g), h in zip(groups.items(), extra_halves):
                 # lids, knobs and coasters are solid parts: their own walls, infill and top/bottom shells, whatever
@@ -161,7 +164,7 @@ class Build:
                                         "parts": [(f"{n} {k + 1}" if len(g) > 1 else n, m, lidx(c)) for k, (m, c) in enumerate(g)]})
                     x += 2 * h + 8
                 over = dict(self.overrides); over.update(SOLID_OBJECT)
-                over["enable_prime_tower"] = "1" if len(lcols) > 1 else "0"
+                over["enable_prime_tower"] = "1" if len(lcols) > 1 and self.tower else "0"
                 if len(lcols) > 1:                                 # park the tower front-right, clear of the lids
                     over["wipe_tower_x"] = [f"{printer.BED - printer.TOWER[2] - 20:g}"]; over["wipe_tower_y"] = ["20"]
                 bambu.write_3mf(str(pathlib.Path(path).with_name(pathlib.Path(path).stem + "-lid.3mf")), lid_objects,
@@ -508,7 +511,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
 
     if T["family"] == "lattice":
         region = S.lattice(v, nz.rod_h)
-        rods = lattice.weave(region, nz, texture)
+        rods = lattice.weave(region, nz, texture, group=int(options.get("course_group", 1) or 1))
         by_slot = rods.meshes()
         # same colour on two slots -> one part, one filament, no swaps between them
         merged = {}
@@ -828,14 +831,36 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
             warnings.extend(ls["notes"])
             lid_parts, assembled = _cap_or_plain(lid_parts, assembled, shape, S, T, texture, v, nz, colours, options,
                                                  parts, ls, t_plate, style, open_r, top, draft, stats, warnings)
+    lid_plate = "same"
     if lid_parts:
         stats["colours"] = len({c for _, _, _, c in parts + lid_parts})   # the lid's own filaments count too
         probe = Build(shape, texture, nz.size, v, T["family"], parts, stats, over, extras=lid_parts)
-        if probe.lid_shares_plate() and len({c for _, _, _, c in parts + lid_parts}) > 1:
-            transitions = _geom_transitions(parts + lid_parts, over, ranges); swaps = len(transitions)
-            stats["swaps"] = swaps; stats["swap_minutes"] = round(swaps * SWAP_SECONDS / 60)
-            pg = sum(bambu.flush_volume(a, b) for a, b in transitions) * flush_mult * 1.26 / 1000 + 0.12 * swaps
-            stats["grams_purge"] = int(round(pg)); stats["grams_est"] = stats["grams_part"] + stats["grams_purge"]
+        want = options.get("lid_plate", "auto")
+        lid_alone = _geom_transitions(lid_parts, over, None) if len({c for _, _, _, c in lid_parts}) > 1 else []
+        if not probe.lid_shares_plate():
+            lid_plate = "own"
+        elif len({c for _, _, _, c in parts + lid_parts}) > 1:
+            shared = _geom_transitions(parts + lid_parts, over, ranges)
+            # Auto: print the lid on its own plate when sharing would cost more changes than a second print
+            if want == "own" or (want == "auto" and len(shared) > swaps + len(lid_alone)):
+                lid_plate = "own"
+            else:
+                transitions = shared; swaps = len(transitions)
+                stats["swaps"] = swaps; stats["swap_minutes"] = round(swaps * SWAP_SECONDS / 60)
+                pg = sum(bambu.flush_volume(a, b) for a, b in transitions) * flush_mult * 1.26 / 1000 + 0.12 * swaps
+                stats["grams_purge"] = int(round(pg)); stats["grams_est"] = stats["grams_part"] + stats["grams_purge"]
+        elif want == "own":
+            lid_plate = "own"
+        if "lid" in stats:
+            stats["lid"].update(plate=lid_plate, swaps=len(lid_alone) if lid_plate == "own" else 0)
+    tower = True
+    if options.get("tower") == "off":                       # purge goes to the chute only: no tower, no tower sliver
+        tower = False; over["enable_prime_tower"] = "0"
+        if stats.get("swaps"):
+            stats["grams_purge"] = max(0, stats["grams_purge"] - int(round(0.12 * stats["swaps"])))
+            stats["grams_est"] = stats["grams_part"] + stats["grams_purge"]
+            warnings.append("No prime tower: each change still purges through the chute, but the first line of a new "
+                            "colour can carry a little of the old one. Fine on most pieces — try a small one first.")
     if options.get("purge_piece") == "coaster" and len({c for _, _, _, c in parts}) > 1:
         coaster = trimesh.creation.cylinder(radius=45.0, height=6.0, sections=96); coaster.apply_translation([0, 0, 3.0])
         lid_parts = list(lid_parts) + [("Purge coaster", coaster, 1, parts[0][3])]
@@ -843,4 +868,4 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
                         "3 g per 40 mm block — a modest saving that turns waste into a coaster.")
     return Build(shape, texture, nz.size, v, T["family"], parts, stats, over, warnings, preview,
                  ranges=ranges, per_filament=per_filament, flush_mult=flush_mult, draft=draft,
-                 extras=lid_parts, assembled=assembled)
+                 extras=lid_parts, assembled=assembled, lid_plate=lid_plate, tower=tower)
