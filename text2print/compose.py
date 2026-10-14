@@ -19,9 +19,9 @@ from .fabric_presets import fabric_preset
 from .fabric import RELIEFS, relief
 from .fabric_wall import tri01
 
-MIXABLE = ["plain", "zigzag", "domes", "wave", "garland", "drips", "melt", "halftone",
+MIXABLE = ["plain", "fuzzy", "zigzag", "domes", "wave", "garland", "drips", "melt", "halftone",
            "fringe", "swag", "curls", "unraveled"]
-NAMES = {"plain": "Plain", "zigzag": "Zigzag", "domes": "Knit", "wave": "Wave", "garland": "Garland",
+NAMES = {"plain": "Plain", "fuzzy": "Fuzzy skin", "zigzag": "Zigzag", "domes": "Knit", "wave": "Wave", "garland": "Garland",
          "drips": "Drips", "melt": "Melt", "halftone": "Halftone",
          "fringe": "Fringe", "swag": "Swag", "curls": "Curls", "unraveled": "Unraveled"}
 PRESETS = {
@@ -37,6 +37,9 @@ PRESETS = {
     "drip":    dict(name="Drip rim", bands=[dict(texture="plain", share=18, slot=0),
                                             dict(texture="garland", share=44, slot=0),
                                             dict(texture="drips", share=38, slot=1)]),
+    "stone":   dict(name="Stone & silk", bands=[dict(texture="fuzzy", share=55, slot=0, options={"noise": "voronoi"}),
+                                                dict(texture="plain", share=8, slot=1),
+                                                dict(texture="wave", share=37, slot=1)]),
     "knit":    dict(name="Knit & wave", bands=[dict(texture="domes", share=30, slot=0),
                                                dict(texture="plain", share=6, slot=1),
                                                dict(texture="wave", share=64, slot=1)]),
@@ -153,6 +156,10 @@ def build(shape, v, nz, bands, draft=False):
     for bi, b in enumerate(bands):
         t = b["texture"]; lh = lhs[bi]; za, zb = zs[bi], zs[bi + 1]; n = n_theta(t)
         th = np.linspace(0, 2 * np.pi, n, endpoint=False)
+        if t == "fuzzy":                                           # slicer-made texture through a layer range
+            ranges.append((za, zb, {"layer_height": f"{lh:.2f}", "fuzzy_skin": "external",
+                                    "fuzzy_skin_noise_type": b["options"].get("noise", "perlin"),
+                                    "fuzzy_skin_thickness": "0.4", "fuzzy_skin_point_distance": "0.6"}))
         if t == "halftone":
             # only the layer height: line widths in a range make Bambu 2.8 drop layers of multi-part objects
             ranges.append((za, zb, {"layer_height": f"{ht_lh:.2f}"}))
@@ -163,7 +170,7 @@ def build(shape, v, nz, bands, draft=False):
             z0, z1 = za + k * lh, za + (k + 1) * lh; zm = (z0 + z1) / 2; R = prof(zm)
             floor_layer = z1 <= floor_z + 1e-6
             entry = dict(z0=z0, z1=z1, slot=b["slot"], band=bi, lh=lh, n=n, r=None)
-            if floor_layer or t in ("plain",) or t in droop.STYLES:
+            if floor_layer or t in ("plain", "fuzzy") or t in droop.STYLES:
                 pass                                                   # smooth wall
             elif t in fp:
                 f = fp[t]; cyc = f["zigzag_layers"] + f["straight_layers"]; p = k
