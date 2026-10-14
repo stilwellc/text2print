@@ -1,25 +1,15 @@
-# text2print runtime — Python 3.10-3.12 (CadQuery's OCC kernel has no
-# 3.13+ wheels). Install everything; ad-hoc subsets break the tools.
-
+# text2print — Python 3.10-3.12
 # geometry
-cadquery>=2.6.1,<3
 trimesh>=4.0,<5
 numpy>=1.24,<3
 manifold3d>=2.4,<4
-rtree>=1.0,<2
 shapely>=2.0,<3
 mapbox_earcut>=1.0,<3
-
-# rendering + 2D outlines
+# rendering (thumbnails, previews, 3MF plate image)
 pyrender>=0.1.45,<0.2
 Pillow>=10,<13
 matplotlib>=3.7,<4
-
-# file formats
-lxml>=4.9,<7
-
-# live design UI
+# studio
 flask>=3.0,<4
-
 # tests
 pytest>=8,<10

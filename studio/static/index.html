@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>text2print</title>
+<link rel="stylesheet" href="/static/app.css">
+<script type="importmap">
+{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
+             "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"}}
+</script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">text2print</div>
+  <div class="printer"><span class="dot"></span><span id="printerName">Bambu Lab P2S</span></div>
+  <div class="nozzle">
+    <span class="label">Nozzle</span>
+    <div class="seg" id="nozzles" role="radiogroup" aria-label="Nozzle"></div>
+  </div>
+</header>
+
+<main class="app">
+  <aside class="picker" aria-label="Design">
+    <section>
+      <h2>Shape</h2>
+      <div class="cards" id="shapes"></div>
+    </section>
+    <section>
+      <h2>Pattern</h2>
+      <div id="textures"></div>
+    </section>
+    <section>
+      <h2>Size</h2>
+      <div id="sizes" class="sizes"></div>
+    </section>
+    <section>
+      <h2>Colour</h2>
+      <div id="colours" class="colours"></div>
+      <p class="hint" id="colourHint"></p>
+    </section>
+    <section id="finishSec" hidden>
+      <h2>Finish</h2>
+      <label class="toggle"><input type="checkbox" id="rimLoops"><span>Loop edge at the rim</span></label>
+      <div class="field-label">Floor</div>
+      <div class="seg small" id="floors"></div>
+    </section>
+  </aside>
+
+  <section class="stage" aria-label="Preview">
+    <canvas id="view"></canvas>
+    <div class="status" id="status" hidden><span class="spin"></span><span id="statusText">Weaving…</span></div>
+    <div class="dims" id="dims"></div>
+    <div class="viewbtns">
+      <button class="ghost" id="spinBtn" aria-pressed="false">Spin</button>
+      <button class="ghost" id="resetBtn">Reset view</button>
+    </div>
+    <div class="error" id="error" hidden></div>
+  </section>
+
+  <aside class="print" aria-label="Print">
+    <h1 id="title">—</h1>
+    <p class="blurb" id="blurb"></p>
+    <dl class="stats" id="stats"></dl>
+    <div class="slice" id="slice"></div>
+    <div class="actions">
+      <button class="primary" id="openBtn">Open in Bambu Studio</button>
+      <button class="secondary" id="sliceBtn">Get exact print time</button>
+      <div class="links">
+        <a id="dl3mf" href="#">Download .3mf</a>
+        <a id="dlStl" href="#">STLs</a>
+      </div>
+    </div>
+    <ul class="notes" id="notes"></ul>
+    <details class="settings">
+      <summary>Print settings</summary>
+      <dl id="settings"></dl>
+    </details>
+  </aside>
+</main>
+<div class="toast" id="toast" hidden></div>
+<div class="popover" id="palette" hidden></div>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

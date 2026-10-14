@@ -1,0 +1,39 @@
+"""The studio API end to end, without a browser."""
+import numpy as np
+import pytest
+
+flask = pytest.importorskip("flask")
+from studio import server  # noqa: E402
+
+
+@pytest.fixture
+def client():
+    return server.app.test_client()
+
+
+def test_catalogue_lists_shapes_textures_and_nozzles(client):
+    c = client.get("/api/catalogue").get_json()
+    assert {s["key"] for s in c["shapes"]} >= {"tray", "cup", "vase"}
+    assert any(t["family"] == "fabric" for t in c["textures"])
+    assert [n["size"] for n in c["nozzles"]] == [0.2, 0.4, 0.6, 0.8]
+
+
+def test_build_mesh_and_download(client):
+    r = client.post("/api/build", json={"shape": "coaster", "texture": "grid", "params": {"width": 70, "dish": 0}})
+    assert r.status_code == 200
+    d = r.get_json()
+    assert len(d["parts"]) == 2 and d["stats"]["swaps"] > 0
+    raw = client.get(d["parts"][0]["url"]).data
+    nv, nf = np.frombuffer(raw[:8], dtype=np.uint32)
+    assert len(raw) == 8 + nv * 12 + nf * 12 and nf == d["parts"][0]["triangles"]
+    dl = client.get(f"/api/job/{d['id']}/download")
+    assert dl.status_code == 200 and dl.data[:2] == b"PK"
+
+
+def test_incompatible_pick_is_a_clear_400(client):
+    r = client.post("/api/build", json={"shape": "tray", "texture": "zigzag"})
+    assert r.status_code == 400 and "doesn't fit" in r.get_json()["error"]
+
+
+def test_index_serves_the_picker(client):
+    assert b"text2print" in client.get("/").data
