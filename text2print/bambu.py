@@ -12,6 +12,7 @@ import json
 import pathlib
 import uuid
 import zipfile
+from xml.sax.saxutils import escape as _esc
 import numpy as np
 
 APP = "BambuStudio-02.08.02.61"
@@ -62,7 +63,52 @@ def _thumbnail(objects, colours, size, bed=256.0):
     return buf.getvalue()
 
 
-def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), overrides=DEFAULT_OVERRIDES, base=None):
+def _lum(hex_):
+    r, g, b = (int(hex_[k:k + 2], 16) / 255 for k in (1, 3, 5))
+    lin = lambda c: c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b), max(r, g, b) - min(r, g, b)
+
+
+def flush_volume(c_from, c_to):
+    """mm3 to purge when changing c_from -> c_to. Light after dark needs the most; dark after light very little
+    (the same shape as Bambu's own calculator, tuned to its 280 mm3 default for a mid-contrast pair)."""
+    if c_from.lower() == c_to.lower():
+        return 0
+    (y0, s0), (y1, s1) = _lum(c_from), _lum(c_to)
+    if y1 > y0:                                    # going lighter: the dark trace shows through
+        v = 140 + 560 * (y1 - y0) ** 0.75 + 120 * abs(s1 - s0)
+    else:
+        v = 110 + 160 * (y0 - y1) + 80 * abs(s1 - s0)
+    return int(max(90, min(600, v)))
+
+
+def flush_matrix(colours):
+    return [[flush_volume(a, b) for b in colours] for a in colours]
+
+
+def _ranges_xml(objects):
+    body = ""
+    for idx, ob in enumerate(objects, 1):                   # keyed by position in the build (verified, BS 2.8)
+        rs = ob.get("ranges") or []
+        if not rs:
+            continue
+        body += f' <object id="{idx}">\n'
+        for z0, z1, opts in rs:
+            body += f'  <range min_z="{z0:.4f}" max_z="{z1:.4f}">\n'
+            body += "".join(f'   <option opt_key="{k}">{v}</option>\n' for k, v in opts.items())
+            body += "  </range>\n"
+        body += " </object>\n"
+    return f'<?xml version="1.0" encoding="utf-8"?>\n<objects>\n{body}</objects>\n' if body else None
+
+
+def _x(s):
+    return _esc(str(s), {'"': "&quot;"})
+
+
+def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), overrides=DEFAULT_OVERRIDES, base=None,
+              per_filament=None):
+    """objects: [{name, position, parts: [(name, mesh, slot)], ranges?: [(z0, z1, {opt: value})]}].
+    per_filament: {key: [value per filament]} for filament-level settings (fan, temperature)."""
     n_fil = max(slot for ob in objects for _, _, slot in ob["parts"])
     ident = "1 0 0 0 1 0 0 0 1 0 0 0"
     next_id = 1
@@ -87,7 +133,7 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
         part_xml = ""
         for pid, (name, m, slot) in zip(part_ids, ob["parts"]):
             part_xml += (f'    <part id="{pid}" subtype="normal_part" uuid="{uuid.uuid4()}">\n'
-                         f'      <metadata key="name" value="{name}"/>\n'
+                         f'      <metadata key="name" value="{_x(name)}"/>\n'
                          f'      <metadata key="matrix" value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"/>\n'
                          f'      <metadata key="extruder" value="{slot}"/>\n'
                          f'      <mesh_stat face_count="{len(m.faces)}" edges_fixed="0" degenerate_facets="0" '
@@ -101,7 +147,7 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
 
     root_model = (f'<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="en-US" {NS}>\n'
                   f' <metadata name="Application">{APP}</metadata>\n <metadata name="BambuStudio:3mfVersion">1</metadata>\n'
-                  f' <metadata name="Title">{title}</metadata>\n <resources>\n{root_objects} </resources>\n'
+                  f' <metadata name="Title">{_x(title)}</metadata>\n <resources>\n{root_objects} </resources>\n'
                   f' <build p:UUID="{uuid.uuid4()}">\n{build_items} </build>\n</model>\n')
     settings = (f'<?xml version="1.0" encoding="UTF-8"?>\n<config>\n{settings_objects}'
                 f'  <plate>\n    <metadata key="plater_id" value="1"/>\n    <metadata key="plater_name" value=""/>\n'
@@ -117,10 +163,19 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
         if key in cfg and isinstance(cfg[key], list):
             cfg[key] = (cfg[key] + [cfg[key][0]] * n_fil)[:n_fil]
     cfg["filament_map"] = ["1"] * n_fil
-    cfg["flush_volumes_matrix"] = ["0" if i == j else "280" for i in range(n_fil) for j in range(n_fil)]
+    fm = flush_matrix(list(colours[:n_fil]))
+    cfg["flush_volumes_matrix"] = [str(fm[i][j]) for i in range(n_fil) for j in range(n_fil)]
+    cfg["flush_multiplier"] = ["1"]
     cfg["flush_volumes_vector"] = ["140"] * (2 * n_fil)
     cfg["filament_density"] = ["1.26"] * n_fil; cfg["filament_cost"] = ["19.99"] * n_fil
     cfg["filament_vendor"] = ["Bambu Lab"] * n_fil; cfg["filament_ids"] = ["GFA00"] * n_fil
+    for key in list(cfg):                                   # every per-filament list must be n_fil long
+        if key.startswith(("filament_", "nozzle_temperature", "fan_", "overhang_fan", "additional_cooling",
+                           "slow_down_", "close_fan", "cool_plate", "hot_plate", "textured_plate", "eng_plate")) \
+                and isinstance(cfg[key], list) and 1 <= len(cfg[key]) < n_fil and key != "flush_volumes_vector":
+            cfg[key] = (cfg[key] + [cfg[key][-1]] * n_fil)[:n_fil]
+    for key, vals in (per_filament or {}).items():
+        cfg[key] = [str(v) for v in vals][:n_fil]
 
     content_types = ('<?xml version="1.0" encoding="UTF-8"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
                      ' <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n'
@@ -143,6 +198,9 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
         for sub_path, xml in object_files.items():
             z.writestr(sub_path.lstrip("/"), xml)
         z.writestr("Metadata/model_settings.config", settings)
+        rx = _ranges_xml(objects)
+        if rx:
+            z.writestr("Metadata/layer_config_ranges.xml", rx)
         z.writestr("Metadata/project_settings.config", json.dumps(cfg, indent=4))
         z.writestr("Metadata/slice_info.config", slice_info)
         z.writestr("Metadata/cut_information.xml", f'<?xml version="1.0" encoding="utf-8"?>\n<objects>\n{cut_objs}</objects>\n')

@@ -4,7 +4,9 @@ A mix is a list of bands, bottom to top, each {texture, share, slot, slot2?, opt
 of its print layers as an outer contour r(theta) and a colour slot; droop bands add strands. Consecutive layers of
 one colour become one staircase solid; where a band meets a band of the SAME colour, the upper one reaches a
 quarter layer down and the two are unioned (never coplanar — the slicer never samples that quarter layer).
-One layer height and one wall for the whole print: the nozzle's standard layer and the fabric shell.
+Layer heights: every band prints at the nozzle's standard layer EXCEPT halftone bands, which keep their own recipe
+(max layer height, one wide line) through a Bambu layer range — band edges are snapped so every band is a whole
+number of its own layers and the slicer's layers land exactly on the geometry's.
 
 Woven rods can't join a mix: they are the whole object, not a wall."""
 import math
@@ -14,10 +16,13 @@ import trimesh
 
 from . import droop, halftone
 from .fabric_presets import fabric_preset
+from .fabric import RELIEFS, relief
 from .fabric_wall import tri01
 
-MIXABLE = ["plain", "zigzag", "domes", "wave", "halftone", "fringe", "swag", "curls", "unraveled"]
-NAMES = {"plain": "Plain", "zigzag": "Zigzag", "domes": "Knit", "wave": "Wave", "halftone": "Halftone",
+MIXABLE = ["plain", "zigzag", "domes", "wave", "garland", "drips", "melt", "halftone",
+           "fringe", "swag", "curls", "unraveled"]
+NAMES = {"plain": "Plain", "zigzag": "Zigzag", "domes": "Knit", "wave": "Wave", "garland": "Garland",
+         "drips": "Drips", "melt": "Melt", "halftone": "Halftone",
          "fringe": "Fringe", "swag": "Swag", "curls": "Curls", "unraveled": "Unraveled"}
 PRESETS = {
     "candle":  dict(name="Coil band", bands=[dict(texture="plain", share=14, slot=0),
@@ -29,6 +34,9 @@ PRESETS = {
     "flame":   dict(name="Flame foot", bands=[dict(texture="halftone", share=46, slot=0, slot2=1),
                                               dict(texture="plain", share=4, slot=1),
                                               dict(texture="zigzag", share=50, slot=1)]),
+    "drip":    dict(name="Drip rim", bands=[dict(texture="plain", share=18, slot=0),
+                                            dict(texture="garland", share=44, slot=0),
+                                            dict(texture="drips", share=38, slot=1)]),
     "knit":    dict(name="Knit & wave", bands=[dict(texture="domes", share=30, slot=0),
                                                dict(texture="plain", share=6, slot=1),
                                                dict(texture="wave", share=64, slot=1)]),
@@ -110,122 +118,147 @@ def normalise(bands):
     return bands
 
 
-def build(shape, v, nz, bands):
+def build(shape, v, nz, bands, draft=False):
     prof, height, rmax = shape.profile(v)
     bands = normalise(bands)
-    lh = nz.layer_h
+    base_lh = nz.layer_h
+    ht_lh, ht_lw = halftone.RECIPE[nz.size]
     fp = {st: fabric_preset(nz.size, diameter=2 * rmax, stitch=st)["fabric"] for st in ("zigzag", "domes", "wave")}
-    shell = fp["zigzag"]["shell_t"]
-    floor_t = fp["zigzag"]["floor_t"]
-    n_layers = int(round(height / lh)); n_floor = int(math.ceil(floor_t / lh))
-    # band layer ranges (the floor belongs to the first band)
-    edges = [0]; acc = 0.0
-    for b in bands:
-        acc += b["share"]; edges.append(int(round(acc * n_layers)))
-    edges[-1] = n_layers
-    for i in range(1, len(edges)):
-        edges[i] = max(edges[i], edges[i - 1] + (n_floor + 2 if i == 1 else 2))
-    edges = [min(e, n_layers) for e in edges]
-    # one angular sampling for the whole print (fine enough for every band's period)
-    need = [fp[b["texture"]]["zigzags_around"] * fp[b["texture"]]["samples_per_zigzag"]
-            for b in bands if b["texture"] in fp]
-    ribs = max(24, int(round(2 * math.pi * rmax / max(2.6 * shell, 3.2))))
-    if any(b["texture"] == "halftone" for b in bands):
-        need.append(ribs * 6)
-    n_th = max(need + [360])
-    th = np.linspace(0, 2 * np.pi, n_th, endpoint=False)
+    shell = fp["zigzag"]["shell_t"]; floor_t = fp["zigzag"]["floor_t"]
 
-    layers = []          # per layer: (slot, outer r array)
-    droop_bands = []
+    # band edges: each band a whole number of its own layers; the floor belongs to band 0
+    lhs = [ht_lh if b["texture"] == "halftone" else base_lh for b in bands]
+    n_floor = int(math.ceil(floor_t / lhs[0])); floor_z = n_floor * lhs[0]
+    zs = [0.0]; acc = 0.0
+    for i, b in enumerate(bands):
+        acc += b["share"]; want = acc * height - zs[-1]
+        n = max(int(round(want / lhs[i])), (n_floor + 3) if i == 0 else 3)
+        zs.append(zs[-1] + n * lhs[i])
+    total_h = zs[-1]
+
+    def n_theta(t):
+        circ = 2 * math.pi * rmax
+        if t in fp:
+            n = fp[t]["zigzags_around"] * fp[t]["samples_per_zigzag"]
+        elif t in RELIEFS:
+            n = int(circ / 0.6)
+        elif t == "halftone":
+            n = _ribs(rmax, ht_lw) * 6
+        else:
+            n = max(180, int(circ / 1.2))
+        return max(120, n // (3 if draft else 1))
+
+    layers = []          # dicts: z0, z1, slot, r (array) or None (smooth), band, lh
+    ranges, droop_bands = [], []
     for bi, b in enumerate(bands):
-        k0, k1 = edges[bi], edges[bi + 1]; t = b["texture"]
-        for k in range(k0, k1):
-            zm = (k + 0.5) * lh; R = prof(zm); p = k - k0
-            base = np.full(n_th, R)
-            if t in fp and k >= n_floor:
-                f = fp[t]; cyc = f["zigzag_layers"] + f["straight_layers"]
-                if p % cyc >= f["zigzag_layers"]:
-                    layers.append((b["slot"], base)); continue
-                band = p // cyc; u = f["zigzags_around"] * th / (2 * np.pi) + 0.5 * (band % 2)
-                scale = max(0.35, R / rmax); d = f["zigzag_depth"] * scale
-                stand = 0.02 * (1 + band % 2) + 0.001 * (p % cyc)
-                if t == "domes":
-                    env = math.sin(math.pi * ((p % cyc) + 0.5) / f["zigzag_layers"])
-                    disp = d * env * np.sin(np.pi * np.mod(u, 1.0)) ** 2
-                elif t == "wave":
-                    disp = 0.5 * d * np.sin(2 * np.pi * u)
+        t = b["texture"]; lh = lhs[bi]; za, zb = zs[bi], zs[bi + 1]; n = n_theta(t)
+        th = np.linspace(0, 2 * np.pi, n, endpoint=False)
+        if t == "halftone":
+            # only the layer height: line widths in a range make Bambu 2.8 drop layers of multi-part objects
+            ranges.append((za, zb, {"layer_height": f"{ht_lh:.2f}"}))
+        if t in droop.STYLES:
+            droop_bands.append((b, za, zb))
+        k = 0
+        while za + (k + 1) * lh <= zb + 1e-6:
+            z0, z1 = za + k * lh, za + (k + 1) * lh; zm = (z0 + z1) / 2; R = prof(zm)
+            floor_layer = z1 <= floor_z + 1e-6
+            entry = dict(z0=z0, z1=z1, slot=b["slot"], band=bi, lh=lh, n=n, r=None)
+            if floor_layer or t in ("plain",) or t in droop.STYLES:
+                pass                                                   # smooth wall
+            elif t in fp:
+                f = fp[t]; cyc = f["zigzag_layers"] + f["straight_layers"]; p = k
+                if p % cyc < f["zigzag_layers"]:
+                    band = p // cyc; u = f["zigzags_around"] * th / (2 * np.pi) + 0.5 * (band % 2)
+                    d = f["zigzag_depth"] * max(0.35, R / rmax)
+                    stand = 0.02 * (1 + band % 2) + 0.001 * (p % cyc)
+                    if t == "domes":
+                        env = math.sin(math.pi * ((p % cyc) + 0.5) / f["zigzag_layers"])
+                        disp = d * env * np.sin(np.pi * np.mod(u, 1.0)) ** 2
+                    elif t == "wave":
+                        disp = 0.5 * d * np.sin(2 * np.pi * u)
+                    else:
+                        disp = d * tri01(u)
+                    entry["r"] = R + stand + disp
                 else:
-                    disp = d * tri01(u)
-                layers.append((b["slot"], base + stand + disp))
-            elif t == "halftone" and k >= n_floor:
-                pic = b["options"].get("picture", "flames")
-                colour = p % 2
-                g = halftone.picture(pic, th / (2 * np.pi), p / max(k1 - k0, 1), b["options"].get("image"))
+                    entry["r"] = np.full(n, R)
+            elif t in RELIEFS:
+                entry["r"] = R + 0.02 * (k % 2) + relief(t, th, zm, R, za, zb, fp["zigzag"]["zigzag_depth"] * max(0.35, R / rmax))
+            elif t == "halftone":
+                colour = k % 2; ribs = _ribs(rmax, ht_lw)
+                g = halftone.picture(b["options"].get("picture", "flames"), th / (2 * np.pi), (zm - za) / max(zb - za, 1e-6),
+                                     b["options"].get("image"))
                 g = g if colour == 0 else 1 - g
                 step = max(prof(zm) - prof(zm - lh), 0.0)
-                amp = max(0.2 * shell, min(0.5 * shell, 0.6 * shell - step))
-                ripple = 0.5 - 0.5 * np.cos(ribs * th)
-                layers.append((b["slot"] if colour == 0 else b["slot2"], base + amp * g * ripple))
-            else:
-                layers.append((b["slot"], base))
-        if t in droop.STYLES:
-            droop_bands.append((b, k0, k1))
+                amp = max(0.2 * ht_lw, min(0.5 * ht_lw, 0.6 * ht_lw - step))
+                entry["r"] = R + amp * g * (0.5 - 0.5 * np.cos(ribs * th))
+                entry["slot"] = b["slot"] if colour == 0 else b["slot2"]
+            layers.append(entry); k += 1
 
-    # runs of one colour -> staircases; same-colour neighbours overlap a quarter layer down and get unioned
-    runs = []; k = 0
-    while k < n_layers:
-        slot = layers[k][0]; k2 = k
-        while k2 + 1 < n_layers and layers[k2 + 1][0] == slot and _same_family(bands, edges, k2, k2 + 1):
-            k2 += 1
-        runs.append((slot, k, k2 + 1)); k = k2 + 1
+    # runs: consecutive layers of one band and one colour
+    runs = []; i = 0
+    while i < len(layers):
+        j = i
+        while j + 1 < len(layers) and layers[j + 1]["slot"] == layers[i]["slot"] and layers[j + 1]["band"] == layers[i]["band"]:
+            j += 1
+        runs.append((i, j)); i = j + 1
     solids = {}
-    for slot, a, b in runs:
+    for a, b_ in runs:
+        L0 = layers[a]; slot = L0["slot"]; n = L0["n"]
+        bi = L0["band"]; sh = ht_lw if bands[bi]["texture"] == "halftone" else shell
         rings = []
-        for kk in range(a, b):
-            z0 = kk * lh
-            if kk == a and a > 0 and layers[a - 1][0] == slot:
-                z0 -= 0.25 * lh
-            rings += [(z0, layers[kk][1]), ((kk + 1) * lh, layers[kk][1])]
-        solids.setdefault(slot, []).append(_staircase(rings, shell, floor_t if a == 0 else None))
+        reach_down = a > 0 and layers[a - 1]["slot"] == slot
+        for kk in range(a, b_ + 1):
+            L = layers[kk]; z0 = L["z0"] - (0.25 * layers[a - 1]["lh"] if kk == a and reach_down else 0.0)
+            if L["r"] is None:                                         # smooth: one ring per layer boundary
+                rings.append((z0, np.full(n, prof(max(z0, 0.0)))))
+                if kk == b_:
+                    rings.append((L["z1"], np.full(n, prof(L["z1"]))))
+            else:
+                rings += [(z0, L["r"]), (L["z1"], L["r"])]
+        solids.setdefault(slot, []).append(_staircase(rings, sh, floor_z if a == 0 else None))
 
-    # droop strands, in their band's colour
-    q = lambda z: (math.floor(z / lh) + 0.25) * lh
-    flat_strands, hung = {}, {}; reach = 0.0
-    for b, k0, k1 in droop_bands:
+    # droop strands, in their band's colour, on that band's layer grid
+    flat, hung = {}, {}; reach = 0.0
+    for b, za, zb in droop_bands:
         st = b["texture"]; o = b["options"]
-        spots = droop._rows(st, prof, height, nz, droop.DENSITY.get(o.get("density", "medium"), 1.0),
-                            droop.LENGTH.get(o.get("length", "medium"), 1.0), z_range=(k0 * lh, k1 * lh))
+        q = lambda z, za=za: za + (math.floor((z - za) / base_lh) + 0.25) * base_lh
+        spots = droop._rows(st, prof, total_h, nz, droop.DENSITY.get(o.get("density", "medium"), 1.0),
+                            droop.LENGTH.get(o.get("length", "medium"), 1.0), z_range=(za, zb))
         spots = droop._never_touch(spots, prof, q)
         reach = max([reach] + [bu for _, _, bu, _, _, _, _ in spots])
         ribbons = [droop._ribbon(t_, ch, bu, q(z), hh, w, prof, shell * 0.55, droop._SPEC[st]["power"], le)
                    for t_, ch, bu, z, hh, le, w in spots]
-        flat_strands.setdefault(b["slot"], []).extend(ribbons)
-        dr = droop.drape(trimesh.Trimesh(), spots, prof, q, ribbons, st)
-        hung.setdefault(b["slot"], []).append(dr)
+        flat.setdefault(b["slot"], []).extend(ribbons)
+        hung.setdefault(b["slot"], []).append(droop.drape(trimesh.Trimesh(), spots, prof, q, ribbons, st))
 
     parts, preview = {}, {}
     for slot, ms in solids.items():
-        strands = flat_strands.get(slot, [])
-        walls = _manifold(ms) if len(ms) > 1 else ms[0]
-        parts[slot] = _manifold([walls] + strands) if strands else walls
-        if strands and _bodies(parts[slot]) > _bodies(walls):
-            raise ValueError("a droop strand isn't attached to the wall")
+        strands = flat.get(slot, [])
+        if draft:
+            walls = trimesh.util.concatenate(ms)
+            parts[slot] = trimesh.util.concatenate([walls] + strands)
+        else:
+            walls = _manifold(ms) if len(ms) > 1 else ms[0]
+            parts[slot] = _manifold([walls] + strands) if strands else walls
+            if strands and _bodies(parts[slot]) > _bodies(walls):
+                raise ValueError("a droop strand isn't attached to the wall")
         preview[slot] = trimesh.util.concatenate([walls] + hung.get(slot, []))
-    # colour changes: walk the layers' slot sets
-    sets = [{s} for s, _ in layers]
-    swaps, last = 0, None
-    for S in sets:
-        if last is not None and last not in S:
-            swaps += 1
-        last = next(iter(S))
-    info = dict(layers=n_layers, bands=[(b["texture"], edges[i + 1] - edges[i]) for i, b in enumerate(bands)],
-                swaps=swaps, floor_layers=n_floor, droop=bool(droop_bands),
-                strands=sum(len(v) for v in flat_strands.values()), reach=round(reach, 1))
+
+    seq = [L["slot"] for L in layers]
+    swaps = sum(1 for x, y in zip(seq, seq[1:]) if x != y)
+    kinds = {}
+    for b in bands:
+        for s_ in ([b["slot"], b["slot2"]] if b["texture"] == "halftone" else [b["slot"]]):
+            if b["texture"] in droop.STYLES:
+                kinds[s_] = "droop"
+            else:
+                kinds.setdefault(s_, "normal")
+    info = dict(layers=len(layers), bands=[(b["texture"], round(zs[i + 1] - zs[i], 2)) for i, b in enumerate(bands)],
+                swaps=swaps, floor_layers=n_floor, droop=bool(droop_bands), height=round(total_h, 2),
+                strands=sum(len(x) for x in flat.values()), reach=round(reach, 1), ranges=ranges, kinds=kinds,
+                layer_slots=[(round(L["z0"], 4), round(L["z1"], 4), L["slot"]) for L in layers])
     return parts, preview, info
 
 
-def _same_family(bands, edges, k_a, k_b):
-    """True when layers k_a and k_b sit in the same band (a run never crosses a band edge)."""
-    ba = next(i for i in range(len(bands)) if edges[i] <= k_a < edges[i + 1])
-    bb = next(i for i in range(len(bands)) if edges[i] <= k_b < edges[i + 1])
-    return ba == bb
+def _ribs(rmax, lw):
+    return max(24, int(round(2 * math.pi * rmax / max(2.6 * lw, 3.2))))

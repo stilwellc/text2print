@@ -181,7 +181,7 @@ def drape(wall, spots, prof, q, ribbons, style, seed=11):
     return trimesh.util.concatenate(out)
 
 
-def build(shape, v, nz, style="fringe", density="medium", length="medium", preview=False):
+def build(shape, v, nz, style="fringe", density="medium", length="medium", preview=False, draft=False):
     import manifold3d as m3d
     wall, prof, height, rmax, shell = body(shape, v, nz)
     spots = _rows(style, prof, height, nz, DENSITY.get(density, 1.0), LENGTH.get(length, 1.0))
@@ -192,21 +192,22 @@ def build(shape, v, nz, style="fringe", density="medium", length="medium", previ
     spots = _never_touch(spots, prof, q)
     ribbons = [_ribbon(th, ch, bu, q(z), hh, w, prof, embed, _SPEC[style]["power"], lean)
                for th, ch, bu, z, hh, lean, w in spots]
-    to_m = lambda t: m3d.Manifold(m3d.Mesh(vert_properties=np.asarray(t.vertices, np.float32),
-                                            tri_verts=np.asarray(t.faces, np.int32)))
-    merged = m3d.Manifold.batch_boolean([to_m(wall)] + [to_m(r) for r in ribbons], m3d.OpType.Add)
-    out = merged.to_mesh()
-    mesh = trimesh.Trimesh(np.asarray(out.vert_properties)[:, :3], np.asarray(out.tri_verts), process=True)
-    parts = mesh.split(only_watertight=False)
-    if len(parts) > 1:
-        # every strand is unioned into the wall, so anything else must be a zero-volume flap from a near-coplanar
-        # cut on a sloped wall; drop those, and refuse a real detached piece (it would fall off on the bed)
-        solid = [b for b in parts if abs(b.volume) > 0.5]
-        if len(solid) != 1:
-            raise ValueError(f"droop build produced {len(solid)} solid bodies — a strand is detached")
-        mesh = solid[0]
-    if mesh.volume < 0:
-        mesh.invert()
+    if draft:                                                   # preview only: skip the (slow) union
+        mesh = trimesh.util.concatenate([wall] + ribbons)
+    else:
+        to_m = lambda t: m3d.Manifold(m3d.Mesh(vert_properties=np.asarray(t.vertices, np.float32),
+                                                tri_verts=np.asarray(t.faces, np.int32)))
+        merged = m3d.Manifold.batch_boolean([to_m(wall)] + [to_m(r) for r in ribbons], m3d.OpType.Add)
+        out = merged.to_mesh()
+        mesh = trimesh.Trimesh(np.asarray(out.vert_properties)[:, :3], np.asarray(out.tri_verts), process=True)
+        parts = mesh.split(only_watertight=False)
+        if len(parts) > 1:
+            solid = [b for b in parts if abs(b.volume) > 0.5]
+            if len(solid) != 1:
+                raise ValueError(f"droop build produced {len(solid)} solid bodies — a strand is detached")
+            mesh = solid[0]
+        if mesh.volume < 0:
+            mesh.invert()
     reach = max((bu for _, _, bu, _, _, _, _ in spots), default=0.0)
     draped = drape(wall, spots, prof, q, ribbons, style) if preview else None
     info = dict(strands=len(spots), reach=round(reach, 1), draped=draped,

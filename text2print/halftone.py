@@ -61,14 +61,14 @@ def picture(name, u, v, path=None):
     return np.clip(np.maximum(body, small) + (v < 0.12), 0, 1)
 
 
-def build(shape, v, nz, picture_name="flames", image_path=None, band=1):
+def build(shape, v, nz, picture_name="flames", image_path=None, band=1, draft=False):
     lh, lw = RECIPE[nz.size]
     prof, height, rmax = shape.profile(v)
     floor_t = max(1.2, 4 * lh)
     n_layers = int(round(height / lh)); n_floor = int(math.ceil(floor_t / lh))
     period = max(2.6 * lw, 3.2)                                   # rib spacing around the wall
     n_ribs = max(24, int(round(2 * math.pi * rmax / period)))
-    n_th = n_ribs * 6                                             # 6 points per rib: the slicer sees the wave
+    n_th = n_ribs * (3 if draft else 6)                           # 6 points per rib: the slicer sees the wave
     th = np.linspace(0, 2 * np.pi, n_th, endpoint=False)
     wave = 0.5 - 0.5 * np.cos(n_ribs * th)                        # 0 at the flat ring, 1 at a rib peak
     parts = {0: [], 1: []}
