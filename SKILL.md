@@ -1,6 +1,6 @@
 ---
 name: text2print
-description: Textured 3D prints for a Bambu Lab P2S, picked from a catalogue. Use when someone wants a woven, basket, lattice, crosshatch, knit, fabric, zigzag or wave-textured tray, platter, dish, coaster, cup, lamp shade, bowl or vase; asks to "pick a pattern / pick a shape"; or wants to open or extend the text2print studio. Produces a Bambu Studio project (one object, one part per AMS colour, P2S settings for the chosen nozzle).
+description: Textured 3D prints for a Bambu Lab P2S, picked from a catalogue. Use when someone wants a woven, basket, lattice, crosshatch, knit, fabric, zigzag, wave, drooping, fringe, loop or curl-textured tray, platter, dish, coaster, cup, lamp shade, bowl or vase; asks to "pick a pattern / pick a shape"; or wants to open or extend the text2print studio. Produces a Bambu Studio project (one object, one part per AMS colour, P2S settings for the chosen nozzle).
 ---
 
 # text2print — pick a shape, pick a texture
@@ -26,10 +26,13 @@ from `--slice` plus the AMS change estimate in `stats`.
 
 ## Catalogue
 
-Shapes (`text2print/shapes.py`): tray, platter, dish (round), coaster, cup, shade — woven; cup, bowl, vase — fabric.
+Shapes (`text2print/shapes.py`): tray, platter, dish (round), coaster, cup, shade — woven; cup, bowl, vase, goblet — fabric;
+cup, bowl, vase, goblet, candle (solid bell + taper socket) — droop.
 Woven textures (`lattice.PATTERNS`): grid "Weave", twill, kagome, polar "Rose window" (round shapes only),
 ripple, selvedge, beat "Moiré", overunder, tartan. Fabric (`fabric.STITCHES`): zigzag, domes "Knit", wave;
-options rim_loops and floor = solid | diamonds | lens.
+options rim_loops and floor = solid | diamonds | lens. Droop (`droop.STYLES`): fringe, swag, curls, unraveled;
+options density = sparse | medium | dense, length = short | medium | long. `Build.preview` holds the strands hung
+by gravity (display only — strands pass through each other); the print files carry the flat strands.
 
 ## Laws (print-verified; tests enforce the geometric ones)
 
@@ -44,12 +47,18 @@ options rim_loops and floor = solid | diamonds | lens.
 - Objects <= 200 mm so the prime tower (216, 216) fits; meshes centred, the writer places by centre.
 - Bambu CLI: run `--slice 0 --export-3mf <abs>` from the output dir; never `--outputdir`. CLI numbers are
   single-colour (it ignores part->filament); add `stats.swap_minutes`.
+- Droop (UNRAVEL, print-verified July 2026): a strand is a flat ribbon anchored INTO the wall at both ends,
+  never an r(theta) displacement. One extrusion wide (swag: 2), <= 4 layers tall, rows a strand + a layer
+  apart, strands never intersect in the mesh (`_never_touch`), strand faces on the 1/4-layer grid and wall
+  rings on the 3/4-layer grid (coplanar unions leave slivers). Print: overhang slow-down OFF, fan <= 20 %,
+  nozzle +5 C — slow strands freeze and don't droop. Verify with a G-code layer plot: one line out, one back.
 - Only the 0.4 nozzle is print-verified. 0.2/0.6/0.8 are computed from it — say so.
 
 ## Extending
 
 New woven texture: a function `p_name(region, nz, rods)` in `lattice.py` that walks `region.n` courses, uses
 `Course(region, nz, i).lines(theta, ...)` / `.curve(...)`, and calls `rods.line(a, b, slot)` / `rods.path(pts, slot)`;
-register it in `PATTERNS` (name, blurb, slots, swaps, round_only). New fabric stitch: `fabric.STITCHES` +
+register it in `PATTERNS` (name, blurb, slots, swaps, round_only). New droop style: a `_SPEC` + `STYLES` entry
+(and a `HANG` angle range). New fabric stitch: `fabric.STITCHES` +
 the `scaled()` displacement. New shape: a `Block`, `Vessel` or `Profiled` entry in `SHAPES` with `Param`s.
 Then `python -m text2print thumbs` and `python -m pytest`. Verify visually: render, and screenshot the studio.

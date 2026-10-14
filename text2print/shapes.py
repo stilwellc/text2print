@@ -130,6 +130,22 @@ class Profiled(Shape):
 
     def profile(self, v):
         top, h = v["diameter"] / 2, v["height"]
+        if self.kind == "goblet":
+            stem = top * 0.26; foot = top * 0.62
+            def f(z):
+                t = min(max(z / h, 0), 1)
+                if t < 0.22:
+                    return stem + (foot - stem) * (0.5 + 0.5 * math.cos(math.pi * t / 0.22))
+                return stem + (top - stem) * ((t - 0.22) / 0.78) ** 1.15      # flare <= ~48 deg
+            return f, h, top
+        if self.kind == "candle":
+            base = top; neck = max(top * 0.36, v.get("socket", 22.5) / 2 + 4)
+            def f(z):
+                t = min(max(z / h, 0), 1)
+                if t < 0.84:
+                    return neck + (base - neck) * (1 - t / 0.84) ** 1.6 if t > 0.04 else base
+                return neck + (t - 0.84) / 0.16 * 3.0                         # a small lip at the top
+            return f, h, top
         if self.kind == "bowl":
             base = top * v["base"] / 100.0
             f = lambda z: base + (top - base) * math.sin(0.5 * math.pi * min(max(z / h, 0), 1)) ** 0.85
@@ -161,18 +177,26 @@ SHAPES = {s.key: s for s in [
         Param("width", "Width", 70, 140, 1, 100), Param("height", "Height", 5, 16, 0.5, 8),
         Param("dish", "Seat", 0, 120, 1, 76), Param("floor", "Floor", 2, 12, 0.5, 5.6),
         Param("corner", "Corner", 0, 40, 1, 16), Param("pillow", "Top edge", 0, 4, 0.5, 2)]),
-    Vessel("cup", "Cup", "Straight-walled vessel with a floor", ("lattice", "fabric"), [
+    Vessel("cup", "Cup", "Straight-walled vessel with a floor", ("lattice", "fabric", "droop"), [
         Param("diameter", "Diameter", 50, 160, 1, 90), Param("height", "Height", 30, 160, 1, 90),
         Param("wall", "Wall", 4, 16, 0.5, 8, family="lattice"),
         Param("floor", "Floor", 2, 10, 0.5, 4, family="lattice")], round=True),
-    Profiled("bowl", "Bowl", "Flared bowl", ("fabric",), [
+    Profiled("bowl", "Bowl", "Flared bowl", ("fabric", "droop"), [
         Param("diameter", "Diameter", 80, 200, 1, 180), Param("height", "Height", 30, 120, 1, 70),
         Param("base", "Base width", 55, 95, 1, 62, "%")], round=True),
-    Profiled("vase", "Vase", "Bellied vase with a narrowing neck", ("fabric",), [
+    Profiled("vase", "Vase", "Bellied vase with a narrowing neck", ("fabric", "droop"), [
         Param("diameter", "Belly", 70, 180, 1, 120), Param("height", "Height", 80, 240, 1, 180),
         Param("neck", "Neck", 55, 100, 1, 70, "%")], round=True),
 ]}
 SHAPES["vase"].kind = "vase"
+_goblet = Profiled("goblet", "Goblet", "A cup on a stem and foot", ("fabric", "droop"), [
+    Param("diameter", "Diameter", 80, 150, 1, 120), Param("height", "Height", 90, 200, 1, 140)], round=True)
+_goblet.kind = "goblet"
+_candle = Profiled("candle", "Candle holder", "A bell that narrows to a socket for a taper candle", ("droop",), [
+    Param("diameter", "Base", 80, 160, 1, 120), Param("height", "Height", 80, 180, 1, 130),
+    Param("socket", "Socket", 18, 26, 0.5, 22.5)], round=True)
+_candle.kind = "candle"; _candle.solid = True
+SHAPES["goblet"] = _goblet; SHAPES["candle"] = _candle
 _shade = Vessel("shade", "Lamp shade", "Open cylinder — light through the weave", ("lattice",), [
     Param("diameter", "Diameter", 80, 200, 1, 140), Param("height", "Height", 60, 180, 1, 120),
     Param("wall", "Wall", 4, 14, 0.5, 6)], round=True)

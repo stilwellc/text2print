@@ -61,7 +61,7 @@ def _per_extruder(base, key, value):
     return [value] * len(cur) if isinstance(cur, list) else value
 
 
-def overrides(size, family, slots=1, floor_layers=0, wall_speed=None) -> dict:
+def overrides(size, family, slots=1, floor_layers=0, wall_speed=None, solid=False) -> dict:
     """Slicer settings for a texture family on this nozzle. family = 'lattice' | 'fabric'."""
     n = nozzle(size); base = base_config(size)
     lw = f"{n.line_w:.2f}"
@@ -83,6 +83,17 @@ def overrides(size, family, slots=1, floor_layers=0, wall_speed=None) -> dict:
                      "bridge_speed": "50", "outer_wall_speed": "100", "inner_wall_speed": "150",
                      "initial_layer_speed": "35"}.items():
             o[k] = _per_extruder(base, k, v)
+    elif family == "droop":
+        # a plain 2-loop wall + single-line strands into air. Print-verified: the strands only droop if they are
+        # laid FAST and stay molten — no overhang slow-down, fan <= 20 %, nozzle +5 C
+        temp = [str(int(t) + 5) for t in base["nozzle_temperature"]]
+        o.update({"wall_loops": "2", "bottom_shell_layers": str(max(floor_layers, 3)), "detect_thin_wall": "1",
+                  "wall_generator": "arachne", "top_shell_layers": "5" if solid else "0",
+                  "sparse_infill_density": "15%" if solid else "0%", "sparse_infill_pattern": "gyroid",
+                  "enable_overhang_speed": _per_extruder(base, "enable_overhang_speed", "0"),
+                  "fan_max_speed": ["20"], "fan_min_speed": ["10"], "overhang_fan_speed": ["20"],
+                  "additional_cooling_fan_speed": ["0"], "slow_down_for_layer_cooling": ["0"],
+                  "nozzle_temperature": temp, "nozzle_temperature_initial_layer": list(base["nozzle_temperature_initial_layer"])})
     else:
         # printed fabric: a 2-loop shell, solid floor, mid-air zigzag layers — slow outer wall, full fan
         o.update({"wall_loops": "2", "bottom_shell_layers": str(max(floor_layers, 3)), "detect_thin_wall": "0",
