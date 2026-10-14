@@ -14,7 +14,12 @@ const el = (tag, attrs = {}, ...kids) => {
 const fmt = (n, d = 0) => Number(n).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
 const minutes = (m) => { const h = Math.floor(m / 60), r = Math.round(m % 60); return `${h ? h + " h " : ""}${r} min`; };
 const MAX_SLOTS = 4;
-const FAMILY_NAMES = { lattice: "Woven", fabric: "Fabric", droop: "Droop", halftone: "Halftone", mix: "Mix" };
+const FAMILY_NAMES = { lattice: "Woven", fabric: "Fabric", droop: "Droop", halftone: "Halftone", spiral: "Vase mode",
+  shell: "Shell", flat: "Flat", mix: "Mix" };
+// options that only apply to some textures
+const ONLY = { folds: ["pleats", "flutes", "twist", "lowpoly", "ribs"], turn: ["twist", "lowpoly"], cell: ["voronoi"],
+  noise: ["fuzzy"], fuzzy_bands: ["fuzzy"], picture: ["litho", "halftone", "flatlitho", "cmyk"], length: ["fringe", "swag", "curls", "unraveled", "fur"] };
+const IMAGE_TEXTURES = ["halftone", "litho", "flatlitho", "cmyk"];
 
 let CAT = null;
 const state = { shape: null, texture: null, nozzle: 0.4, params: {}, colours: [], options: {}, bands: null, mixPreset: null, family: null };
@@ -30,7 +35,7 @@ const isMix = () => textureOf(state.texture).family === "mix";
 const familyOptions = () => CAT.options[textureOf(state.texture).family] || [];
 const zonesOn = () => {
   const fam = textureOf(state.texture).family;
-  return fam === "fabric" || fam === "droop" || (fam === "lattice" && state.options.colour_by === "height");
+  return fam === "fabric" || fam === "droop" || fam === "shell" || (fam === "lattice" && state.options.colour_by === "height");
 };
 function slotCount() {
   if (!isMix() && zonesOn()) return Math.max(1, parseInt(state.options.zones || "1", 10));
@@ -45,7 +50,7 @@ function readUrl() {
   if (q.get("texture") && textureOf(q.get("texture"))) state.texture = q.get("texture");
   if (q.get("nozzle")) state.nozzle = parseFloat(q.get("nozzle"));
   if (q.get("c")) state.colours = q.get("c").split(",").map((h) => "#" + h.replace("#", ""));
-  const optKeys = Object.values(CAT.options).flat().map((o) => o.key).concat(["picture", "image", "lid", "lid_colour"]);
+  const optKeys = Object.values(CAT.options).flat().map((o) => o.key).concat(["picture", "image", "lid", "lid_colour", "lid_fit"]);
   for (const [k, v] of q) {
     if (k === "mix") { try { state.bands = JSON.parse(v); } catch (e) { /* a bad link keeps the default */ } }
     else if (optKeys.includes(k)) state.options[k] = v === "1" ? true : v === "0" ? false : v;
@@ -62,7 +67,11 @@ function linkFor() {
     if (v !== o.default) q.set(o.key, v === true ? "1" : v === false ? "0" : v);
   }
   if (state.options.image && textureOf(state.texture).family === "halftone") q.set("image", state.options.image);
-  if (state.options.lid === "lid" && shapeOf(state.shape).lid) { q.set("lid", "lid"); if (state.options.lid_colour) q.set("lid_colour", state.options.lid_colour); }
+  if (state.options.lid && state.options.lid !== "none" && shapeOf(state.shape).lid) {
+    q.set("lid", state.options.lid); if (state.options.lid_colour) q.set("lid_colour", state.options.lid_colour);
+    if (state.options.lid_fit) q.set("lid_fit", state.options.lid_fit);
+  }
+  if (state.options.image && IMAGE_TEXTURES.includes(state.texture)) q.set("image", state.options.image);
   return "?" + q.toString();
 }
 const writeUrl = () => history.replaceState(null, "", linkFor());
@@ -193,6 +202,7 @@ function renderColours() {
     : zonesOn() && n > 1 ? (state.options.zone_style === "stripes" ? "Stripes repeat the colours up the piece — one AMS change per stripe." : "Colours stack in bands from the bottom — one AMS change where each band starts.")
     : zonesOn() ? "One colour — add colours under Finish › Colours."
     : tex.slots === 1 ? "One colour — no AMS changes."
+    : state.texture === "cmyk" ? "Load cyan, magenta, yellow and white in slots 1–4. The AMS changes only where an ink starts or stops."
     : tex.family === "halftone" ? "Colour 1 paints the picture, colour 2 the background. The AMS changes every layer — pick strong contrast."
     : tex.swaps === "layer" ? "Colours mix inside every course, so the AMS changes about once per layer. Pick the same colour twice for a one-colour print."
     : "Colour follows rod direction: one AMS change per course. Pick the same colour twice for a one-colour print.";
@@ -244,15 +254,18 @@ function renderFinish() {
   const fam = textureOf(state.texture).family, sh = shapeOf(state.shape);
   const after = () => { renderFinish(); renderColours(); changed(); };
   const shown = familyOptions().filter((o) => {
+    if (ONLY[o.key] && !ONLY[o.key].includes(state.texture)) return false;
     if (o.key === "zones") return zonesOn();
     if (o.key === "zone_style") return zonesOn() && parseInt(state.options.zones || "1", 10) > 1;
     return true;
   });
   const kids = shown.flatMap((o) => optionControl(o, after));
-  if (fam === "halftone") kids.splice(2, 0, uploader(state.options.image, (id) => { if (id) state.options.image = id; else delete state.options.image; renderFinish(); changed(); }));
-  if (sh.lid) {
-    kids.push(...optionControl({ key: "lid", label: "Lid", kind: "seg", choices: [["none", "None"], ["lid", "Lid with knob"]], default: "none" }, after));
-    if (state.options.lid === "lid" && slotCount() > 1)
+  if (IMAGE_TEXTURES.includes(state.texture)) kids.splice(Math.min(2, kids.length), 0, uploader(state.options.image, (id) => { if (id) state.options.image = id; else delete state.options.image; renderFinish(); changed(); }));
+  if (sh.lid && fam !== "flat") {
+    kids.push(...optionControl({ key: "lid", label: "Lid", kind: "seg", choices: [["none", "None"], ["slip", "Slip-on"], ["thread", "Screw"], ["magnets", "Magnets"]], default: "none" }, after));
+    if (state.options.lid && state.options.lid !== "none")
+      kids.push(...optionControl({ key: "lid_fit", label: "Lid fit", kind: "seg", choices: [["snug", "Snug 0.15"], ["slip", "Slip 0.25"], ["loose", "Loose 0.40"]], default: "slip" }, after));
+    if (state.options.lid && state.options.lid !== "none" && slotCount() > 1)
       kids.push(...optionControl({ key: "lid_colour", label: "Lid colour", kind: "seg",
         choices: Array.from({ length: slotCount() }, (_, i) => [String(i + 1), `AMS ${i + 1}`]), default: "1" }, after));
   }
@@ -286,10 +299,11 @@ function renderBands() {
       el("button", { class: "x", title: "Remove band", "aria-label": "Remove band", disabled: state.bands.length < 2, onclick: () => { state.bands.splice(idx, 1); edit(); } }, "×"),
       el("div", { class: "share" }, range, out)];
     const fam = M.textures.find((t) => t.key === b.texture).family;
-    if (fam === "droop" || b.texture === "halftone") {
-      const key = fam === "droop" ? "density" : "picture";
+    if (fam === "droop" || b.texture === "halftone" || b.texture === "fuzzy") {
+      const key = fam === "droop" ? "density" : b.texture === "fuzzy" ? "noise" : "picture";
       const box = el("div", { class: "seg small sub" });
-      seg(box, fam === "droop" ? M.droop_options : M.pictures, (b.options || {})[key] ?? (fam === "droop" ? "medium" : "flames"),
+      seg(box, fam === "droop" ? M.droop_options : b.texture === "fuzzy" ? M.noises : M.pictures,
+        (b.options || {})[key] ?? (fam === "droop" ? "medium" : b.texture === "fuzzy" ? "perlin" : "flames"),
         (v) => { b.options = { ...(b.options || {}), [key]: v }; edit(); });
       kids.push(box);
       if (b.texture === "halftone") kids.push(el("div", { class: "sub" }, uploader((b.options || {}).image, (id) => { b.options = { ...(b.options || {}) }; if (id) b.options.image = id; else delete b.options.image; edit(); })));
@@ -317,11 +331,11 @@ function changed(newShape = false, dragging = false) {
 async function requestBuild(draft) {
   const seq = ++reqSeq;
   $("status").hidden = false;
-  $("statusText").textContent = draft ? "Sketching…" : ({ fabric: "Knitting…", droop: "Spinning strands…", halftone: "Screening…", mix: "Stacking bands…" }[textureOf(state.texture).family] || "Weaving…");
+  $("statusText").textContent = draft ? "Sketching…" : ({ fabric: "Knitting…", droop: "Spinning strands…", halftone: "Screening…", mix: "Stacking bands…", spiral: "Folding…", shell: "Shaping…", flat: "Mapping the picture…" }[textureOf(state.texture).family] || "Weaving…");
   try {
     const res = await fetch("/api/build", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shape: state.shape, texture: state.texture, nozzle: state.nozzle, params: state.params, draft,
-        colours: state.colours.slice(0, slotCount()), options: isMix() ? { bands: state.bands, purge: state.options.purge, lid: state.options.lid, lid_colour: state.options.lid_colour } : state.options }) });
+        colours: state.colours.slice(0, slotCount()), options: isMix() ? { bands: state.bands, purge: state.options.purge, lid: state.options.lid, lid_colour: state.options.lid_colour, lid_fit: state.options.lid_fit } : state.options }) });
     const data = await res.json();
     if (res.status === 409 || seq !== reqSeq) return;               // superseded by a newer request
     if (!res.ok) throw new Error(data.error || "Build failed");
@@ -344,7 +358,7 @@ function renderPrint(d) {
   if (s.bands) rows.push(["Bands × layers", `${s.bands} × ${fmt(s.layers)}`]);
   if (s.ribs) rows.push(["Ribs × layers", `${fmt(s.ribs)} × ${fmt(s.layers)}`]);
   if (s.strands) rows.push(["Strands", `${fmt(s.strands)} · up to ${fmt(s.reach)} mm out`]);
-  if (s.lid) rows.push(["Lid", `plug ${fmt(s.lid.plug, 1)} mm · ${s.lid.clearance} mm slip fit`]);
+  if (s.lid) rows.push(["Lid", `${{ slip: "Slip-on", thread: "Screw", magnets: "Magnets" }[s.lid.style] || "Lid"} · plug ${fmt(s.lid.plug, 1)} mm · ${s.lid.clearance} mm fit`]);
   rows.push(["Colours", String(s.colours)]);
   if (s.swaps) rows.push(["AMS changes", `${fmt(s.swaps)} · ≈ ${fmt(s.swap_minutes)} min`]);
   rows.push(["Filament", s.grams_purge ? `≈ ${fmt(s.grams_part)} g + ${fmt(s.grams_purge)} g purge` : `≈ ${fmt(s.grams_est)} g`]);
@@ -357,22 +371,31 @@ function renderPrint(d) {
   $("dl3mf").href = `/api/job/${d.id}/download`; $("dlStl").href = `/api/job/${d.id}/stls`;
   const noz = CAT.nozzles.find((n) => n.size === s.nozzle);
   const notes = [...d.warnings];
-  if (tex.swaps === "layer" && s.colours > 1 && tex.family !== "halftone") notes.push("This pattern changes colour about once per layer — expect a long print, or pick one colour.");
+  if (tex.swaps === "layer" && s.colours > 1 && !["halftone", "flat"].includes(tex.family)) notes.push("This pattern changes colour about once per layer — expect a long print, or pick one colour.");
   if ((tex.family === "halftone" || isMix()) && s.swaps > 300) notes.push(`${fmt(s.swaps)} colour changes — Lean purge, a 0.8 nozzle or a shorter halftone band cut that a lot.`);
   notes.push({
     lattice: "No supports, no infill — the rods are the object. Print on a clean plate, no brim.",
     fabric: "Vase mode off. The layer height must stay at " + noz.layer + " mm — the pattern is built on it.",
-    droop: "Glossy or translucent PETG/PLA shows the strands best. Don't slow overhangs down or raise the fan — the strands only droop while molten.",
+    droop: state.texture === "fur" ? "Hairs print as fast bridges at full fan, a little cooler, so they stay stiff — keep the project's cooling." : "Glossy or translucent PETG/PLA shows the strands best. Don't slow overhangs down or raise the fan — the strands only droop while molten.",
     halftone: `Prints at ${s.layer_h} mm layers with one ${s.line} mm line — keep those, the picture is built on them.`,
     ...{},
+    shell: { voronoi: "Every cell has a pointed roof, so the holes print without supports.",
+      litho: "The picture shows when lit from inside: an LED puck or tealight, never a flame.",
+      fuzzy: null }[state.texture],
     mix: "Keep the project's layer heights — each band is built on its own. Halftone bands print at their recipe height through a layer range.",
   }[tex.family]);
   if (s.lid) notes.push("The lid and knob print top-face down beside the piece; press the knob into the lid from the top.");
-  $("notes").replaceChildren(...notes.map((n) => el("li", {}, n)));
+  $("notes").replaceChildren(...notes.filter(Boolean).map((n) => el("li", {}, n)));
+  const bl = $("backlit"); bl.hidden = !s.backlit;
+  if (s.backlit) bl.replaceChildren(el("img", { src: s.backlit, alt: "The picture as it shows lit from behind" }),
+    el("figcaption", {}, "Lit from behind (estimate)"));
   const set = [["Printer", CAT.printer.name], ["Nozzle", `${s.nozzle} mm`], ["Layer height", `${s.layer_h} mm`],
     ...({ lattice: [["Rod", s.rod], ["Rod spacing", `${s.pitch} mm`], ["Walls", "rods only"], ["Infill", "0%"]],
           fabric: [["Walls", "2 loops"], ["Infill", "0%"], ["Top layers", "0"]],
           mix: [["Walls", "2 loops"], ["Infill", "0%"], ["Bands", `${s.bands}`]],
+          spiral: [["Mode", "spiral vase"], ["Walls", "1"], ["Infill", "0%"]],
+          shell: [["Walls", state.texture === "litho" ? "solid (lithophane)" : "2–4 loops"], ["Infill", "0%"]],
+          flat: [["Layer height", `${s.layer_h} mm`], ["Pixel", `${s.pixel} mm`], ["Solid", "100%"]],
           halftone: [["Line width", `${s.line} mm, 1 wall`], ["Infill", "0%"], ["Colour changes", "every layer"]],
           droop: [["Walls", "2 loops, strands 1 line"], ["Overhang slow-down", "off"], ["Fan", "≤ 20%"], ["Nozzle", "+5 °C"]] }[tex.family]),
     ["Supports", "none"], ["Filament", "Bambu PLA Matte"]];
@@ -545,7 +568,9 @@ let model = new THREE.Group(); scene.add(model);
 function renderDropView(d) {
   const box = $("dropView"); box.hidden = !d.preview;
   if (!d.preview) return;
-  seg(box, [[true, "After droop", "Strands hung as gravity will hang them (preview)"], [false, "As printed", "The flat strands the printer lays"]],
+  const fur = state.texture === "fur";
+  seg(box, [[true, fur ? "Trimmed" : "After droop", fur ? "Hairs cut free of the outer shell (preview)" : "Strands hung as gravity will hang them (preview)"],
+    [false, "As printed", fur ? "Hairs bridged to the shell you cut away" : "The flat strands the printer lays"]],
     draped, async (v) => { draped = v; renderDropView(job); await showModel(job); });
 }
 async function showModel(d) {

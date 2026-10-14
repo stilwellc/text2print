@@ -60,7 +60,8 @@ def _catalogue():
                               family=("plain" if k == "plain" else build.TEXTURES[k]["family"])) for k in compose.MIXABLE],
                presets=[dict(key=k, name=v["name"], bands=v["bands"]) for k, v in compose.PRESETS.items()],
                default=compose.DEFAULT_PRESET, droop_options=[list(c) for c in build.OPTIONS["droop"][0][3]],
-               pictures=[[k, v["name"]] for k, v in halftone.PICTURES.items()])
+               pictures=[[k, v["name"]] for k, v in halftone.PICTURES.items()],
+               noises=[[k, v] for k, v in __import__("text2print.shell", fromlist=["x"]).NOISE.items()])
     cfg = store.printer_config()
     return dict(printer=dict(name=printer.PRINTER, bed=printer.BED), nozzles=nozzles, shapes=shapes, options=options,
                 mix=mix, textures=textures, palette=build.PALETTE, colours=build.DEFAULT_COLOURS,
@@ -68,7 +69,9 @@ def _catalogue():
                 slicer=bambu.slicer_available(), mac=platform.system() == "Darwin",
                 lan=dict(configured=bool(cfg.get("ip") and cfg.get("serial") and cfg.get("access_code")),
                          name=cfg.get("name") or "", ip=cfg.get("ip", "")),
-                plates=[dict(key=k, name=v["name"], coupons=[_coupon_name(c) for c in v["coupons"]]) for k, v in sampler.PLATES.items()])
+                plates=[dict(key=k, name=v["name"], coupons=[_coupon_name(c) for c in v["coupons"]] or
+                             ["rims and lids at 0.15 / 0.20 / 0.25 / 0.30 / 0.40 mm a side — notches count the step"])
+                        for k, v in sampler.PLATES.items()])
 
 
 def _coupon_name(c):
