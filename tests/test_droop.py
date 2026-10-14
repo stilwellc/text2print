@@ -19,10 +19,10 @@ def test_every_shape_and_style_is_one_watertight_body(shape, style):
     b = build.make(shape, style, SMALL[shape])
     m = b.parts[0][1]
     assert m.is_watertight and len(m.split(only_watertight=False)) == 1
-    assert b.stats["strands"] > 0 and b.preview is not None
+    assert b.stats["strands"] > 0 and (b.preview is not None or style == "fur")   # fur hairs stand: no drape preview
 
 
-@pytest.mark.parametrize("style", list(droop.STYLES))
+@pytest.mark.parametrize("style", [k for k in droop.STYLES if k != "fur"])   # fur hairs: own geometry, see test_v4
 def test_strands_never_share_layers_where_they_overlap(style):
     nz = printer.nozzle(0.4); S = SHAPES["vase"]; v = S.defaults(); prof = S.profile(v)[0]
     q = lambda z: (math.floor(z / nz.layer_h) + 0.25) * nz.layer_h
@@ -34,7 +34,7 @@ def test_strands_never_share_layers_where_they_overlap(style):
                 assert da >= (a[1] + b[1]) / 2 + a[6], (style, a, b)
 
 
-@pytest.mark.parametrize("style", list(droop.STYLES))
+@pytest.mark.parametrize("style", [k for k in droop.STYLES if k != "fur"])   # fur hairs: own geometry, see test_v4
 def test_droop_never_reaches_the_bed_and_strands_are_at_most_4_layers(style):
     nz = printer.nozzle(0.4); S = SHAPES["cup"]; v = S.defaults(); prof = S.profile(v)[0]
     spots = droop._rows(style, prof, v["height"], nz, 1.0, 1.4)
