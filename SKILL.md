@@ -113,3 +113,13 @@ register it in `PATTERNS` (name, blurb, slots, swaps, round_only). New droop sty
 (and a `HANG` angle range). New fabric stitch: `fabric.STITCHES` +
 the `scaled()` displacement. New shape: a `Block`, `Vessel` or `Profiled` entry in `SHAPES` with `Param`s.
 Then `python -m text2print thumbs` and `python -m pytest`. Verify visually: render, and screenshot the studio.
+
+## Verification sweeps (Oct 14)
+- Geometry: every shape x texture (519) builds watertight at 0.4 full and 0.8 draft (script pattern: loop
+  build.compatible pairs, record wt/size/swaps/sec). Found + fixed: catchall+melt zero-volume flap (meshops.drop_flaps).
+- Slicer: one texture per shape x family (121) slices with zero CLI errors; app colour-change counts equal the
+  slicer's except the lantern (fitting shares layers; build._geom_transitions recounts from geometry, ~1 % off).
+- Fittings (plinth, collar, foot ring) get a layer range with 20 % infill + 4 top layers (build._merge_range),
+  or they slice hollow under the wall families' 0 % / no-top settings.
+- Filament estimate vs slicer: within ~5 % for most families; vase mode subtracts both caps; fittings count
+  shells + 20 % infill.
