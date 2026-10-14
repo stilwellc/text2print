@@ -78,7 +78,7 @@ MAGNET = dict(d=6.0, h=2.0, clear_d=0.15, clear_h=0.2, n=3, land=6.5)           
 
 def opening(build_, shape, v):
     """(outer rim radius, inner opening radius) at the top of the piece, or None."""
-    if build_.shape in ("dish", "tray") and build_.family == "lattice":
+    if build_.shape in ("dish", "tray", "platter") and build_.family == "lattice":
         d = v.get("dish", 0)
         if d <= 8:
             return None
@@ -89,6 +89,20 @@ def opening(build_, shape, v):
         h = depth - LIP_H                                  # the spherical dish narrows: fit where the plug ends
         r_at = math.sqrt(max(Rs ** 2 - (Rs - h) ** 2, 1.0)) if h > 0 else 4.0
         return rim, r_at
+    if build_.family == "lattice" and getattr(shape, "round", False) and hasattr(shape, "lattice"):
+        # a woven top course is separate parallel rods: no closed hole to slice; read the ring from the region
+        from .printer import nozzle
+        reg = shape.lattice(v, nozzle(build_.nozzle).rod_h)
+        xs = np.linspace(0, reg.extent + 6, 3000)
+        ins = xs[reg.sdf(reg.z(reg.n - 1))(xs, np.zeros_like(xs)) <= 0]
+        if not len(ins) or ins.min() < 5:
+            return None
+        return float(ins.max()), float(ins.min())
+    if build_.family == "spiral" and getattr(shape, "round", False):
+        # vase mode: the model is a solid body, the print is one wall of one line
+        from .printer import nozzle
+        prof, h, _ = shape.profile(v)
+        return float(prof(h)), float(prof(h) - nozzle(build_.nozzle).line_w)
     mesh = trimesh.util.concatenate([m for _, m, _, _ in build_.parts])
     top = mesh.bounds[1][2]
     best = None
@@ -251,6 +265,31 @@ def lid_outline(parts, fit="slip"):
         ext = unary_union([Polygon(q.exterior) for q in polys]).convex_hull
         outer = ext if outer is None else outer.union(ext)
     hole = hole.buffer(-0.4).buffer(0.4)                       # drop texture specks from the opening's edge
+    return _lid_from_polys(hole, outer, clear)
+
+
+def lid_from_region(region, fit="slip"):
+    """Woven rectangles (basket, catch-all): the top course is separate rods, so the opening comes from the
+    region's own outline at the top course instead of a slice."""
+    import skimage.measure as skm
+    from shapely.geometry import Polygon, Point
+    clear = FITS.get(fit, 0.25); E = region.extent + 4
+    g = np.linspace(-E, E, 900); X, Y = np.meshgrid(g, g, indexing="ij")
+    d = region.sdf(region.z(region.n - 1))(X, Y)
+    to_poly = lambda c: Polygon(np.column_stack([np.interp(c[:, 0], np.arange(len(g)), g), np.interp(c[:, 1], np.arange(len(g)), g)])).buffer(0)
+    polys = [to_poly(c) for c in skm.find_contours(d, 0.0) if len(c) > 20]
+    polys = [q for q in polys if q.area > 50]
+    if len(polys) < 2:
+        return None
+    outer = max(polys, key=lambda q: q.area)
+    holes = [q for q in polys if q is not outer and q.contains(Point(0, 0))]
+    if not holes:
+        return None
+    return _lid_from_polys(max(holes, key=lambda q: q.area), outer.convex_hull, clear)
+
+
+def _lid_from_polys(hole, outer, clear):
+    import manifold3d as m3d
     plug_o = hole.buffer(-clear, join_style=1); plug_i = plug_o.buffer(-LIP_W, join_style=1)
     if plug_i.is_empty or plug_i.area < 100:
         return None
@@ -266,3 +305,48 @@ def lid_outline(parts, fit="slip"):
     b = plug_o.bounds
     return dict(lid=_tm(body - hole_c), knob=_knob(rim_r), rim=[], plug_d=round(min(b[2] - b[0], b[3] - b[1]), 1),
                 clearance=clear, notes=[f"The lid's plug follows the opening with {clear} mm a side."])
+
+
+def graft(parts, adds, cuts, into=None):
+    """Add solids to a multi-colour piece without unioning into its walls: the adds become their own part in the
+    colour of the lowest part (the lid's top face, printed on the bed) and are carved out of the other colours;
+    cuts are booleans on everything. Same rule as the fittings."""
+    import manifold3d as m3d
+    low = into if into is not None else min(range(len(parts)), key=lambda i: parts[i][1].bounds[0][2])
+    added = m3d.Manifold.batch_boolean(adds, m3d.OpType.Add) if adds else None
+    cut = m3d.Manifold.batch_boolean(cuts, m3d.OpType.Add) if cuts else None
+    out = []
+    for i, (n, mesh, s, c) in enumerate(parts):
+        man = _m3d(mesh)
+        if added is not None and c != parts[low][3]:
+            man = man - added
+        if cut is not None:
+            man = man - cut
+        if added is not None or cut is not None:
+            mesh = _tm(man)
+        if len(mesh.faces):
+            out.append((n, mesh, s, c))
+    if added is not None:
+        if cut is not None:
+            added = added - cut
+        out.append(("graft", _tm(added), parts[low][2], parts[low][3]))
+    return out
+
+
+def plug_of(lid_mesh, t_plate):
+    """Split a plain lid (plate 0..t_plate, plug above) -> (plug manifold, its footprint polygons just above the plate)."""
+    import manifold3d as m3d
+    from shapely.geometry import Polygon
+    man = _m3d(lid_mesh)
+    top = float(lid_mesh.bounds[1][2])
+    plug = man ^ m3d.Manifold.cube([1000, 1000, top - t_plate + 1.0], False).translate([-500, -500, t_plate + 0.02])
+    sec = lid_mesh.section(plane_origin=[0, 0, t_plate + 0.15], plane_normal=[0, 0, 1])
+    pl, _ = sec.to_2D(to_2D=np.eye(4))
+    return plug, list(pl.polygons_full)
+
+
+def prism(polys, z0, z1):
+    """shapely polygons -> one extruded manifold from z0 to z1."""
+    ms = [trimesh.creation.extrude_polygon(p, z1 - z0) for p in polys]
+    m = trimesh.util.concatenate(ms); m.apply_translation([0, 0, z0])
+    return _m3d(m)

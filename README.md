@@ -33,16 +33,15 @@ Everything else lives in the studio too:
 
 - **Up to 4 colours.** Any fabric or droop piece (and woven pieces coloured by height) splits into 1–4 colour
   bands or repeating stripes, cut exactly on layer boundaries. Mixes give each band its own AMS slot.
-- **Lids.** Cups, vases, bowls, dishes, trays and your own shapes get an optional lid with a 0.25 mm slip-fit
-  plug and a press-fit knob. Both print top-face down beside the piece (or on their own plate if it's too big).
-- **Exact sizes.** Type any dimension in millimetres, or drag. **Your shape** lets you draw the silhouette with
-  five points; it's clamped so the wall never leans out past ~42°.
-- **Your own picture** for halftone (upload a PNG/JPG; dark = colour 1).
-- **Test plates.** One plate per family with a small coupon of every texture. Print one and record the result
-  (`python -m text2print verify fringe 0.4 ok --note "..."`); the cards then show **Printed** badges and the
-  warnings come from real prints.
-- **Send to printer** (experimental). Add your P2S's IP, serial and LAN access code once (stored only on this
-  Mac in `~/.text2print`); the studio slices and sends over your network, always asking before it starts.
+- **Lids.** Cups, vases, bowls, dishes, trays, baskets, catch-alls and platters can get a lid, and the lid gets the
+piece's own treatment: it is a short cap of the same shape, texture and colours, printed top-face down, whose rim
+lands on the piece's rim so the texture carries across. A woven basket gets a woven lid, a knit cup a knit one.
+Inside the cap sits the fit: slip-on, a two-start screw (half a turn closes it) or six 6 × 2 mm magnets on a
+pedestal, all on round rims; square and hex pieces take slip lids that follow their opening. Pick a fit (snug
+0.15, slip 0.25 or loose 0.40 mm a side); the *Fit* test plate prints rings and lids at each clearance. Droop,
+fuzzy and lithophane pieces get a plain cap, since strands on a lid would point up once it's flipped on. On woven
+lids the hidden plug changes colour course by course with the rods, so the lid adds no extra colour changes
+beyond the knob; the change count covers everything on the plate.
 
 From the command line:
 
