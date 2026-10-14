@@ -322,3 +322,15 @@ def test_real_slicer_counts_woven_mix_changes(tmp_path):
     assert "error" not in r, r
     g = zipfile.ZipFile(tmp_path / "s" / "sliced.3mf").read("Metadata/plate_1.gcode").decode(errors="ignore")
     assert len(re.findall(r"^M620 S\dA", g, re.M)) == b.stats["swaps"]
+
+
+@pytest.mark.parametrize("style", ["fringe", "swag", "curls", "unraveled"])
+def test_droop_plain_bands_are_minimal(style):
+    from text2print import droop
+    nz = printer.nozzle(0.4); S = SHAPES["cup"]; v = S.resolve({"diameter": 70, "height": 80})
+    spots = droop._rows(style, S.profile(v)[0], 80.0, nz, 1.0, 1.0)
+    zs = [z for *_, z, _, _, _ in [s[:4] + (0, 0, 0) for s in spots]]
+    gap = max(droop._SPEC[style]["row"], droop._SPEC[style]["tall"] + 1) * nz.layer_h
+    assert min(zs) < 12.0                                         # strands start near the foot (short loops there)
+    assert max(zs) > 80.0 - 1.0 - 4 * nz.layer_h - 2 * gap - 1.0  # ...and run to just under the rim
+    assert all(z - bu >= droop.CLEAR - 1e-6 for _, _, bu, z, *_ in spots)

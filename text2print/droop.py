@@ -24,6 +24,7 @@ STYLES = {
     "unraveled": dict(name="Unraveled", blurb="A wild mix of short and long loops, as if the wall is coming apart"),
     "fur":       dict(name="Fur", blurb="Hundreds of bridged hairs out to a cut-away shell — brush them into a mane"),
 }
+CLEAR = 2.5                 # mm: a hung loop's lowest point stays this far above the bed
 FUR_LEN = {"short": 10.0, "medium": 15.0, "long": 22.0}
 DENSITY = {"sparse": 0.55, "medium": 1.0, "dense": 1.45}
 LENGTH = {"short": 0.7, "medium": 1.0, "long": 1.4}
@@ -31,11 +32,11 @@ LENGTH = {"short": 0.7, "medium": 1.0, "long": 1.4}
 # per style, in units of the nozzle's line width (lw) and layer height (lh) where it matters
 _SPEC = {
     # width 1.15 lw = ONE extrusion (the single overhanging line is the whole idea); swag is 2 lines on purpose
-    #            chord mm  bulge mm  width lw  tall lh  row gap lh  keep  zone (lo, hi) of the wall height
-    "fringe":    dict(chord=(6, 9),   bulge=(14, 22), width=1.15, tall=2, row=4,  keep=0.62, zone=(0.30, 0.86), power=0.55),
-    "swag":      dict(chord=(22, 32), bulge=(7, 10),  width=2.1, tall=3, row=14, keep=0.90, zone=(0.22, 0.84), power=1.0),
-    "curls":     dict(chord=(4, 5.5), bulge=(6, 8),   width=1.15, tall=3, row=5,  keep=1.0,  zone=(0.14, 0.82), power=0.5),
-    "unraveled": dict(chord=(6, 30),  bulge=(5, 24),  width=1.15, tall=2, row=6,  keep=0.55, zone=(0.16, 0.90), power=0.7),
+    #            chord mm  bulge mm  width lw  tall lh  row gap lh  keep
+    "fringe":    dict(chord=(6, 9),   bulge=(14, 22), width=1.15, tall=2, row=4,  keep=0.62, power=0.55),
+    "swag":      dict(chord=(22, 32), bulge=(7, 10),  width=2.1, tall=3, row=14, keep=0.90, power=1.0),
+    "curls":     dict(chord=(4, 5.5), bulge=(6, 8),   width=1.15, tall=3, row=5,  keep=1.0, power=0.5),
+    "unraveled": dict(chord=(6, 30),  bulge=(5, 24),  width=1.15, tall=2, row=6,  keep=0.55, power=0.7),
 }
 
 
@@ -68,11 +69,16 @@ def _rows(style, r_of_z, height, nz, density, length, seed=11, z_range=None, ali
     sp = _SPEC[style]; lh, lw = nz.layer_h, nz.line_w
     tall = min(4, sp["tall"]); strand_h = tall * lh; width = sp["width"] * lw
     gap = max(sp["row"], tall + 1) * lh                      # rows a full strand + a layer apart: never intersect
-    bulge_max = sp["bulge"][1] * length
+    # plain bands as small as possible (Collin): strands run from just above the bed to just under the rim. A loop
+    # hangs about its bulge below its anchor, so near the bed loops are SHORTENED to clear it instead of the whole
+    # bottom being left plain — the fringe tapers into the foot.
+    rim = 0.0
     if z_range is None:
-        z_range = (sp["zone"][0] * height, sp["zone"][1] * height)
-    z_lo = max(z_range[0], bulge_max + 4.0)                   # the droop must not reach the bed
-    z_hi = z_range[1] - strand_h
+        z_range = (0.0, height); rim = 1.0
+    min_bulge = max(2.5, 0.35 * sp["bulge"][0] * length)
+    z_lo = max(z_range[0], CLEAR + min_bulge)
+    z_hi = z_range[1] - strand_h - rim
+    fit = lambda b, z: min(b, z - CLEAR)                    # the hung loop stops CLEAR mm above the bed
     out = []
     if style == "curls":
         # tiers of coil columns; each next loop drifts 40 % of a chord sideways (partial overlap -> a coil)
@@ -91,8 +97,9 @@ def _rows(style, r_of_z, height, nz, density, length, seed=11, z_range=None, ali
                         break
                     chord = sp["chord"][0] + (sp["chord"][1] - sp["chord"][0]) * _h(seed, "ch", tier, c, k)
                     th_k = th + d * 0.4 * chord / r_of_z(z) * (k % 4 - 1.5)
-                    bulge = (sp["bulge"][0] + (sp["bulge"][1] - sp["bulge"][0]) * _h(seed, "b", tier, c, k)) * length
-                    out.append((th_k, chord, bulge, z, strand_h, 0.0, width))
+                    bulge = fit((sp["bulge"][0] + (sp["bulge"][1] - sp["bulge"][0]) * _h(seed, "b", tier, c, k)) * length, z)
+                    if bulge >= min_bulge:
+                        out.append((th_k, chord, bulge, z, strand_h, 0.0, width))
                     z += gap
             tier += 1; z_t += tier_h
         return out
@@ -109,7 +116,7 @@ def _rows(style, r_of_z, height, nz, density, length, seed=11, z_range=None, ali
                 continue
             chord = sp["chord"][0] + (sp["chord"][1] - sp["chord"][0]) * _h(seed, "ch", row, k)
             chord = min(chord, slot - width * 2.0)            # strands in a row never touch
-            bulge = (sp["bulge"][0] + (sp["bulge"][1] - sp["bulge"][0]) * _h(seed, "b", row, k)) * length
+            bulge = fit((sp["bulge"][0] + (sp["bulge"][1] - sp["bulge"][0]) * _h(seed, "b", row, k)) * length, z)
             lean = (_h(seed, "l", row, k) - 0.5) * (0.8 if style == "unraveled" else 0.25)
             th = 2 * math.pi * (k + phase) / n
             out.append((th, chord, bulge, z, strand_h, lean, width))
@@ -203,7 +210,7 @@ def fur(shape, v, nz, density="medium", length="medium", draft=False, preview=Fa
     from .meshops import manifold_to_trimesh
     wall, prof, height, rmax, shell = body(shape, v, nz)
     lh = nz.layer_h; L = FUR_LEN.get(length, 15.0); w = 2 * nz.line_w
-    z_lo, z_hi = height * 0.28, height * 0.86
+    z_lo, z_hi = max(1.6, 8 * lh) + lh, height - 1.5          # hair from just above the floor to just under the rim
     every = {"sparse": 3, "medium": 2, "dense": 1}.get(density, 2)
     shell_t = 2 * nz.line_w + 0.05
     # shell: follows the wall at +L from the bed to the top of the fur band
