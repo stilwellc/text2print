@@ -4,6 +4,8 @@
   python -m text2print list                         shapes, textures and which fit which
   python -m text2print make tray twill --set width=117 --colours "#8B3A2F,#EDE3D1" --out ~/Downloads/tray --slice
   python -m text2print thumbs                       re-render the studio's card thumbnails
+  python -m text2print sampler --nozzle 0.4 --slice  test plates: a coupon of every texture
+  python -m text2print verify fringe 0.4 ok --note "loops fell nicely"   record what a print showed
 """
 import argparse
 import json
@@ -28,11 +30,25 @@ def main(argv=None):
     mk.add_argument("--out", default="."); mk.add_argument("--slice", action="store_true")
     mk.add_argument("--render", action="store_true")
     sub.add_parser("thumbs")
+    sp = sub.add_parser("sampler"); sp.add_argument("--nozzle", type=float, default=0.4)
+    sp.add_argument("--out", default="~/Downloads/text2print/test-plates"); sp.add_argument("--slice", action="store_true")
+    vf = sub.add_parser("verify"); vf.add_argument("texture"); vf.add_argument("nozzle", type=float)
+    vf.add_argument("result", choices=["ok", "fail"]); vf.add_argument("--note", default="")
     a = ap.parse_args(argv)
 
     if a.cmd == "studio":
         from studio.server import run
         return run(port=a.port, browser=not a.no_browser)
+    if a.cmd == "sampler":
+        from .sampler import write_all
+        print(json.dumps(write_all(a.out, a.nozzle, slice_=a.slice), indent=1)); return 0
+    if a.cmd == "verify":
+        from . import verify
+        from .build import TEXTURES
+        if a.texture not in TEXTURES:
+            print(f"unknown texture {a.texture!r}"); return 2
+        verify.record(a.texture, a.nozzle, a.result, a.note); print(f"recorded {a.texture} @ {a.nozzle:g} mm: {a.result}")
+        return 0
     if a.cmd == "thumbs":
         from .thumbs import render_all
         return render_all()

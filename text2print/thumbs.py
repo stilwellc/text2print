@@ -9,7 +9,7 @@ from .shapes import SHAPES
 OUT = pathlib.Path(__file__).resolve().parent.parent / "studio" / "static" / "thumbs"
 FABRIC_TONE = "#D2B48C"     # fabric relief reads in a light tone under raking light
 SHAPE_LOOK = {"tray": "twill", "platter": "grid", "dish": "polar", "coaster": "selvedge", "cup": "grid",
-              "shade": "kagome", "bowl": "zigzag", "vase": "wave", "goblet": "swag", "candle": "curls"}
+              "shade": "kagome", "bowl": "zigzag", "vase": "wave", "goblet": "swag", "candle": "curls", "custom": "garland"}
 HALFTONE_COLOURS = ["#F3D34A", "#C3302C"]
 SAMPLE = {"lattice": ("coaster", {"width": 70, "height": 8, "dish": 0, "corner": 12, "pillow": 0}),
           "lattice_round": ("dish", {"diameter": 70, "height": 9, "dish": 0, "pillow": 0}),
@@ -23,7 +23,7 @@ def render_all(only=None):
             continue
         fab = "lattice" not in s.families
         b = build.make(key, SHAPE_LOOK[key], colours=[FABRIC_TONE] if fab else None)
-        tall = key in ("cup", "vase", "shade", "bowl", "goblet", "candle")
+        tall = key in ("cup", "vase", "shade", "bowl", "goblet", "candle", "custom")
         render([(m, c) for _, m, _, c in (b.preview or b.parts)], OUT / f"shape_{key}.png", size=360,
                view=(1.0, -0.95, 0.45 if tall else 0.8), zoom=1.12, rake=s.families == ("fabric",))
         print("shape", key, flush=True)
@@ -34,7 +34,7 @@ def render_all(only=None):
             from . import compose
             b = build.make("vase", key, {"diameter": 90, "height": 120}, colours=HALFTONE_COLOURS,
                            options={"bands": compose.PRESETS["flame"]["bands"]})
-            render([(m, c) for _, m, _, c in b.preview], OUT / f"texture_{key}.png", size=360,
+            render([(m, c) for _, m, _, c in (b.preview or b.parts)], OUT / f"texture_{key}.png", size=360,
                    view=(1.0, -0.9, 0.3), zoom=1.1)
         elif t["family"] == "halftone":
             b = build.make("cup", key, {"diameter": 80, "height": 90}, nozzle=0.8, colours=HALFTONE_COLOURS)
@@ -42,7 +42,7 @@ def render_all(only=None):
                    view=(1.0, -0.9, 0.25), zoom=1.1)
         elif t["family"] == "droop":                         # a small cup wearing the strands, raking light
             b = build.make("cup", key, {"diameter": 60, "height": 90}, colours=[FABRIC_TONE])
-            render([(m, c) for _, m, _, c in b.preview], OUT / f"texture_{key}.png", size=360,
+            render([(m, c) for _, m, _, c in (b.preview or b.parts)], OUT / f"texture_{key}.png", size=360,
                    view=(1.0, -0.9, 0.3), zoom=1.15, rake=True)
         elif t["family"] == "fabric":                      # close on the wall, raking light: show the stitch
             shp, v = SAMPLE["fabric"]; b = build.make(shp, key, v, colours=[FABRIC_TONE])
