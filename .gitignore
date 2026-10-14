@@ -31,3 +31,17 @@ printcheck.json
 structural.json
 all_check.txt
 face_check.txt
+
+# Slicer runs and session intermediates (scripts + profiles in slice_out/ stay tracked)
+slice_out/woven/
+slice_out/**/x/
+slice_out/**/*.gcode
+slice_out/**/*.log
+slice_out/**/result.json
+slice_out/prusa/progress.txt
+result.json
+*.npy
+hull_meta.json
+*_meta.json
+map_*_report.txt
+*_check.txt
