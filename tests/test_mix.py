@@ -51,4 +51,4 @@ def test_droop_band_gets_droop_cooling_on_its_own_filament():
 
 
 def test_mix_is_offered_only_on_wall_shapes():
-    assert build.compatible("vase", "mix") and not build.compatible("tray", "mix") and not build.compatible("candle", "mix")
+    assert build.compatible("vase", "mix") and build.compatible("tray", "mix") and not build.compatible("coaster", "mix") and not build.compatible("candle", "mix")

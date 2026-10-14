@@ -186,6 +186,40 @@ class Build:
         return out
 
 
+def _cut_handles(parts, v, info, mix_preview=None):
+    """Basket handle slots through both short walls: 14 mm straight, then a 45 deg pointed arch (no overhang)."""
+    import manifold3d as m3d
+    from .meshops import manifold_to_trimesh
+    W, D, H = v["width"], v["depth"], v["height"]
+    hw = min(32.0, D / 2 - 14.0); hz1 = H - 6.0; hz0 = hz1 - (14.0 + hw)
+    if hw < 8 or hz0 < 10:
+        return parts
+    yz = [(-hw, hz0), (hw, hz0), (hw, hz0 + 14.0), (0.0, hz0 + 14.0 + hw), (-hw, hz0 + 14.0)]
+    prism = []                                               # the slot profile (y, z) swept across each short wall
+    for sign in (1, -1):
+        x_in, x_out = sign * (W / 2 - 16.0), sign * (W / 2 + 45.0)
+        lo, hi = min(x_in, x_out), max(x_in, x_out)
+        pts = np.array([[x, y, z] for x in (lo, hi) for (y, z) in yz], float)
+        prism.append(trimesh.convex.convex_hull(pts))
+    cutter = trimesh.util.concatenate(prism)
+    to_m = lambda t: m3d.Manifold(m3d.Mesh(vert_properties=np.asarray(t.vertices, np.float32), tri_verts=np.asarray(t.faces, np.int32)))
+    cut = to_m(prism[0]) + to_m(prism[1])
+    out = []
+    for name, m, slot_, col in parts:
+        out.append((name, manifold_to_trimesh(to_m(m) - cut), slot_, col))
+    def face_cut(m):                                         # previews: drop faces inside the slots (display only)
+        if m is None:
+            return
+        keep = ~cutter.contains(m.triangles_center) if len(m.faces) < 400000 else np.ones(len(m.faces), bool)
+        m.update_faces(keep); m.remove_unreferenced_vertices()
+    face_cut(info.get("draped"))
+    if info.get("drape_pieces"):
+        face_cut(info["drape_pieces"][0])
+    for _, m, _, _ in (mix_preview or []):
+        face_cut(m)
+    return out
+
+
 def _course_edges(starts, gap, top, n, rows=1):
     """Woven-style colour for droop: each strand row (course) and the wall it hangs from take the next colour.
     `starts` are cut-safe row boundaries; keep every `rows`-th one at least rows x row-gap apart."""
@@ -368,6 +402,28 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
                                  wall_speed=info["wall_speed"])
         extra = dict(stitches=info["stitches"], swing_ratio=info["swing_ratio"])
 
+    # ── non-round plans: the wall families built a round piece of the outline's circumference; map it on ──
+    outline = S.outline(v) if (T["family"] not in ("lattice", "flat") and hasattr(S, "outline")) else None
+    if outline is not None:
+        seen = set()
+        def _w(m):
+            if m is not None and id(m) not in seen:
+                seen.add(id(m)); outline.warp(m)
+        for _, m, _, _ in parts:
+            _w(m)
+        inf = locals().get("info") or {}
+        _w(inf.get("draped"))
+        if inf.get("drape_pieces"):
+            _w(inf["drape_pieces"][0])
+            for _, r_ in inf["drape_pieces"][1]:
+                _w(r_)
+        for _, m, _, _ in (locals().get("mix_preview") or []):
+            _w(m)
+        if shape == "basket" and v.get("handles", 0) > 0:
+            if T["family"] == "spiral":
+                warnings.append("Vase mode prints one unbroken wall, so this basket has no handle slots.")
+            else:
+                parts = _cut_handles(parts, v, inf, locals().get("mix_preview"))
     # ── colour zones: up to 4 colours by height (fabric, droop, and woven when coloured by height) ──
     zones = int(options.get("zones", 1) or 1)
     zoned = zones > 1 and (T["family"] in ("fabric", "droop", "shell") or
@@ -467,6 +523,8 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     lid_parts, assembled = [], []
     style = options.get("lid", "none")
     style = "slip" if style == "lid" else style
+    if outline is not None and style in ("slip", "thread", "magnets"):
+        warnings.append("Lids fit round rims and woven trays — this piece has no lid."); style = "none"
     if style in ("slip", "thread", "magnets") and shape in extras.LID_SHAPES:
         tmp = Build(shape, texture, nz.size, v, T["family"], parts, stats, over)
         op = extras.opening(tmp, S, v)
