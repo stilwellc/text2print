@@ -151,6 +151,16 @@ third colour or mix colours inside a course. Mixes work on cup, vase, bowl and g
 # mixes are easiest in the studio; every mix is a shareable link (/?shape=vase&texture=mix&mix=[...])
 ```
 
+## Custom pictures and patterns
+
+Every picture texture (halftone, wall lithophane, flat lithophane, CMYK tile, halftone mix bands) reads from one
+picture library: the built-ins, your uploads, **text** in ten fonts (centred, repeating around the piece, or
+stacked; rendered at the wall's real proportions so letters never stretch), and anything in
+`~/.text2print/pictures`. New pictures, weaves and stitches can also be written as small Python **plugins** in
+`~/.text2print/plugins` — that's what the Claude skill does when you ask for "a koi pond halftone" or "a
+fish-scale knit". `python -m text2print plugin check FILE` builds one on a sample piece, checks it and renders a
+preview; the studio lists it on its next load. Examples: `plugin_examples/` (Koi pond, Diamond weave, Fish scales).
+
 ## Shapes
 
 | Shape | Textures | Sizes |

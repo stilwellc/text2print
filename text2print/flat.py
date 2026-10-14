@@ -81,7 +81,7 @@ def _trim(mesh, fp_poly, h):
     return manifold_to_trimesh(body ^ prism, min_volume=0.0)
 
 
-def build(shape, v, nz, style="litho", image=None, picture="sunset", draft=False):
+def build(shape, v, nz, style="litho", image=None, picture="sunset", draft=False, options=None):
     W = v["width"]; D = v.get("depth", v["width"] * 1.1547)
     fp = shape.footprint(v)
     lh = 0.12 if nz.size <= 0.4 else round(nz.size * 0.3, 2)
@@ -92,7 +92,14 @@ def build(shape, v, nz, style="litho", image=None, picture="sunset", draft=False
     X, Y = np.meshgrid(xc, yc, indexing="ij")
     inside = fp(X, Y) <= 0
     frame = fp(X, Y) > -3.0                                       # 3 mm solid frame
-    img = _image(image, nx, ny, picture)[::-1].transpose(1, 0, 2)  # -> [ix, iy, rgb], y up
+    use_lib = bool(options) and bool(options.get("image") or (options.get("picture") or "sunset") != "sunset")
+    if use_lib:
+        from PIL import Image
+        from . import pictures
+        im = pictures.colour_image(options, W / D).resize((nx, ny), Image.LANCZOS)
+        img = (np.asarray(im, float) / 255.0)[::-1].transpose(1, 0, 2)
+    else:
+        img = _image(image, nx, ny, picture)[::-1].transpose(1, 0, 2)  # -> [ix, iy, rgb], y up
     lum = img.mean(axis=2)
     q = lambda t: np.round(t / lh).astype(int)                     # thickness -> whole layers
     from shapely.geometry import Polygon

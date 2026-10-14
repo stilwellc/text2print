@@ -64,7 +64,7 @@ def picture(name, u, v, path=None):
 AREAS = {"full": 1.0, "half": 0.5, "third": 1 / 3}
 
 
-def build(shape, v, nz, picture_name="flames", image_path=None, band=1, draft=False, area="full", silk=False):
+def build(shape, v, nz, picture_name="flames", image_path=None, band=1, draft=False, area="full", silk=False, pic=None):
     """Economy levers (research §5.5): `band` layers per colour (fewer changes), `area` keeps the picture to the
     lower part of the piece (plain background above, no changes there), `silk` prints one dual-colour silk
     filament — the ribs flip its sheen, the picture shows with zero AMS changes."""
@@ -82,6 +82,10 @@ def build(shape, v, nz, picture_name="flames", image_path=None, band=1, draft=Fa
     disc = trimesh.creation.cylinder(radius=prof(floor_t / 2), height=n_floor * lh, sections=n_th)
     disc.apply_translation([0, 0, n_floor * lh / 2]); parts[0].append(disc)
     pic_top = floor_t + (height - floor_t) * AREAS.get(area, 1.0)
+    samp = None
+    if pic is not None:                                           # the picture library: uploads, text, prompts
+        from . import pictures
+        samp = pictures.darkness(pic, 2 * math.pi * rmax / max(pic_top - floor_t, 1e-6))
     swaps = 0; prev = 0
     for k in range(n_floor, n_layers):
         z0, z1 = k * lh, (k + 1) * lh; zm = (z0 + z1) / 2
@@ -97,7 +101,8 @@ def build(shape, v, nz, picture_name="flames", image_path=None, band=1, draft=Fa
         step = max(prof(zm) - prof(zm - lh), 0.0)               # the wall's own outward lean this layer
         amp = max(0.2 * lw, min(0.5 * lw, 0.6 * lw - step))      # overhang law: lean + swing <= 0.6 line
         if in_pic:
-            g = picture(picture_name, th / (2 * np.pi), (zm - floor_t) / max(pic_top - floor_t, 1e-6), image_path)
+            vv = (zm - floor_t) / max(pic_top - floor_t, 1e-6)
+            g = samp(th / (2 * np.pi), np.full(len(th), vv)) if samp else picture(picture_name, th / (2 * np.pi), vv, image_path)
             g = g if (colour == 0 or silk) else 1.0 - g
         else:
             g = np.zeros_like(th)

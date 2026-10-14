@@ -237,8 +237,10 @@ def build(shape, v, nz, bands, draft=False):
                 entry["r"] = R + 0.02 * (k % 2) + relief(t, th, zm, R, za, zb, fp["zigzag"]["zigzag_depth"] * max(0.35, R / rmax))
             elif t == "halftone":
                 colour = k % 2; ribs = _ribs(rmax, ht_lw)
-                g = halftone.picture(b["options"].get("picture", "flames"), th / (2 * np.pi), (zm - za) / max(zb - za, 1e-6),
-                                     b["options"].get("image"))
+                if "_dark" not in b:                                      # the picture library, once per band
+                    from . import pictures
+                    b["_dark"] = pictures.darkness(b["options"], 2 * math.pi * rmax / max(zb - za, 1e-6))
+                g = b["_dark"](th / (2 * np.pi), np.full(len(th), (zm - za) / max(zb - za, 1e-6)))
                 g = g if colour == 0 else 1 - g
                 step = max(prof(zm) - prof(zm - lh), 0.0)
                 amp = max(0.2 * ht_lw, min(0.5 * ht_lw, 0.6 * ht_lw - step))

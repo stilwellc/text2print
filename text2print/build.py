@@ -479,6 +479,8 @@ def _png_data_url(rgba, max_px=480):
 
 
 def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=None, options=None, draft=False, _raw=False):
+    from . import plugins
+    plugins.load_all()                                          # textures written as plugins (cheap when unchanged)
     if shape not in SHAPES:
         raise ValueError(f"unknown shape {shape!r}")
     if texture not in TEXTURES:
@@ -562,7 +564,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     elif T["family"] == "flat":
         style = "cmyk" if texture == "cmyk" else "litho"
         meshes, info = flat.build(S, v, nz, style, image=options.get("image"), picture=options.get("picture", "sunset"),
-                                  draft=draft)
+                                  draft=draft, options=options)
         cols = list(colours) if (colours and style == "cmyk" and options.get("own_colours")) else (
             flat.CMYK if style == "cmyk" else [colours[0] if colours and colours[0] != DEFAULT_COLOURS[0] else "#FFFFFF"])
         if style == "cmyk":
@@ -603,7 +605,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     elif T["family"] == "halftone":
         meshes, info = halftone.build(S, v, nz, picture_name=options.get("picture", "flames"),
                                       image_path=options.get("image"), band=int(options.get("band", 1)), draft=draft,
-                                      area=options.get("area", "full"), silk=options.get("silk") == "silk")
+                                      area=options.get("area", "full"), silk=options.get("silk") == "silk", pic=options)
         merged = {}
         for slot, mesh in sorted(meshes.items()):
             merged.setdefault(colours[slot], []).append(mesh)

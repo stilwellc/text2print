@@ -75,10 +75,13 @@ def build(shape, v, nz, style, options, draft=False):
         u = np.linspace(0, 1, n, endpoint=False)
         band0, band1 = floor_t + 2.0, height - 2.0
         r_out, r_in = [], []
+        from . import pictures
+        dark = pictures.darkness(dict(options, picture=options.get("picture") or "moon"),
+                                 2 * math.pi * rmax / max(band1 - band0, 1e-6))
         for z in zs:
             R = prof(z)
             if band0 <= z <= band1:
-                lum = _lum(options.get("image"), options.get("picture", "moon"), u, np.full(n, (z - band0) / (band1 - band0)))
+                lum = 1.0 - dark(u, np.full(n, (z - band0) / (band1 - band0)))
                 t = t1 - (t1 - t0) * lum                                 # bright -> thin
             else:
                 t = np.full(n, t1)

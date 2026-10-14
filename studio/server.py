@@ -12,6 +12,7 @@ import pathlib
 import platform
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -41,7 +42,8 @@ _RUN_LOCK = threading.Lock()
 
 # ── catalogue ─────────────────────────────────────────────────────────────────
 def _catalogue():
-    from text2print import extras
+    from text2print import extras, pictures, plugins
+    plugins.load_all()                                         # plugin textures appear without a restart
     shapes = [dict(key=s.key, name=s.name, blurb=s.blurb, families=list(s.families), round=s.round, lid=s.key in extras.LID_SHAPES,
                    params=[dict(key=p.key, label=p.label, lo=p.lo, hi=p.hi, step=p.step, default=p.default,
                                 unit=p.unit, family=p.family) for p in s.params],
@@ -53,7 +55,8 @@ def _catalogue():
         st = {n: verify.status(k, n)[0] for n in printer.NOZZLES}
         textures.append(dict(key=k, name=t["name"], blurb=t["blurb"], family=t["family"], slots=t["slots"],
                              swaps=t["swaps"], round_only=bool(t.get("round_only")), status=st,
-                             thumb=f"/static/thumbs/texture_{k}.png",
+                             thumb=(f"/static/thumbs/texture_{k}.png" if (THUMBS / f"texture_{k}.png").exists()
+                                    else f"/api/thumb/texture/{k}"), custom=bool(t.get("custom")),
                              fits=[s.key for s in SHAPES.values() if build.compatible(s.key, k)]))
     nozzles = [dict(size=n, rod=f"{printer.nozzle(n).rod_w:.2f} × {printer.nozzle(n).rod_h:.2f}",
                     layer=printer.nozzle(n).layer_h, verified=printer.nozzle(n).verified) for n in printer.NOZZLES]
@@ -63,12 +66,14 @@ def _catalogue():
                               family=("plain" if k == "plain" else build.TEXTURES[k]["family"])) for k in compose.MIXABLE],
                presets=[dict(key=k, name=v["name"], bands=v["bands"]) for k, v in compose.PRESETS.items()],
                default=compose.DEFAULT_PRESET, droop_options=[list(c) for c in build.OPTIONS["droop"][0][3]],
-               pictures=[[k, v["name"]] for k, v in halftone.PICTURES.items()],
+               pictures=[[c["key"], c["name"]] for c in pictures.choices() if c["key"] != "text"],
                noises=[[k, v] for k, v in __import__("text2print.shell", fromlist=["x"]).NOISE.items()])
     cfg = store.printer_config()
     return dict(printer=dict(name=printer.PRINTER, bed=printer.BED), nozzles=nozzles, shapes=shapes, options=options,
                 mix=mix, textures=textures, palette=build.PALETTE, colours=build.DEFAULT_COLOURS,
                 lid=dict(textures=build.lid_textures(), knobs=[list(k) for k in build.LID_KNOBS]),
+                pictures=dict(choices=pictures.choices(), fonts=[list(f) for f in pictures.fonts()],
+                              layouts=[list(l) for l in pictures.LAYOUTS], errors=dict(plugins.ERRORS)),
                 defaults=dict(shape="tray", texture="twill", nozzle=printer.DEFAULT_NOZZLE),
                 slicer=bambu.slicer_available(), mac=platform.system() == "Darwin",
                 lan=dict(configured=bool(cfg.get("ip") and cfg.get("serial") and cfg.get("access_code")),
@@ -212,6 +217,28 @@ def _job(jid):
     if not j:
         abort(404)
     return j
+
+
+@app.get("/api/thumb/texture/<key>")
+def texture_thumb(key):
+    """Plugin textures: render a card on first view, cached by the plugin file's change time."""
+    from text2print import plugins, thumbs
+    plugins.load_all()
+    if key not in build.TEXTURES:
+        abort(404)
+    fam = build.TEXTURES[key]["family"]
+    src = next((p for p in plugins.DIR.glob("*.py") if f"x_{p.stem}" == key), None)
+    stamp = int(src.stat().st_mtime) if src else 0
+    out = plugins.HOME / "cache" / f"thumb_{key}_{stamp}.png"
+    if not out.exists():
+        # OpenGL must run on a process's main thread on macOS (a Flask thread aborts the whole server): render in
+        # a short-lived child process, which also keeps any renderer crash out of the studio
+        out.parent.mkdir(parents=True, exist_ok=True)
+        r = subprocess.run([sys.executable, "-m", "text2print", "thumb-texture", key, str(out)],
+                           cwd=str(pathlib.Path(__file__).resolve().parent.parent), capture_output=True, timeout=180)
+        if r.returncode != 0 or not out.exists():
+            abort(500)
+    return Response(out.read_bytes(), mimetype="image/png")
 
 
 @app.get("/api/job/<jid>/mesh/<int:n>")
