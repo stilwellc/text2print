@@ -13,3 +13,6 @@ matplotlib>=3.7,<4
 flask>=3.0,<4
 # tests
 pytest>=8,<10
+
+# send to printer (LAN)
+paho-mqtt>=2.0,<3
