@@ -191,8 +191,8 @@ def test_lids_fit_inside_the_opening(shape, texture):
     assert [n for n, *_ in b.extras] == ["Lid", "Knob"]
     lid_m = b.extras[0][1]
     assert lid_m.is_watertight and b.extras[1][1].is_watertight
-    rim, plug = extras.opening(b, SHAPES[shape], b.params)
-    assert b.stats["lid"]["plug"] == pytest.approx(2 * plug, abs=0.1) and plug < rim
+    rim, open_r = extras.opening(b, SHAPES[shape], b.params)
+    assert b.stats["lid"]["plug"] == pytest.approx(2 * (open_r - extras.FITS["slip"]), abs=0.1) and open_r < rim
 
 
 def test_lid_shares_the_plate_when_it_fits(tmp_path):

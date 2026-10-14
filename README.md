@@ -55,7 +55,7 @@ python -m text2print make cup halftone --nozzle 0.8 --image flames.png --colours
 
 ## Textures
 
-<p align="center"><img src="docs/textures.png" alt="The twelve textures: Weave, Twill, Kagome, Rose window, Ripple, Selvedge, Moiré, Over-under, Tartan, Zigzag, Knit, Wave" width="920"></p>
+<p align="center"><img src="docs/textures.png" alt="Every texture in the studio, one card each" width="920"></p>
 
 **Woven rods.** Each course is a row of parallel rounded beads; the next course runs another way, so every
 rod bridges a short gap across the ones below. No supports, no infill, no walls — the rods are the object.
@@ -107,15 +107,35 @@ is the grey level. Built-in pictures: flames, fade, polka dots, chevron, waves, 
 command line (`--image photo.png`). It prints at the nozzle's maximum layer height with one wide line
 (0.8 nozzle: 0.56 mm layers, 1.4 mm line; 0.4: 0.28 / 1.0), the recipe from kowafatcompany's
 [Fire Flame Vase](https://makerworld.com/en/models/3429731). The AMS changes every layer, so a 0.8 nozzle or
-"2 layers per colour" keeps the change count sane. Works on cup, vase, bowl and goblet; the rib depth shrinks
+"2 or 3 layers per colour" keeps the change count sane. Three more levers cut changes and purge: keep the
+picture to the bottom half or third, flush purge into the infill of a solid coaster on the plate, or print with
+one dual-colour silk spool and let the ribs turn the sheen (no changes at all). Works on cup, vase, bowl and goblet; the rib depth shrinks
 where a wall flares so a rib never overhangs more than 60 % of its line.
+
+**Vase mode.** One continuous wall printed in Bambu's spiral vase mode: no seams, no colour changes, and
+fast. **Pleats** (sharp folds), **Flutes** (rounded channels), **Twist** (folds that turn up the wall),
+**Low-poly** (faceted, turning), **Pinch** (soft lobes pinched at the waist) and **Slit ribs** (fins on a solid
+body, cut by hairline slits so vase mode traces every fin). Dual- or tri-colour silk shows the folds best. Spiral
+mode can't change filament, so these are one colour.
+
+**Shell.** Plain-wall textures. **Voronoi** cuts organic cells through the wall, gable-roofed so every hole
+prints without supports. **Lithophane** carves a picture into a thick wall that shows when lit from inside.
+**Fuzzy skin** paints Bambu's fuzzy skin onto chosen bands (orange peel, billow, marble or stone noise); it
+appears in the sliced preview.
+
+**Flat.** Pictures on a tile that print face-down and show backlit. **Lithophane** is one white filament whose
+thickness is the grey level. **CMYK** stacks cyan, magenta and yellow under a white body; the ink depth per pixel
+mixes the colour, and each layer starts with the colour already loaded (13 changes on a test tile).
+
+**Fur.** Short single-line hairs bridge off the wall at full fan and a little cooler, so they stay stiff and
+stand out like a pelt.
 
 **Mix.** Stack textures in bands up one wall: plain, zigzag, knit, wave, halftone, fringe, swag, curls and
 unraveled, each band with its own height and AMS colour. Presets: *Coil band* (plain, curls, plain), *Fringe
 skirt* (wave foot, dense fringe, plain neck), *Flame foot* (halftone flames under zigzag) and *Knit & wave*.
 Bands print at the nozzle's standard layer height, except halftone bands, which keep their 0.28 mm (0.4
 nozzle) recipe through a Bambu layer range. The AMS changes where two colours meet (and every layer inside a
-halftone band). Droop bands get their own low-fan, +5 °C filament settings; give a droop band its own colour slot
+halftone band). A fuzzy band paints fuzzy skin onto its stretch of wall. Droop bands get their own low-fan, +5 °C filament settings; give a droop band its own colour slot
 and the rest of the piece keeps full cooling. Woven rods can't join a mix — they are the whole object, not a wall. Mixes work on cup, vase, bowl and goblet.
 
 ```bash
@@ -136,7 +156,25 @@ and the rest of the piece keeps full cooling. Woven rods can't join a mix — th
 | Vase | fabric, droop or halftone | belly, height, neck |
 | Goblet | fabric, droop or halftone | a cup on a stem and foot |
 | Candle holder | droop | a solid bell with a socket for a taper candle |
-| Your shape | fabric, droop, halftone, mix | widest, height, and a 5-point drawn silhouette |
+| Your shape | fabric, droop, halftone, mix, vase mode, shell | widest, height, and a 5-point drawn silhouette |
+| Cachepot | fabric, halftone, vase mode, shell | sized to a 3–7 in nursery pot, with a foot ring that lifts it |
+| Liner sleeve | fabric, vase mode, shell | slides over a glass liner (a cylinder vase or jar) |
+| Tealight lantern | fabric, shell, halftone | plinth with a 41 × 17 mm tealight pocket |
+| Pendant shade | fabric, droop, shell | top plate with a 40 mm hole for an E27 socket ring |
+| Puck lamp | fabric, shell, halftone | collar pocket for a 59 × 18 mm LED puck, with a cable notch |
+| Amphora | fabric, vase mode, shell | tall belly and neck that never lean past 45° |
+| Basket | woven | rounded box with two arched handle holes |
+| Catch-all | woven | low rounded tray |
+| Hex tile | woven, flat | hexagon: lattice tile or backlit picture |
+| Tile | flat | rounded rectangle for lithophanes and CMYK |
+
+**Fittings.** The lamp, lantern, pendant, cachepot and candle shapes carry their hardware fit. The collar,
+plinth, foot ring or crush ribs print in the floor colour, and the app adds the safety copy: LED pucks and
+tealights in LED form only for shades, and a taper bore of 23 mm with six crush ribs.
+
+**Lids.** Cups, vases, bowls, dishes and trays can get a lid: slip-on, a two-start screw (half a turn closes it),
+or six 6 × 2 mm magnets. Pick a fit (snug 0.15, slip 0.25 or loose 0.40 mm a side); the *Fit* test plate prints
+rings and lids at each clearance so you can choose before printing the piece.
 
 ## Made for the Bambu Lab P2S
 
@@ -162,6 +200,10 @@ at its stock 10 mm/s the print takes twice as long for nothing); fabric prints a
 - Layer ranges are keyed by the object's position in the build (`Metadata/layer_config_ranges.xml`). A range
   must set `layer_height`; line widths in a range drop layers of multi-part objects, and "extruder" breaks them.
 - The prime tower needs every object on a plate to share one set of layer ranges.
+- Weight comes back one number per filament; the app sums them.
+- Spiral vase mode prints one wall and can't change filament.
+- With three or more colours the prime tower grows deep: it parks front-right with 20 mm margins, or the G-code
+  leaves the printable area.
 - Purge per change comes from the colour pair (light after dark costs most), not a flat number.
 
 ## Laws
@@ -180,7 +222,8 @@ These are print-verified, and the tests enforce the geometric ones.
 ## Repo
 
 ```
-text2print/   shapes.py · lattice.py (woven rods) · droop.py (strands) · halftone.py · compose.py (mix) · extras.py (zones, lids)
+text2print/   shapes.py · lattice.py (woven rods) · droop.py (strands, fur) · halftone.py · compose.py (mix) · extras.py (zones, lids)
+              spiral.py (vase mode) · shell.py (voronoi, litho, fuzzy) · flat.py (tiles) · fittings.py · meshops.py
               sampler.py (test plates) · verify.py · store.py (~/.text2print) · lan.py (send) · fabric.py + fabric_wall.py + fabric_presets.py (fabric)
               floors.py · build.py (pick -> project) · printer.py + data/ (P2S) · bambu.py (3MF + CLI slice)
 studio/       server.py + static/ (the picker)

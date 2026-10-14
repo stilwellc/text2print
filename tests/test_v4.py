@@ -1,0 +1,207 @@
+"""Research top-12 features: fittings, halftone economy, vase mode, shell textures, fur, lid styles, footprints, flat."""
+import zipfile
+
+import numpy as np
+import pytest
+
+from text2print import bambu, build, extras, fittings, flat, printer, sampler
+from text2print.shapes import SHAPES
+
+
+def _solid_at(b, pt):
+    return any(m.contains([pt])[0] for _, m, _, _ in b.parts)
+
+
+def _ok(b):
+    assert b.parts and all(m.is_watertight and m.volume > 0 for _, m, _, _ in b.parts)
+
+
+# ── fittings ──────────────────────────────────────────────────────────────────────────────────────────────
+def test_puck_lamp_has_a_pocket_and_a_cable_notch():
+    b = build.make("puck", "zigzag", draft=True)
+    _ok(b)
+    r = fittings.PUCK[0] / 2
+    for pt in ([0, 0, 9], [r - 0.2, 0, 9], [0, -(r + 1.0), 4]):           # pocket centre, pocket edge, notch
+        assert not _solid_at(b, pt), pt
+    assert any(fittings.NOTES["puck"][:20] in w for w in b.warnings)
+
+
+def test_pendant_has_the_e27_hole():
+    b = build.make("pendant", "zigzag", draft=True)
+    _ok(b)
+    for x in (0.0, fittings.E27_HOLE / 2 - 0.3):
+        assert not _solid_at(b, [x, 0, 3.0])
+
+
+def test_lantern_plinth_holds_a_tealight():
+    b = build.make("lantern", "voronoi", draft=True)
+    _ok(b)
+    assert _solid_at(b, [0, 0, 1.5])                                       # plinth under the pocket
+    assert not _solid_at(b, [0, 0, 20.0 - fittings.TEALIGHT_POCKET[1] / 2])  # the pocket itself
+    assert any("flame" in w.lower() or "candle" in w.lower() or "tealight" in w.lower() for w in b.warnings)
+
+
+def test_taper_candle_socket_has_crush_ribs():
+    b = build.make("candle", "curls", draft=True)
+    _ok(b)
+    top = b.params["height"]; sock = fittings.TAPER_BORE / 2
+    assert _solid_at(b, [0, sock - 0.2, top - 6])                          # rib face
+    assert not _solid_at(b, [0, 0, top - 6])                               # the bore
+
+
+def test_cachepot_sizes_to_the_nursery_pot():
+    a = build.make("cachepot", "pleats", {"pot": 4}, draft=True)
+    c = build.make("cachepot", "pleats", {"pot": 6}, draft=True)
+    _ok(a); _ok(c)
+    assert c.stats["size"][0] - a.stats["size"][0] >= 2 * 25.4 - 1
+
+
+# ── halftone economy ─────────────────────────────────────────────────────────────────────────────────────
+def test_halftone_levers_cut_colour_changes():
+    dims = {"diameter": 60, "height": 50}
+    base = build.make("cup", "halftone", dims, draft=True).stats["swaps"]
+    band3 = build.make("cup", "halftone", dims, options={"band": "3"}, draft=True).stats["swaps"]
+    third = build.make("cup", "halftone", dims, options={"area": "third"}, draft=True).stats["swaps"]
+    silk = build.make("cup", "halftone", dims, options={"silk": "silk"}, draft=True)
+    assert band3 < base / 2 and third < base / 2
+    assert silk.stats["swaps"] == 0 and len(silk.parts) == 1
+
+
+# ── vase mode ────────────────────────────────────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("texture", ["pleats", "flutes", "twist", "lowpoly", "pinch"])
+def test_vase_mode_is_one_wall_in_spiral_mode(texture):
+    b = build.make("vase", texture, {"diameter": 70, "height": 90}, draft=True)
+    _ok(b)
+    assert len(b.parts) == 1 and b.overrides.get("spiral_mode") == "1"
+    assert len(b.parts[0][1].split(only_watertight=False)) == 1
+
+
+def test_slit_ribs_cut_the_solid_body_without_spiral_mode():
+    b = build.make("vase", "ribs", {"diameter": 70, "height": 90}, draft=True)
+    _ok(b)
+    assert b.stats.get("sections", 0) > 0
+
+
+def test_amphora_keeps_the_overhang_law():
+    S = SHAPES["amphora"]; v = S.resolve({})
+    prof, h = S.profile(v)[:2]
+    z = np.linspace(0, h, 400); r = np.array([prof(zz) for zz in z])
+    assert (np.diff(r) / np.diff(z)).max() <= 1.0 + 1e-6                  # never wider than 45 deg per mm
+
+
+# ── shell textures ───────────────────────────────────────────────────────────────────────────────────────
+def test_voronoi_is_one_body_with_holes():
+    b = build.make("cup", "voronoi", {"diameter": 70, "height": 80}, draft=True)
+    _ok(b)
+    m = b.parts[0][1]
+    assert len(m.split(only_watertight=False)) == 1 and b.stats["cells"] > 5
+    plain = build.make("cup", "litho", {"diameter": 70, "height": 80}, draft=True).parts[0][1]
+    assert m.volume < plain.volume
+
+
+def test_fuzzy_bands_are_layer_ranges():
+    b = build.make("cup", "fuzzy", {"diameter": 70, "height": 80}, options={"fuzzy_bands": "2"}, draft=True)
+    _ok(b)
+    fz = [r for r in b.ranges if r[2].get("fuzzy_skin", "none") != "none"]
+    assert fz and all("layer_height" in r[2] for r in b.ranges)
+
+
+def test_litho_wall_is_thick_enough_to_light():
+    b = build.make("cup", "litho", {"diameter": 70, "height": 80}, draft=True)
+    _ok(b)
+    assert int(b.overrides["wall_loops"]) * printer.nozzle(0.4).line_w >= 3.0
+
+
+# ── fur ──────────────────────────────────────────────────────────────────────────────────────────────────
+def test_fur_hairs_are_bridges_on_their_own_cooling():
+    b = build.make("cup", "fur", {"diameter": 60, "height": 50}, draft=True)
+    _ok(b)
+    assert b.stats["strands"] > 50
+    assert b.per_filament and b.per_filament.get("fan_max_speed") == ["100"]
+
+
+# ── lids ─────────────────────────────────────────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("style", ["slip", "thread", "magnets"])
+def test_lid_styles(style):
+    b = build.make("cup", "zigzag", {"diameter": 80, "height": 60}, options={"lid": style}, draft=True)
+    assert b.stats["lid"]["style"] == style
+    assert all(m.is_watertight for _, m, _, _ in b.extras)
+    rims = [m for n, m, _, _ in b.parts if n == "rim"]
+    assert bool(rims) == (style != "slip") and all(m.is_watertight for m in rims)
+
+
+@pytest.mark.parametrize("fit,clear", list(extras.FITS.items()))
+def test_lid_fit_sets_the_clearance(fit, clear):
+    b = build.make("cup", "zigzag", {"diameter": 80, "height": 60}, options={"lid": "slip", "lid_fit": fit}, draft=True)
+    assert b.stats["lid"]["clearance"] == clear
+
+
+def test_fit_plate_builds():
+    p = sampler.plate("fit")
+    assert len(p["objects"]) >= 2
+    assert all(m.is_watertight for ob in p["objects"] for _, m, _ in ob["parts"])
+
+
+# ── footprints ───────────────────────────────────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("shape,texture", [("basket", "twill"), ("catchall", "grid"), ("hextile", "kagome"),
+                                           ("tile", "flatlitho"), ("hextile", "cmyk")])
+def test_non_round_footprints(shape, texture):
+    b = build.make(shape, texture, draft=True)
+    _ok(b)
+    x, y, _ = b.stats["size"]
+    assert x < printer.BED and y < printer.BED
+
+
+def test_basket_has_handle_holes():
+    b = build.make("basket", "twill", draft=True)
+    v = b.params; top = b.stats["size"][2]
+    x = b.stats["size"][0] / 2 - 1.0
+    assert not _solid_at(b, [x, 0, top - 12]) or not _solid_at(b, [-x, 0, top - 12])
+
+
+# ── flat pictures ────────────────────────────────────────────────────────────────────────────────────────
+def test_cmyk_tile_is_four_clean_parts_with_counted_changes():
+    b = build.make("tile", "cmyk", {"width": 70, "depth": 60}, draft=True)
+    _ok(b)
+    assert [c for *_, c in b.parts] == list(flat.CMYK)[:len(b.parts)] and len(b.parts) == 4
+    assert 0 < b.stats["swaps"] < 40
+
+
+def test_flat_backlit_preview_matches_the_footprint():
+    S = SHAPES["hextile"]; v = S.resolve({})
+    _, info = flat.build(S, v, printer.nozzle(0.4), "cmyk", draft=True)
+    im = info["backlit"]
+    assert im.ndim == 3 and im.shape[2] == 4 and 0 < (im[..., 3] > 0).mean() < 1
+
+
+# ── plate layout ─────────────────────────────────────────────────────────────────────────────────────────
+def test_three_colours_park_the_tower_front_right_and_the_piece_clear(tmp_path):
+    b = build.make("cup", "zigzag", {"diameter": 80, "height": 40}, colours=["#8B3A2F", "#EDE3D1", "#2E4E7E"],
+                   options={"zones": "3"}, draft=True)
+    p = b.write_3mf(tmp_path / "c.3mf")
+    tx = float(b.overrides["wipe_tower_x"][0]); ty = float(b.overrides["wipe_tower_y"][0])
+    assert tx + printer.TOWER[2] + 20 <= printer.BED + 1e-6 and ty == 20
+    with zipfile.ZipFile(p) as z:
+        assert "plate_1" in " ".join(z.namelist()) or z.read("3D/3dmodel.model")
+
+
+# ── real slicer ──────────────────────────────────────────────────────────────────────────────────────────
+@pytest.mark.slicer
+@pytest.mark.parametrize("shape,texture,dims,opts", [
+    ("vase", "pleats", {"diameter": 60, "height": 60}, {}),
+    ("cup", "voronoi", {"diameter": 60, "height": 50}, {}),
+    ("tile", "cmyk", {"width": 60, "depth": 50}, {}),
+    ("puck", "zigzag", {}, {}),
+    ("cup", "zigzag", {"diameter": 70, "height": 40}, {"lid": "thread"}),
+])
+def test_real_slicer_accepts_the_new_families(tmp_path, shape, texture, dims, opts):
+    if not bambu.slicer_available():
+        pytest.skip("Bambu Studio not installed")
+    b = build.make(shape, texture, dims, options=opts, draft=False)
+    r = bambu.slice_project(b.write_3mf(tmp_path / "m.3mf"), tmp_path / "s")
+    assert "error" not in r, r
+
+
+def test_vase_mode_estimate_counts_one_wall_not_the_solid_body():
+    b = build.make("vase", "pleats", draft=True)
+    assert 15 < b.stats["grams_est"] < 150

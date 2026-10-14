@@ -63,5 +63,5 @@ def test_designs_and_printer_endpoints(client, tmp_path, monkeypatch):
 def test_catalogue_has_status_plates_and_lan(client):
     c = client.get("/api/catalogue").get_json()
     tw = next(t for t in c["textures"] if t["key"] == "twill")
-    assert tw["status"]["0.4"] == "printed" and {p["key"] for p in c["plates"]} == {"woven", "colour", "droop", "fabric"}
+    assert tw["status"]["0.4"] == "printed" and {p["key"] for p in c["plates"]} == {"woven", "colour", "droop", "fabric", "fit"}
     assert "configured" in c["lan"]
