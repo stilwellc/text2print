@@ -13,6 +13,7 @@ import numpy as np
 import trimesh
 
 from . import bambu, compose, droop, extras, fabric, fittings, flat, halftone, lattice, printer, shell, spiral, verify
+from .meshops import volume as _vol, watertight as _wt
 from .shapes import SHAPES
 
 # Bambu PLA Matte, approximate swatches (preview + 3MF colour only; the real colour is your spool)
@@ -713,11 +714,11 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         if abs(zmin) > 1e-9:
             m.apply_translation([0, 0, -zmin])
     for _, m, _, _ in parts:
-        if not m.is_watertight:
+        if not _wt(m):
             warnings.append("a part is not watertight — report this build")
     all_v = np.vstack([m.vertices for _, m, _, _ in parts])
     lo, hi = all_v.min(0), all_v.max(0)
-    vol = sum(m.volume for _, m, _, _ in parts) / 1000.0
+    vol = sum(_vol(m) for _, m, _, _ in parts) / 1000.0
     if T["family"] == "droop" and info.get("solid"):          # solid body prints as 2 walls + 15 % infill
         m0 = parts[0][1]; skin = m0.area * 2 * nz.line_w / 1000.0
         vol = min(vol, skin + 0.15 * max(vol - skin, 0.0))
@@ -730,7 +731,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         vol = min(vol, ((m0.area - base - top_cap) * nz.line_w * 1.05 + base * 1.2) / 1000.0)
     for n_, m_, _, _ in parts:                                # fittings print as shells + 20 % infill, not solid
         if n_ == "fitting" and T["family"] != "spiral":
-            skin = m_.area * 3 * nz.line_w / 1000.0; fv = m_.volume / 1000.0
+            skin = m_.area * 3 * nz.line_w / 1000.0; fv = _vol(m_) / 1000.0
             vol -= fv - min(fv, skin + 0.2 * max(fv - skin, 0.0))
     # purge: each change flushes the colour pair's volume (x the multiplier) + a sliver of prime tower
     purge_g = sum(bambu.flush_volume(a, b) for a, b in transitions) * flush_mult * 1.26 / 1000 + 0.12 * len(transitions)

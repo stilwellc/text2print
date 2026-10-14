@@ -216,20 +216,17 @@ def fabric_solid(profile_r, height, *,
     c_top = len(verts) + 1
     verts = np.vstack([verts, [[0, 0, 0], [0, 0, floor_t]]])
 
-    faces = []
-    idx = lambda i, j: i * n_theta + (j % n_theta)
-    for i in range(n_rings - 1):
-        for j in range(n_theta):
-            a, b = idx(i, j), idx(i, j + 1)
-            c, d = idx(i + 1, j), idx(i + 1, j + 1)
-            faces.append([a, b, c])
-            faces.append([b, d, c])
-    for j in range(n_theta):
-        faces.append([idx(0, j + 1), idx(0, j), c_bot])                     # bottom cap
-        faces.append([idx(n_rings - 1, j), idx(n_rings - 1, j + 1), c_top])  # floor
-
-    tm = trimesh.Trimesh(vertices=verts, faces=np.array(faces), process=True)
-    trimesh.repair.fix_normals(tm)
+    # faces in one array op (was ~9M Python appends on a tall vase): quads between consecutive rings + the caps.
+    # Rings never repeat (add_ring dedups), so there are no duplicate vertices to merge and the winding is
+    # consistent by construction — only the overall sign needs checking.
+    i = np.arange(n_rings - 1)[:, None]; j = np.arange(n_theta)[None, :]; jn = (j + 1) % n_theta
+    a = i * n_theta + j; b = i * n_theta + jn; c = (i + 1) * n_theta + j; d = (i + 1) * n_theta + jn
+    quads = np.stack([np.stack([a, b, c], -1), np.stack([b, d, c], -1)], axis=2).reshape(-1, 3)
+    j1 = np.arange(n_theta); j2 = (j1 + 1) % n_theta; last = (n_rings - 1) * n_theta
+    caps = np.vstack([np.column_stack([j2, j1, np.full(n_theta, c_bot)]),
+                      np.column_stack([last + j1, last + j2, np.full(n_theta, c_top)])])
+    faces = np.vstack([quads, caps]).astype(np.int64)
+    tm = trimesh.Trimesh(vertices=verts, faces=faces, process=False)
     if tm.volume < 0:
         tm.invert()
     return tm

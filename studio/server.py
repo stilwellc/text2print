@@ -104,12 +104,41 @@ def catalogue():
 
 
 # ── builds (cancellable worker process) ───────────────────────────────────────
+def _slim(b):
+    """Before the build crosses the pipe: drop trimesh's derived caches (a 4.6 M-triangle wall carries a
+    per-triangle coordinate array, normals, edge tables… several times the mesh itself) and store vertices as
+    float32 / faces as int32. Pickling those caches was seconds per full build."""
+    import numpy as _np
+    seen = set()
+    for group in (b.parts, b.preview or [], b.extras, b.assembled):
+        for item in group:
+            m = item[1]
+            if id(m) in seen:
+                continue
+            seen.add(id(m))
+            m._cache.clear()
+            m.vertices = _np.ascontiguousarray(m.vertices, dtype=_np.float32)
+            m.faces = _np.ascontiguousarray(m.faces, dtype=_np.int32)
+            m._cache.clear()
+
+
+BUILD_CACHE = OrderedDict()            # request -> (status, build, secs): revisiting a design is instant
+BUILD_CACHE_N = 12
+
+
+def _cache_key(req):
+    return json.dumps({k: req.get(k) for k in ("shape", "texture", "params", "nozzle", "colours", "options", "draft")},
+                      sort_keys=True, default=str)
+
+
+
 def _worker(conn, req):
     try:
         t = time.time()
         b = build.make(req.get("shape"), req.get("texture"), req.get("params") or {},
                        nozzle=req.get("nozzle", printer.DEFAULT_NOZZLE), colours=req.get("colours") or None,
                        options=req.get("options") or {}, draft=bool(req.get("draft")))
+        _slim(b)
         conn.send(("ok", b, time.time() - t))
     except ValueError as e:
         conn.send(("bad", str(e), 0))
@@ -144,7 +173,15 @@ def _run_build(req):
 @app.post("/api/build")
 def api_build():
     req = request.get_json(force=True) or {}
-    status, b, secs = _run_build(req)
+    ck = _cache_key(req)
+    if ck in BUILD_CACHE:
+        BUILD_CACHE.move_to_end(ck); status, b, secs = BUILD_CACHE[ck]; secs = 0.0
+    else:
+        status, b, secs = _run_build(req)
+        if status == "ok":
+            BUILD_CACHE[ck] = (status, b, secs)
+            while len(BUILD_CACHE) > BUILD_CACHE_N:
+                BUILD_CACHE.popitem(last=False)
     if status == "cancelled":
         return jsonify(error="superseded"), 409
     if status == "bad":

@@ -93,26 +93,38 @@ def _staircase(rings, shell, floor_t=None):
         V = np.vstack([V, [[0, 0, allr[0][0]], [0, 0, floor_t]]])
         F += [np.column_stack([jn, j, np.full(n, cb)]),
               np.column_stack([(m - 1) * n + j, (m - 1) * n + jn, np.full(n, ct)])]
-    mesh = trimesh.Trimesh(V, np.vstack(F), process=True)
-    trimesh.repair.fix_normals(mesh)
-    if mesh.volume < 0:
+    mesh = trimesh.Trimesh(V, np.vstack(F), process=False)   # rings dedup'd above: no merge pass needed
+    from .meshops import volume
+    if volume(mesh) < 0:                                      # consistent winding by construction; fix the sign only
         mesh.invert()
     return mesh
 
 
 def _manifold(meshes):
     import manifold3d as m3d
+    from .meshops import manifold_to_trimesh
     ms = [m3d.Manifold(m3d.Mesh(vert_properties=np.asarray(t.vertices, np.float32),
                                 tri_verts=np.asarray(t.faces, np.int32))) for t in meshes]
-    out = m3d.Manifold.batch_boolean(ms, m3d.OpType.Add).to_mesh()
-    mesh = trimesh.Trimesh(np.asarray(out.vert_properties)[:, :3], np.asarray(out.tri_verts), process=True)
-    parts = mesh.split(only_watertight=False)
-    solid = [b for b in parts if abs(b.volume) > 0.5]          # drop zero-volume flaps from grazing cuts
-    if len(solid) != len(parts):
-        mesh = trimesh.util.concatenate(solid)
-    if mesh.volume < 0:
-        mesh.invert()
-    return mesh
+    from .meshops import drop_flaps
+    return drop_flaps(manifold_to_trimesh(m3d.Manifold.batch_boolean(ms, m3d.OpType.Add), split=False))
+
+
+def _attach(walls, strands, check=True):
+    """Union strands into their walls; with check, a strand that adds a body (detached) raises. Bodies are
+    counted by Manifold (C++) — trimesh splits of a multi-million-triangle wall cost seconds. Skipped when a
+    woven band shares the part (thousands of rods are separate bodies by design)."""
+    import manifold3d as m3d
+    from .meshops import drop_flaps, manifold_to_trimesh
+    to_m = lambda t: m3d.Manifold(m3d.Mesh(vert_properties=np.asarray(t.vertices, np.float32),
+                                           tri_verts=np.asarray(t.faces, np.int32)))
+    w = to_m(walls)
+    u = m3d.Manifold.batch_boolean([w] + [to_m(s) for s in strands], m3d.OpType.Add)
+    if check:
+        nw = len([c for c in w.decompose() if abs(c.volume()) > 0.5])
+        nu = len([c for c in u.decompose() if abs(c.volume()) > 0.5])
+        if nu > nw:
+            raise ValueError("a droop strand isn't attached to the wall")
+    return drop_flaps(manifold_to_trimesh(u, split=False))
 
 
 def _bodies(mesh):
@@ -235,10 +247,25 @@ def build(shape, v, nz, bands, draft=False):
             layers.append(entry); k += 1
 
     # runs: consecutive layers of one band and one colour
+    # runs: consecutive layers of one colour. A run may cross into the next band when the wall is the same
+    # thickness and the contours share a sampling (or one side is smooth): one staircase, no boolean union —
+    # the unions of same-colour neighbours were most of a mix's build time.
+    def _shell(L):
+        return ht_lw if bands[L["band"]]["texture"] == "halftone" else shell
+    def _joins(A, B):
+        if A.get("woven") or B.get("woven") or A["slot"] != B["slot"]:
+            return False
+        if A["band"] == B["band"]:
+            return True
+        return _shell(A) == _shell(B) and (A["r"] is None or B["r"] is None or len(A["r"]) == len(B["r"]))
     runs = []; i = 0
     while i < len(layers):
-        j = i
-        while j + 1 < len(layers) and layers[j + 1]["slot"] == layers[i]["slot"] and layers[j + 1]["band"] == layers[i]["band"]:
+        j = i; rn = len(layers[i]["r"]) if layers[i]["r"] is not None else None   # the run's contour sampling
+        while j + 1 < len(layers) and _joins(layers[j], layers[j + 1]):
+            nb = layers[j + 1]["r"]
+            if nb is not None and rn is not None and len(nb) != rn:
+                break
+            rn = rn if rn is not None else (len(nb) if nb is not None else None)
             j += 1
         runs.append((i, j)); i = j + 1
     solids = {}
@@ -248,7 +275,8 @@ def build(shape, v, nz, bands, draft=False):
             for slot, m in _woven_band(b, wplan[bi], za, prof, shell, nz, bi == 0, prev_slot, draft).items():
                 solids.setdefault(slot, []).append(m)
     for a, b_ in runs:
-        L0 = layers[a]; slot = L0["slot"]; n = L0["n"]
+        L0 = layers[a]; slot = L0["slot"]
+        n = next((len(layers[k]["r"]) for k in range(a, b_ + 1) if layers[k]["r"] is not None), L0["n"])
         if L0.get("woven"):
             continue
         bi = L0["band"]; sh = ht_lw if bands[bi]["texture"] == "halftone" else shell
@@ -258,8 +286,8 @@ def build(shape, v, nz, bands, draft=False):
             L = layers[kk]; z0 = L["z0"] - (0.25 * layers[a - 1]["lh"] if kk == a and reach_down else 0.0)
             if L["r"] is None:                                         # smooth: one ring per layer boundary
                 rings.append((z0, np.full(n, prof(max(z0, 0.0)))))
-                if kk == b_:
-                    rings.append((L["z1"], np.full(n, prof(L["z1"]))))
+                if kk == b_ or layers[kk + 1]["r"] is not None:          # close before a textured layer: a step,
+                    rings.append((L["z1"], np.full(n, prof(L["z1"]))))   # not a ramp across this layer
             else:
                 rings += [(z0, L["r"]), (L["z1"], L["r"])]
         solids.setdefault(slot, []).append(_staircase(rings, sh, floor_z if a == 0 else None))
@@ -286,9 +314,10 @@ def build(shape, v, nz, bands, draft=False):
             parts[slot] = trimesh.util.concatenate([walls] + strands)
         else:
             walls = _manifold(ms) if len(ms) > 1 else ms[0]
-            parts[slot] = _manifold([walls] + strands) if strands else walls
-            if strands and _bodies(parts[slot]) > _bodies(walls):
-                raise ValueError("a droop strand isn't attached to the wall")
+            if strands:
+                parts[slot] = _attach(walls, strands, check=not wplan)
+            else:
+                parts[slot] = walls
         preview[slot] = trimesh.util.concatenate([walls] + hung.get(slot, []))
 
     seq = [L["slot"] for L in layers]

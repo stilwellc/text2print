@@ -258,3 +258,6 @@ h2 { font-size: 15px; margin-bottom: 12px; }
 #lid .height { display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center; }
 #lid .height input { width: 100%; accent-color: var(--ink); margin: 0; }
 #lid .height output { color: var(--muted); font-size: 12.5px; font-variant-numeric: tabular-nums; min-width: 44px; text-align: right; }
+
+/* progressive builds: the refine pass is a quiet chip, not a blocking overlay */
+.status.quiet { opacity: .72; transform: scale(.94); }

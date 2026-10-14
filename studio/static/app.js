@@ -395,15 +395,23 @@ function renderLid() {
 
 // ── building: drafts while dragging, full on release; newer requests cancel older ones ─────
 let timer = null, reqSeq = 0, reframe = true;
+// speed: every change shows a quick sketch first, then the full build replaces it quietly (woven pieces have no
+// cheaper sketch, so they go straight to the full build)
 function changed(newShape = false, dragging = false) {
   if (newShape) reframe = true;
   writeUrl(); clearTimeout(timer);
-  timer = setTimeout(() => requestBuild(dragging), dragging ? 90 : 220);
+  timer = setTimeout(async () => {
+    if (dragging) return requestBuild(true);
+    const sketchFirst = textureOf(state.texture).family !== "lattice";
+    if (!sketchFirst) return requestBuild(false);
+    const seq = await requestBuild(true);
+    if (seq === reqSeq) requestBuild(false, true);
+  }, dragging ? 60 : 120);
 }
-async function requestBuild(draft) {
+async function requestBuild(draft, quiet = false) {
   const seq = ++reqSeq;
-  $("status").hidden = false;
-  $("statusText").textContent = draft ? "Sketching…" : ({ fabric: "Knitting…", droop: "Spinning strands…", halftone: "Screening…", mix: "Stacking bands…", spiral: "Folding…", shell: "Shaping…", flat: "Mapping the picture…" }[textureOf(state.texture).family] || "Weaving…");
+  $("status").hidden = false; $("status").classList.toggle("quiet", quiet);
+  $("statusText").textContent = quiet ? "Refining…" : draft ? "Sketching…" : ({ fabric: "Knitting…", droop: "Spinning strands…", halftone: "Screening…", mix: "Stacking bands…", spiral: "Folding…", shell: "Shaping…", flat: "Mapping the picture…" }[textureOf(state.texture).family] || "Weaving…");
   try {
     const res = await fetch("/api/build", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shape: state.shape, texture: state.texture, nozzle: state.nozzle, params: state.params, draft,
@@ -418,6 +426,7 @@ async function requestBuild(draft) {
   } finally {
     if (seq === reqSeq) $("status").hidden = true;
   }
+  return seq;
 }
 
 // ── print panel ────────────────────────────────────────────────────────────────

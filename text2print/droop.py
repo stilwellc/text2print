@@ -46,8 +46,9 @@ def _h(*key):
 
 
 def _ribbon(theta_c, chord, bulge, z0, height, width, r_of_z, embed, power, lean=0.0, n=26):
-    """One loop: a strip that starts inside the wall, arcs out `bulge` mm and returns, `chord` mm apart."""
-    from shapely.geometry import LineString
+    """One loop: a strip that starts inside the wall, arcs out `bulge` mm and returns, `chord` mm apart.
+    Built straight from arrays (offset polyline -> strip -> extrusion): thousands per piece, so no shapely/trimesh
+    processing per strand."""
     r_w = r_of_z(z0 + height / 2)
     dth = chord / max(r_w, 1.0)
     t = np.linspace(0, 1, n)
@@ -57,10 +58,34 @@ def _ribbon(theta_c, chord, bulge, z0, height, width, r_of_z, embed, power, lean
     r = (r_w + leg) + (bulge - leg) * s                     # long shallow strand never grazes the wall surface
     r = np.concatenate([[r_w - embed], r, [r_w - embed]])
     th = np.concatenate([[th[0]], th, [th[-1]]])
-    line = LineString(np.column_stack([r * np.cos(th), r * np.sin(th)]))
-    poly = line.buffer(width / 2, cap_style=2, join_style=1, resolution=4)
-    m = trimesh.creation.extrude_polygon(poly, height)
-    m.apply_translation([0, 0, z0])
+    P = np.column_stack([r * np.cos(th), r * np.sin(th)])
+    return _strip(P, width, z0, height)
+
+
+def _strip(P, width, z0, height):
+    """Polyline P (k, 2) -> watertight extruded ribbon of `width` (flat caps, mitred joins clamped to 2x)."""
+    T = np.empty_like(P)
+    T[1:-1] = P[2:] - P[:-2]; T[0] = P[1] - P[0]; T[-1] = P[-1] - P[-2]
+    T /= np.maximum(np.linalg.norm(T, axis=1), 1e-9)[:, None]
+    N = np.column_stack([-T[:, 1], T[:, 0]])
+    seg = P[1:] - P[:-1]; seg /= np.maximum(np.linalg.norm(seg, axis=1), 1e-9)[:, None]
+    scale = np.ones(len(P))
+    if len(P) > 2:                                          # mitre: 1/cos(half the turn), clamped
+        cosh = np.clip(np.einsum("ij,ij->i", N[1:-1], np.column_stack([-seg[:-1, 1], seg[:-1, 0]])), 0.5, 1.0)
+        scale[1:-1] = 1.0 / cosh
+    L = P + N * (width / 2 * scale)[:, None]; R = P - N * (width / 2 * scale)[:, None]
+    k = len(P)
+    ring = np.vstack([L, R[::-1]])                          # closed outline, 2k points
+    V = np.vstack([np.column_stack([ring, np.full(2 * k, z0)]), np.column_stack([ring, np.full(2 * k, z0 + height)])])
+    m2 = 2 * k; i = np.arange(m2); i2 = (i + 1) % m2
+    side = np.vstack([np.column_stack([i, i2, m2 + i2]), np.column_stack([i, m2 + i2, m2 + i])])
+    a = np.arange(k - 1); l0, l1 = a, a + 1; r0, r1 = m2 - 1 - a, m2 - 2 - a      # strip quads between L and R
+    bot = np.vstack([np.column_stack([l0, r1, l1]), np.column_stack([l0, r0, r1])])
+    top = np.vstack([np.column_stack([m2 + l0, m2 + l1, m2 + r1]), np.column_stack([m2 + l0, m2 + r1, m2 + r0])])
+    F = np.vstack([side, bot, top])
+    m = trimesh.Trimesh(V, F, process=False)
+    if (V[F][:, 0] * np.cross(V[F][:, 1], V[F][:, 2])).sum() < 0:   # signed volume < 0: flip every face
+        m.faces = F[:, ::-1]
     return m
 
 
@@ -271,20 +296,16 @@ def build(shape, v, nz, style="fringe", density="medium", length="medium", previ
     else:
         to_m = lambda t: m3d.Manifold(m3d.Mesh(vert_properties=np.asarray(t.vertices, np.float32),
                                                 tri_verts=np.asarray(t.faces, np.int32)))
+        from .meshops import manifold_to_trimesh
         merged = m3d.Manifold.batch_boolean([to_m(wall)] + [to_m(r) for r in ribbons], m3d.OpType.Add)
-        out = merged.to_mesh()
-        mesh = trimesh.Trimesh(np.asarray(out.vert_properties)[:, :3], np.asarray(out.tri_verts), process=True)
-        parts = mesh.split(only_watertight=False)
-        if len(parts) > 1:
-            solid = [b for b in parts if abs(b.volume) > 0.5]
-            if len(solid) != 1:
-                raise ValueError(f"droop build produced {len(solid)} solid bodies — a strand is detached")
-            mesh = solid[0]
-        if mesh.volume < 0:
-            mesh.invert()
+        solid = [c for c in merged.decompose() if abs(c.volume()) > 0.5]
+        if len(solid) != 1:
+            raise ValueError(f"droop build produced {len(solid)} solid bodies — a strand is detached")
+        mesh = manifold_to_trimesh(solid[0])
     reach = max((bu for _, _, bu, _, _, _, _ in spots), default=0.0)
-    draped = drape(wall, spots, prof, q, ribbons, style) if preview else None
     drape_pieces = drape(wall, spots, prof, q, ribbons, style, pieces=True) if preview else None
+    draped = (trimesh.util.concatenate([drape_pieces[0]] + [r_ for _, r_ in drape_pieces[1]])
+              if preview else None)                             # hung once, per strand; the whole is their sum
     info = dict(strands=len(spots), reach=round(reach, 1), draped=draped, drape_pieces=drape_pieces,
                 courses=courses(spots, lh), course_gap=max(_SPEC[style]["row"], _SPEC[style]["tall"] + 1) * lh,
                 floor_layers=int(round(max(1.6, 8 * nz.layer_h) / nz.layer_h)), solid=bool(getattr(shape, "solid", False)))
