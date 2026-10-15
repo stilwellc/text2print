@@ -340,6 +340,16 @@ function renderBands() {
       kids.push(box);
       if (b.texture === "halftone") kids.push(el("div", { class: "sub" }, uploader((b.options || {}).image, (id) => { b.options = { ...(b.options || {}) }; if (id) b.options.image = id; else delete b.options.image; edit(); })));
     }
+    if (idx > 0) {                                     // how this band meets the band below it
+      const blendable = (k) => M.blendable.includes(k);
+      if (blendable(b.texture) && blendable(state.bands[idx - 1].texture)) {
+        const bs = el("select", { "aria-label": "Blend into the band below", class: "blend" }, ...M.blends.map(([k, lab]) => {
+          const o = el("option", { value: k }, `${lab}${k === "hard" ? "" : " into the band below"}`);
+          o.selected = ((b.blend || {}).style || "hard") === k; return o; }));
+        bs.addEventListener("change", () => { b.blend = bs.value === "hard" ? undefined : { style: bs.value, size: (b.blend || {}).size || 16 }; edit(); });
+        kids.push(el("div", { class: "sub" }, bs));
+      }
+    }
     return el("div", { class: "band" }, ...kids);
   });
   $("bands").replaceChildren(...rows.reverse());
@@ -366,43 +376,62 @@ function buildOptions() {
 
 // ── ask Claude: a pattern in words -> a plugin written, checked and selected ─────────────────────────────
 let askJob = null;
+function currentDesign() {
+  const o = buildOptions();
+  if (isMix()) o.bands = state.bands;
+  return { shape: state.shape, texture: state.texture, params: state.params, nozzle: state.nozzle,
+           colours: state.colours.slice(0, slotCount()), options: o };
+}
+function applyDesign(d) {
+  if (d.shape && shapeOf(d.shape)) state.shape = d.shape;
+  if (d.texture && textureOf(d.texture)) state.texture = d.texture;
+  state.params = { ...(d.params || {}) };
+  if (d.nozzle) state.nozzle = parseFloat(d.nozzle);
+  if (Array.isArray(d.colours) && d.colours.length) {
+    d.colours.forEach((c, i) => { state.colours[i] = c; });
+  }
+  const o = { ...(d.options || {}) };
+  if (o.bands) { state.bands = o.bands; delete o.bands; state.mixPreset = null; }
+  if (Array.isArray(o.lid_colours)) {                 // lid colours come back as hex: give them AMS slots
+    o.lid_colours.forEach((c, i) => {
+      let k = state.colours.indexOf(c);
+      if (k < 0) { k = Math.min(MAX_SLOTS - 1, slotCount() + i); state.colours[k] = c; }
+      o[i ? "lid_slot2" : "lid_slot"] = String(k);
+    });
+    delete o.lid_colours;
+  }
+  state.options = o; state.family = textureOf(state.texture).family;
+}
 function renderAsk() {
   const box = $("ask");
-  const inp = el("input", { type: "text", class: "words", placeholder: "Describe a pattern — “koi pond”, “herringbone weave”, “fish-scale knit”…", "aria-label": "Describe a pattern" });
-  const go = el("button", { class: "ghost" }, "Ask Claude");
-  const msg = el("p", { class: "hint" });
+  const inp = el("textarea", { class: "words", rows: "3", placeholder: "Describe what you want — “a vase that starts woven at the base and dissolves into knit, ocean colours, with our name under it”, “use my dog's photo on a halftone cup”, “an autumn version of my saved tray”…", "aria-label": "Describe a design" });
+  const go = el("button", { class: "primary" }, "Design it");
+  const msg = el("p", { class: "hint" }, "Claude can compose any design, blend textures, prepare photos, draw pictures and write new weaves, stitches and shapes. It builds on your saved designs.");
+  let photoId = null;
+  const photo = uploader(null, (id) => { photoId = id; });
   const send = async () => {
     const words = inp.value.trim(); if (!words || askJob) return;
-    go.disabled = true; msg.textContent = "Claude is designing it — usually 1–4 minutes. Keep working; it appears here when ready.";
+    go.disabled = true; msg.textContent = "Claude is designing — usually 1–4 minutes. Keep working; it loads here when ready.";
+    const cur = currentDesign(); if (photoId) cur.options.image = photoId;
     const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ request: words, shape: state.shape, texture: state.texture }) });
+      body: JSON.stringify({ request: words, current: cur }) });
     const d = await r.json();
     if (!r.ok) { msg.textContent = d.error; go.disabled = false; return; }
     askJob = d.id; poll();
   };
   const poll = async () => {
     const d = await (await fetch(`/api/ask/${askJob}`)).json();
-    if (d.state === "running") { msg.textContent = `Claude is designing it… ${d.seconds}s`; return setTimeout(poll, 3000); }
+    if (d.state === "running") { msg.textContent = `Claude is designing… ${d.seconds}s`; return setTimeout(poll, 3000); }
     askJob = null; go.disabled = false;
     if (d.state === "error") { msg.textContent = d.error; return; }
-    const res = d.result || {};
-    CAT = await (await fetch("/api/catalogue")).json();                      // the new plugin is in the catalogue now
-    if (res.kind === "text") { state.options.picture = "text"; state.options.text = res.text || ""; if (!IMAGE_TEXTURES.includes(state.texture)) state.texture = "halftone"; }
-    else if (res.kind === "picture") { state.options.picture = res.key; if (!IMAGE_TEXTURES.includes(state.texture) && !["in", "out"].includes(state.options.mask)) state.texture = "halftone"; }
-    else if (res.kind === "shape" && CAT.shapes.find((x) => x.key === res.key)) {
-      state.shape = res.key; state.params = {};
-      if (!fits(shapeOf(res.key), textureOf(state.texture))) state.texture = "domes";
-    }
-    else if (res.key && CAT.textures.find((t) => t.key === res.key)) {
-      state.texture = res.key;
-      if (!fits(shapeOf(state.shape), textureOf(res.key))) state.shape = res.kind === "woven" ? "tray" : "cup";
-    }
-    msg.textContent = res.summary || "Done.";
+    CAT = await (await fetch("/api/catalogue")).json();             // new plugins / pictures are in the catalogue now
+    applyDesign(d.result.design || {});
+    msg.textContent = d.result.summary || "Done.";
     renderAll(); changed(true);
   };
-  inp.addEventListener("keydown", (e) => { if (e.key === "Enter") send(); });
+  inp.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); });
   go.addEventListener("click", send);
-  box.replaceChildren(el("div", { class: "field-label" }, "Make a new one"), el("div", { class: "askrow" }, inp, go), msg);
+  box.replaceChildren(inp, el("div", { class: "askrow" }, photo, go), msg);
 }
 
 // ── pictures: built-ins, text in any font, and library pictures (uploads and ones written from a prompt) ──

@@ -685,3 +685,68 @@ def test_ask_endpoint_validates_and_reports_missing_cli(monkeypatch):
     monkeypatch.setattr(ask, "available", lambda: True)
     assert c.post("/api/ask", json={"request": ""}).status_code == 400
     assert c.get("/api/ask/nope").status_code == 404
+
+
+# ── blending, the design agent's tools, photo preparation ──────────────────────────────────────────────
+@pytest.mark.parametrize("style", ["fade", "dither", "wave", "zigzag", "scallop", "drip", "noise"])
+def test_band_blends_build_clean_and_change_the_wall(style):
+    hard = [dict(texture="zigzag", share=50, slot=0), dict(texture="domes", share=50, slot=0)]
+    soft = [dict(texture="zigzag", share=50, slot=0), dict(texture="domes", share=50, slot=0, blend={"style": style, "size": 24})]
+    a = build.make("cup", "mix", {"diameter": 70, "height": 70}, options={"bands": hard}, draft=True)
+    b = build.make("cup", "mix", {"diameter": 70, "height": 70}, options={"bands": soft}, draft=True)
+    _ok(b)
+    ma, mb = a.parts[0][1], b.parts[0][1]
+    assert len(ma.faces) != len(mb.faces) or not np.allclose(ma.vertices, mb.vertices)
+
+
+@pytest.mark.parametrize("style,mode", [("dither", "stripes"), ("wave", "edge")])
+def test_two_colour_blends(style, mode):
+    bands = [dict(texture="zigzag", share=50, slot=0), dict(texture="wave", share=50, slot=1, blend={"style": style, "size": 26})]
+    b = build.make("cup", "mix", {"diameter": 70, "height": 70}, options={"bands": bands}, colours=["#2E4E7E", "#EDE3D1"])
+    _ok(b)
+    hard = build.make("cup", "mix", {"diameter": 70, "height": 70}, colours=["#2E4E7E", "#EDE3D1"],
+                      options={"bands": [dict(bands[0]), dict(bands[1], blend=None)]})
+    assert b.stats["swaps"] > hard.stats["swaps"] >= 1          # a gradient / shaped edge costs changes, said up front
+
+
+@pytest.mark.slicer
+def test_real_slicer_counts_a_shaped_colour_edge(tmp_path):
+    if not bambu.slicer_available():
+        pytest.skip("Bambu Studio not installed")
+    import re
+    bands = [dict(texture="zigzag", share=50, slot=0), dict(texture="domes", share=50, slot=1, blend={"style": "wave", "size": 20})]
+    b = build.make("cup", "mix", {"diameter": 60, "height": 50}, options={"bands": bands}, colours=["#2E4E7E", "#EDE3D1"])
+    r = bambu.slice_project(b.write_3mf(tmp_path / "e.3mf"), tmp_path / "s")
+    assert "error" not in r, r
+    g = zipfile.ZipFile(tmp_path / "s" / "sliced.3mf").read("Metadata/plate_1.gcode").decode(errors="ignore")
+    n = len(re.findall(r"^M620 S\dA", g, re.M))
+    assert abs(n - b.stats["swaps"]) <= max(3, 0.05 * n)
+
+
+def test_agent_catalogue_and_design_check(tmp_path):
+    from text2print import agent
+    c = agent.catalogue()
+    assert {"shapes", "textures", "mix", "pictures", "palette", "saved_designs"} <= set(c)
+    assert "drip" in c["mix"]["blends"] and "vase" in c["shapes"]
+    d = {"shape": "cup", "texture": "mix", "params": {"diameter": 60, "height": 50}, "nozzle": 0.4,
+         "colours": ["#2E4E7E", "#EDE3D1"], "options": {"bands": [dict(texture="zigzag", share=50, slot=0),
+                                                                  dict(texture="domes", share=50, slot=1, blend={"style": "noise", "size": 20})]}}
+    r = agent.check_design(d, tmp_path / "p.png")
+    assert r["ok"] and r["colour_changes"] > 0 and (tmp_path / "p.png").exists() and r["print_minutes"]
+
+
+def test_photo_prepare_makes_flat_tones(tmp_path):
+    from PIL import Image, ImageDraw
+    from text2print import agent
+    im = Image.new("RGB", (300, 200), (210, 200, 185)); ImageDraw.Draw(im).ellipse((100, 40, 200, 160), fill=(90, 60, 40))
+    im.save(tmp_path / "p.jpg")
+    out = agent.prepare(tmp_path / "p.jpg", tmp_path / "o.png", subject=True, posterize=3)
+    a = np.asarray(Image.open(out))
+    assert len(np.unique(a)) <= 3 and a[0, 0] == 255 and a[100, 150] < 200     # background white, subject dark
+
+
+def test_ask_parses_the_last_json_object():
+    from studio import ask
+    text = 'Thinking {"a": 1} ... done.\n{"design": {"shape": "cup", "options": {"bands": [{"texture": "plain"}]}}, "summary": "ok"}'
+    r = ask._last_json(text)
+    assert r["design"]["shape"] == "cup" and r["summary"] == "ok"

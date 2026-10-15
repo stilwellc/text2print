@@ -35,8 +35,18 @@ def main(argv=None):
     vf = sub.add_parser("verify"); vf.add_argument("texture"); vf.add_argument("nozzle", type=float)
     vf.add_argument("result", choices=["ok", "fail"]); vf.add_argument("--note", default="")
     pc = sub.add_parser("pictures", help="list built-in, text and library pictures, and fonts")
-    pt = sub.add_parser("picture", help="render text as a picture (preview)")
-    pt.add_argument("kind", choices=["text"]); pt.add_argument("words")
+    sub.add_parser("catalogue", help="everything a design can use, as JSON (for Claude)")
+    dg = sub.add_parser("design", help="design check FILE.json: build, report, render a preview")
+    dg.add_argument("action", choices=["check"]); dg.add_argument("file"); dg.add_argument("--preview", default=None)
+    dg.add_argument("--draft", action="store_true")
+    pt = sub.add_parser("picture", help="picture text WORDS (preview) | picture prepare PHOTO --out NAME")
+    pt.add_argument("kind", choices=["text", "prepare"]); pt.add_argument("words")
+    pt.add_argument("--crop", default=None, help="x0,y0,x1,y1 as fractions of the photo")
+    pt.add_argument("--mode", default="halftone", choices=["halftone", "litho", "colour"])
+    pt.add_argument("--contrast", type=float, default=1.0); pt.add_argument("--gamma", type=float, default=1.0)
+    pt.add_argument("--equalize", action="store_true"); pt.add_argument("--posterize", type=int, default=0)
+    pt.add_argument("--edges", action="store_true"); pt.add_argument("--threshold", type=float, default=None)
+    pt.add_argument("--blur", type=float, default=0.0); pt.add_argument("--subject", action="store_true")
     pt.add_argument("--font", default="futura"); pt.add_argument("--layout", default="center", choices=["center", "repeat", "stack"])
     pt.add_argument("--aspect", type=float, default=3.0); pt.add_argument("--invert", action="store_true")
     pt.add_argument("--out", default="text.png")
@@ -70,6 +80,24 @@ def main(argv=None):
         for c in pictures.choices():
             print(f"  {c['group']:9s} {c['key']:20s} {c['name']}")
         return 0
+    if a.cmd == "catalogue":
+        from . import agent
+        print(json.dumps(agent.catalogue(), indent=1)); return 0
+    if a.cmd == "design":
+        from . import agent
+        d = json.loads(pathlib.Path(a.file).expanduser().read_text())
+        prev = a.preview or str(pathlib.Path(a.file).expanduser().with_suffix(".png"))
+        print(json.dumps(agent.check_design(d, prev, draft=a.draft), indent=1, default=str)); return 0
+    if a.cmd == "picture" and a.kind == "prepare":
+        from . import agent, pictures
+        out = pathlib.Path(a.out).expanduser()
+        if out.suffix.lower() != ".png":                 # a bare name -> the picture library
+            pictures.LIB.mkdir(parents=True, exist_ok=True); out = pictures.LIB / f"{out.stem}.png"
+        crop = tuple(float(x) for x in a.crop.split(",")) if a.crop else None
+        print(agent.prepare(pathlib.Path(a.words).expanduser(), out, crop=crop, mode=a.mode, contrast=a.contrast,
+                            gamma=a.gamma, equalize=a.equalize, posterize=a.posterize, edges=a.edges,
+                            threshold=a.threshold, blur=a.blur, invert=a.invert, subject=a.subject))
+        print(f"picture key: lib:{out.stem}"); return 0
     if a.cmd == "picture":
         from . import pictures
         pictures.render_text(a.words, a.font, a.layout, a.aspect, invert=a.invert).save(a.out); print(a.out); return 0

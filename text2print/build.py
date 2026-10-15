@@ -566,6 +566,8 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
             over.update({k: lat[k] for k in ("overhang_3_4_speed", "overhang_4_4_speed", "overhang_totally_speed",
                                              "bridge_speed", "wall_generator", "detect_thin_wall", "detect_overhang_wall")})
         ranges = info["ranges"]
+        if info.get("recount") and len({c for _, _, _, c in parts}) > 1:   # shaped colour edges: 2 colours a layer
+            transitions = _geom_transitions(parts, over, ranges); swaps = len(transitions)
         if ranges and ranges[0][0] < 1e-6:                       # bottom band is halftone: its grid starts the print
             over["initial_layer_print_height"] = ranges[0][2]["layer_height"]
         per_filament = printer.filament_settings(nz.size, [mkind[c] for _, _, _, c in parts])

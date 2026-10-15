@@ -177,7 +177,7 @@ h2 { font-size: 15px; margin-bottom: 12px; }
 .bands { display: grid; gap: 8px; margin-top: 10px; }
 .band { display: grid; grid-template-columns: 1fr auto auto; gap: 8px 10px; align-items: center; padding: 10px 10px 12px;
   border-radius: 12px; background: var(--card); border: 1px solid var(--line); }
-.band select { font: inherit; font-size: 13.5px; padding: 6px 8px; border-radius: 9px; border: 1px solid var(--line-strong);
+.band select, .band select.blend { font: inherit; font-size: 13.5px; padding: 6px 8px; border-radius: 9px; border: 1px solid var(--line-strong);
   background: var(--panel); color: var(--ink); min-width: 0; }
 .band .chips { display: flex; gap: 4px; }
 .band .chip-btn { width: 24px; height: 24px; border-radius: 50%; border: 1px solid rgba(0,0,0,.14); padding: 0; position: relative; }
@@ -275,7 +275,8 @@ h2 { font-size: 15px; margin-bottom: 12px; }
 .card .cost .c2 { color: #8B3A2F; }
 
 /* ask Claude */
-.ask { margin-top: 14px; }
-.ask .askrow { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.ask .askrow { display: flex; gap: 8px; justify-content: space-between; align-items: center; margin-top: 8px; }
+.ask textarea.words { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; font-size: 14px; line-height: 1.4;
+  padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink); }
 .ask input.words { font: inherit; font-size: 13.5px; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line-strong);
   background: var(--panel); color: var(--ink); min-width: 0; }
