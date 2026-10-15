@@ -84,7 +84,7 @@ def relief(kind, th, z, R, z0, z1, depth):
     return out
 
 
-def build(shape, v, nozzle, stitch="zigzag", rim_loops=False, floor="solid", draft=False):
+def build(shape, v, nozzle, stitch="zigzag", rim_loops=False, floor="solid", draft=False, mask=None):
     """-> (mesh, info). shape must support the fabric family (has .profile)."""
     prof, height, rmax = shape.profile(v)
     from . import plugins
@@ -125,6 +125,19 @@ def build(shape, v, nozzle, stitch="zigzag", rim_loops=False, floor="solid", dra
             return 0.5 * depth * s * np.sin(2 * np.pi * u)
         return depth * s * tri01(u)
 
+    if mask is not None:                                     # the texture only inside (or around) a picture / words
+        from . import pictures
+        n_ar = kw["zigzags_around"]; h0 = kw["solid_base_z"]
+        dark = pictures.darkness(mask, 2 * math.pi * rmax / max(height - h0, 1e-6))
+        keep_in = mask.get("mask") != "out"
+        plain = scaled
+
+        def scaled(u, layer_in_band, band_layers, band, z_frac):
+            d = plain(u, layer_in_band, band_layers, band, z_frac)
+            th = (np.asarray(u, float) - 0.5 * (band % 2)) / n_ar             # back to 0..1 around
+            vv = (z_frac * height - h0) / max(height - h0, 1e-6)
+            m = dark(th, np.full(np.shape(th), vv)) > 0.5
+            return np.where(m if keep_in else ~m, d, 0.0)
     kw["stitch"] = scaled
     if draft:
         kw["samples_per_zigzag"] = max(2, kw["samples_per_zigzag"] // 2)

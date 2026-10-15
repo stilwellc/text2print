@@ -55,8 +55,8 @@ function readUrl() {
   if (q.get("texture") && textureOf(q.get("texture"))) state.texture = q.get("texture");
   if (q.get("nozzle")) state.nozzle = parseFloat(q.get("nozzle"));
   if (q.get("c")) state.colours = q.get("c").split(",").map((h) => "#" + h.replace("#", ""));
-  const optKeys = Object.values(CAT.options).flat().map((o) => o.key).concat(["picture", "image"]).concat(TEXT_KEYS).concat(["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "tower"]);
-  const toggleKeys = Object.values(CAT.options).flat().filter((o) => o.kind === "toggle").map((o) => o.key).concat(["text_invert"]);
+  const optKeys = Object.values(CAT.options).flat().map((o) => o.key).concat(["picture", "image"]).concat(TEXT_KEYS).concat(["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "tower", "engrave_base", "engrave_lid", "engrave_font"]);
+  const toggleKeys = Object.values(CAT.options).flat().filter((o) => o.kind === "toggle").map((o) => o.key).concat(["text_invert", "picture_invert"]);
   for (const [k, v] of q) {
     if (k === "mix") { try { state.bands = JSON.parse(v); } catch (e) { /* a bad link keeps the default */ } }
     else if (optKeys.includes(k)) state.options[k] = toggleKeys.includes(k) ? v === "1" : v;   // only checkboxes are booleans
@@ -73,11 +73,13 @@ function linkFor() {
     if (v !== o.default) q.set(o.key, v === true ? "1" : v === false ? "0" : v);
   }
   if (state.options.image && textureOf(state.texture).family === "halftone") q.set("image", state.options.image);
-  if (state.options.picture === "text") for (const k of TEXT_KEYS) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k] === true ? "1" : state.options[k] === false ? "0" : state.options[k]);
+  if (IMAGE_TEXTURES.includes(state.texture) || isMix() || ["in", "out"].includes(state.options.mask))
+    for (const k of TEXT_KEYS) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k] === true ? "1" : state.options[k] === false ? "0" : state.options[k]);
   if (state.options.lid && state.options.lid !== "none" && shapeOf(state.shape).lid) {
-    for (const k of ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "tower"]) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k]);
+    for (const k of ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "tower", "engrave_base", "engrave_lid", "engrave_font"]) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k]);
   }
   if (state.options.image && IMAGE_TEXTURES.includes(state.texture)) q.set("image", state.options.image);
+  for (const k of ["engrave_base", "engrave_font"]) if (state.options[k]) q.set(k, state.options[k]);
   return "?" + q.toString();
 }
 const writeUrl = () => history.replaceState(null, "", linkFor());
@@ -94,6 +96,13 @@ function badge(t) {
   if (st === "published") return el("span", { class: "badge pub" }, "Published");
   if (st === "failed") return el("span", { class: "badge fail" }, "Failed");
   return null;
+}
+// what a texture costs in colour changes, before you pick it (two colours loaded)
+function costNote(t) {
+  if (t.slots < 2 && t.family !== "mix") return el("span", { class: "c0" }, "1 colour");
+  const g = parseInt(state.options.course_group || "1", 10);
+  return el("span", { class: t.swaps === "layer" ? "c2" : "c1" },
+    { none: "no changes", course: g > 1 ? `change / ${g} courses` : "change / course", layer: "change / layer", band: "change / band" }[t.swaps] || "");
 }
 function card(item, checked, onPick, extra) {
   return el("button", { class: "card", role: "radio", "aria-checked": String(checked), title: item.blurb, onclick: onPick },
@@ -132,7 +141,8 @@ function renderTextures() {
   });
   const list = CAT.textures.filter((t) => t.family === state.family && fits(sh, t));
   $("textures").replaceChildren(
-    el("div", { class: "cards" }, ...list.map((t) => card(t, t.key === state.texture, () => { state.texture = t.key; renderAll(); changed(); }, badge(t)))),
+    el("div", { class: "cards" }, ...list.map((t) => card(t, t.key === state.texture, () => { state.texture = t.key; renderAll(); changed(); },
+      el("span", { class: "cost" }, badge(t) || "", costNote(t))))),
     el("p", { class: "desc" }, textureOf(state.texture).family === state.family ? textureOf(state.texture).blurb : "Pick one to switch."));
 }
 
@@ -274,7 +284,9 @@ function optionControl(o, onChange) {
 function renderFinish() {
   const fam = textureOf(state.texture).family, sh = shapeOf(state.shape);
   const after = () => { renderFinish(); renderColours(); changed(); };
+  const masked = fam === "fabric" && ["in", "out"].includes(state.options.mask);
   const shown = familyOptions().filter((o) => {
+    if (fam === "fabric" && o.key === "picture") return masked;               // picture only drives a mask here
     if (ONLY[o.key] && !ONLY[o.key].includes(state.texture)) return false;
     if (o.key === "course_group") return state.options.colour_by !== "height" && slotCount() > 1;
     if (o.key === "zones") return zonesOn();
@@ -284,7 +296,8 @@ function renderFinish() {
     return true;
   });
   const kids = shown.flatMap((o) => o.key === "picture" ? pictureControl(o, after) : optionControl(o, after));
-  if (IMAGE_TEXTURES.includes(state.texture)) kids.splice(Math.min(2, kids.length), 0, uploader(state.options.image, (id) => { if (id) state.options.image = id; else delete state.options.image; renderFinish(); changed(); }));
+  if (IMAGE_TEXTURES.includes(state.texture) || masked) kids.splice(Math.min(2, kids.length), 0, uploader(state.options.image, (id) => { if (id) state.options.image = id; else delete state.options.image; renderFinish(); changed(); }));
+  if (!["lattice", "flat"].includes(fam)) kids.push(...engraveControl("engrave_base", "Words under the base", after));
   $("finishSec").hidden = !kids.length;
   $("finish").replaceChildren(...kids);
 }
@@ -341,7 +354,7 @@ $("addBand").addEventListener("click", () => {
 function renderAll() { renderShapes(); renderTextures(); renderBands(); renderSizes(); renderColours(); renderFinish(); renderLid(); }
 
 function buildOptions() {
-  const lidKeys = ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_plate", "tower"];
+  const lidKeys = ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_plate", "tower", "engrave_base", "engrave_lid", "engrave_font"];
   const o = isMix() ? { bands: state.bands, purge: state.options.purge } : { ...state.options };
   for (const k of lidKeys) if (state.options[k] !== undefined) o[k] = state.options[k];
   const ls = lidSlots();
@@ -351,7 +364,15 @@ function buildOptions() {
 }
 
 // ── pictures: built-ins, text in any font, and library pictures (uploads and ones written from a prompt) ──
-const TEXT_KEYS = ["text", "font", "text_layout", "text_invert"];
+const TEXT_KEYS = ["text", "font", "text_layout", "text_invert", "picture_place", "picture_size", "picture_lift", "picture_contrast", "picture_invert"];
+function rangeCtl(key, label, min, max, step, def, show) {
+  const v = state.options[key] !== undefined ? parseFloat(state.options[key]) : def;
+  const out = el("output", {}, show(v));
+  const r = el("input", { type: "range", min: String(min), max: String(max), step: String(step), value: String(v), "aria-label": label });
+  r.addEventListener("input", () => { out.textContent = show(parseFloat(r.value)); state.options[key] = r.value; changed(false, true); });
+  r.addEventListener("change", () => { state.options[key] = r.value; changed(); });
+  return [el("div", { class: "field-label" }, label), el("div", { class: "height" }, r, out)];
+}
 let textTimer = null;
 function pictureControl(o, after) {
   const P = CAT.pictures, val = state.options.picture ?? o.default, groups = {};
@@ -367,12 +388,34 @@ function pictureControl(o, after) {
       const op = el("option", { value: k }, lab); op.selected = (state.options.font || "futura") === k; return op; }));
     font.addEventListener("change", () => { state.options.font = font.value; changed(); });
     kids.push(el("div", { class: "field-label" }, "Words"), inp, el("div", { class: "field-label" }, "Font"), font,
-      ...optionControl({ key: "text_layout", label: "Layout", kind: "seg", choices: P.layouts, default: "center" }, after),
-      ...optionControl({ key: "text_invert", label: "Light letters on dark", kind: "toggle", default: false }, after));
+      ...optionControl({ key: "text_layout", label: "Layout", kind: "seg", choices: P.layouts, default: "center" }, after));
   }
+  if ((IMAGE_TEXTURES.includes(state.texture) && !["flatlitho", "cmyk"].includes(state.texture)) ||
+      (textureOf(state.texture).family === "fabric" && ["in", "out"].includes(state.options.mask))) {   // walls only
+    kids.push(...optionControl({ key: "picture_place", label: "Placement", kind: "seg",
+      choices: [["wrap", "Wrap around"], ["front", "Front"]], default: "wrap" }, after));
+    kids.push(...rangeCtl("picture_size", "Size", 0.15, 1, 0.05, 1, (x) => `${Math.round(x * 100)} % of the height`));
+    const sz = state.options.picture_size !== undefined ? parseFloat(state.options.picture_size) : 1;
+    if (sz < 0.999) kids.push(...rangeCtl("picture_lift", "Position", 0, 1, 0.05, 0.5, (x) => x < 0.2 ? "Low" : x > 0.8 ? "High" : "Middle"));
+  }
+  kids.push(...rangeCtl("picture_contrast", "Contrast", 0.3, 3, 0.1, 1, (x) => `${x.toFixed(1)}×`));
+  kids.push(...optionControl({ key: "picture_invert", label: "Invert", kind: "toggle", default: false }, after));
   if (Object.keys(P.errors || {}).length)
     kids.push(el("p", { class: "hint" }, `A plugin didn't load: ${Object.keys(P.errors).join(", ")} — run "python -m text2print plugin list".`));
   return kids;
+}
+
+function engraveControl(key, label, after) {
+  const inp = el("input", { type: "text", class: "words", placeholder: "Optional", value: state.options[key] || "", "aria-label": label });
+  inp.addEventListener("input", () => { clearTimeout(textTimer); textTimer = setTimeout(() => { if (inp.value) state.options[key] = inp.value; else delete state.options[key]; changed(); }, 400); });
+  const out = [el("div", { class: "field-label" }, label), inp];
+  if (state.options.engrave_base || state.options.engrave_lid) {
+    const font = el("select", { "aria-label": "Engraving font", class: "font" }, ...CAT.pictures.fonts.map(([k, lab]) => {
+      const op = el("option", { value: k }, lab); op.selected = (state.options.engrave_font || "futura") === k; return op; }));
+    font.addEventListener("change", () => { state.options.engrave_font = font.value; changed(); });
+    if (key === "engrave_base") out.push(el("div", { class: "field-label" }, "Engraving font"), font);
+  }
+  return out;
 }
 
 // ── lid: its own section — closure, look, fit, height, colours, knob ─────────────────────────────
@@ -426,6 +469,7 @@ function renderLid() {
       kids.push(el("div", { class: "field-label" }, "Colours"), el("div", { class: "chips" }, chip("lid_slot", "0"), lidTwoSlot() ? chip("lid_slot2", "1") : null));
     }
     kids.push(...optionControl({ key: "lid_knob", label: "Knob", kind: "seg", choices: CAT.lid.knobs, default: "knob" }, after));
+    kids.push(...engraveControl("engrave_lid", "Words on the lid", after));
     kids.push(...optionControl({ key: "lid_plate", label: "Print the lid", kind: "seg",
       choices: [["auto", "Auto"], ["same", "With the piece"], ["own", "On its own"]], default: "auto" }, after));
     kids.push(el("p", { class: "hint" }, "Auto prints the lid on its own plate when sharing would add colour changes."));
@@ -483,6 +527,7 @@ function renderPrint(d) {
     + (s.lid.plate === "own" ? ` · own plate${s.lid.swaps ? `, ${fmt(s.lid.swaps)} changes` : ""}` : "")]);
   rows.push(["Colours", String(s.colours)]);
   if (s.swaps) rows.push(["AMS changes", `${fmt(s.swaps)} · ≈ ${fmt(s.swap_minutes)} min`]);
+  if (s.minutes_est) rows.push(["Print time", `≈ ${s.minutes_est >= 60 ? `${Math.floor(s.minutes_est / 60)} h ${Math.round(s.minutes_est % 60)} min` : `${Math.round(s.minutes_est)} min`}`]);
   rows.push(["Filament", s.grams_purge ? `≈ ${fmt(s.grams_part)} g + ${fmt(s.grams_purge)} g purge` : `≈ ${fmt(s.grams_est)} g`]);
   $("stats").replaceChildren(...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
   $("dims").replaceChildren(`${fmt(s.size[0])} × ${fmt(s.size[1])} × ${fmt(s.size[2], 1)} mm`,

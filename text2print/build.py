@@ -47,7 +47,9 @@ LID = [("lid", "Lid", "seg", [("none", "None"), ("slip", "Slip-on"), ("thread", 
 # options each family offers in the picker: key -> (label, kind, choices, default)
 OPTIONS = {
     "fabric": [("rim_loops", "Loop edge at the rim", "toggle", None, False),
-               ("floor", "Floor", "seg", [("solid", "Solid"), ("diamonds", "Diamonds"), ("lens", "Eyes")], "solid")] + ZONES,
+               ("floor", "Floor", "seg", [("solid", "Solid"), ("diamonds", "Diamonds"), ("lens", "Eyes")], "solid"),
+               ("mask", "Texture", "seg", [("off", "Everywhere"), ("in", "Inside a picture"), ("out", "Around a picture")], "off"),
+               ("picture", "Picture", "seg", [("text", "Text")], "text")] + ZONES,
     "droop": [("density", "Density", "seg", [("sparse", "Sparse"), ("medium", "Medium"), ("dense", "Dense")], "medium"),
               ("length", "Loop length", "seg", [("short", "Short"), ("medium", "Medium"), ("long", "Long")], "medium"),
               ZONES[0],
@@ -222,7 +224,8 @@ def lid_textures():
 
 
 LID_KNOBS = [("knob", "Knob"), ("button", "Flat button"), ("none", "None")]
-LID_SKIP = ("lid", "lid_fit", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "zones", "zone_style", "course_rows", "purge_piece", "floor", "rim_loops",
+LID_SKIP = ("lid", "lid_fit", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
+            "engrave_lid", "zones", "zone_style", "course_rows", "purge_piece", "floor", "rim_loops",
             "purge", "handles")
 
 
@@ -338,6 +341,18 @@ def _lid_cap(shape, S, T, texture, v, nz, colours, options, parts, ls, t_plate, 
         rp = open_r - M["land"] / 2; pd = M["d"] + M["clear_d"]; ph = M["h"] + M["clear_h"]
         cuts += [m3d.Manifold.cylinder(ph + 1, pd / 2, pd / 2, 32).translate([rp, 0, Hs - ph]).rotate([0, 0, 360 * k / M["n"]])
                  for k in range(M["n"])]
+    words = (options.get("engrave_lid") or "").strip()
+    if words and not lat:                                       # words on the lid's top (its print-bottom face)
+        sec = trimesh.util.concatenate([m_ for _, m_, _, _ in cparts]).section(plane_origin=[0, 0, 0.05], plane_normal=[0, 0, 1])
+        if sec is not None:
+            (x0, y0), (x1, y1) = sec.bounds[0][:2], sec.bounds[1][:2]; w_, h_ = x1 - x0, y1 - y0
+            th = min(12.0, 0.2 * min(w_, h_))
+            knob_r = 0.0 if options.get("lid_knob", "knob") == "none" else max(9.0, min(16.0, min(w_, h_) / 2 * 0.18)) + 2.5
+            off = knob_r + th / 2 if knob_r else 0.0                 # below the knob, seen from above
+            cut_w = extras.engrave_cut(words, options.get("engrave_font", "futura"), 0.6 * min(w_, h_), th, mirror="y",
+                                       offset=((x0 + x1) / 2, (y0 + y1) / 2 + off))
+            if cut_w is not None:
+                cuts.append(cut_w)
     grafted = extras.graft(cparts, adds, cuts)
     if lat and len(set(cap_cols)) > 1:                          # woven: the hidden plug follows the rods' colour
         g = [x for x in grafted if x[0] == "graft"]              # course by course, so a layer stays one colour
@@ -638,7 +653,8 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
                         "low and the nozzle 5 °C hotter.")
     else:
         mesh, info = fabric.build(S, v, nz.size, stitch=texture, rim_loops=bool(options.get("rim_loops")),
-                                  floor=options.get("floor", "solid"), draft=draft)
+                                  floor=options.get("floor", "solid"), draft=draft,
+                                  mask=options if options.get("mask") in ("in", "out") else None)
         parts = [("colour 1", mesh, 1, colours[0])]; swaps = 0
         over = printer.overrides(nz.size, "fabric", slots=1, floor_layers=info["floor_layers"],
                                  wall_speed=info["wall_speed"])
@@ -718,6 +734,24 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     for _, m, _, _ in parts:                      # sit exactly on the bed (tilted curved-bead sections can dip µm)
         if abs(zmin) > 1e-9:
             m.apply_translation([0, 0, -zmin])
+    # ── words under the base: debossed into the bottom face, mirrored so they read from below ──
+    if (options.get("engrave_base") or "").strip():
+        if T["family"] in ("lattice", "flat"):
+            warnings.append("Words under the base need a solid floor — a woven floor is all rods, and a tile has no "
+                            "base. Not engraved.")
+        else:
+            whole = trimesh.util.concatenate([m for _, m, _, _ in parts])
+            sec = whole.section(plane_origin=[0, 0, 0.05], plane_normal=[0, 0, 1])
+            if sec is not None:
+                (x0, y0), (x1, y1) = sec.bounds[0][:2], sec.bounds[1][:2]
+                w_, h_ = x1 - x0, y1 - y0
+                cut = extras.engrave_cut(options["engrave_base"].strip(), options.get("engrave_font", "futura"),
+                                         0.62 * min(w_, h_), min(12.0, 0.22 * min(w_, h_)), mirror="x",
+                                         offset=((x0 + x1) / 2, (y0 + y1) / 2))
+                if cut is not None:
+                    parts = extras.graft(parts, [], [cut])
+                    stats_note = f"“{options['engrave_base'].strip()}” is debossed {extras.ENGRAVE_DEPTH} mm under the base."
+                    warnings.append(stats_note)
     for _, m, _, _ in parts:
         if not _wt(m):
             warnings.append("a part is not watertight — report this build")
@@ -834,6 +868,9 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
             lid_parts, assembled = _cap_or_plain(lid_parts, assembled, shape, S, T, texture, v, nz, colours, options,
                                                  parts, ls, t_plate, style, open_r, top, draft, stats, warnings)
     lid_plate = "same"
+    from . import timing
+    stats["minutes_est"] = timing.estimate(T["family"], stats["grams_part"], stats["swaps"], stats["size"][2],
+                                           sum(float(m.area) for _, m, _, _ in parts), nz.size)
     if lid_parts:
         stats["colours"] = len({c for _, _, _, c in parts + lid_parts})   # the lid's own filaments count too
         probe = Build(shape, texture, nz.size, v, T["family"], parts, stats, over, extras=lid_parts)
