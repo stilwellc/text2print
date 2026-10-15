@@ -516,18 +516,158 @@ GROUPABLE = {"grid", "twill", "kagome", "polar", "ripple", "selvedge", "beat", "
              "basket", "brick", "trellis", "frame"}                                    # colour follows the course
 
 
-def weave(region, nz, pattern, group=1, params=None):
+def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, picture=None):
     """group > 1: colour changes every `group` courses instead of every course (bands, not colour by
-    direction) — a half, a third or a quarter of the AMS changes."""
+    direction) — a half, a third or a quarter of the AMS changes.
+    Modifiers Claude sets from a description (any weave):
+      twist   degrees each course turns about the centre — the weave spirals up the piece
+      ombre   slots bottom -> top, e.g. [0, 1] or [0, 2, 1]: course colours fade through them (ordered dither)
+      picture (dark(x, y, z) -> bool, first_course): rods split and coloured by a picture — dark parts in slot 1"""
     rods = Rods(nz)
+    reg = _Twisted(region, twist) if twist else region
     if PATTERNS[pattern].get("custom"):                    # a plugin weave: its sliders' values
         from .plugins import call
-        call(PATTERNS[pattern]["fn"], region, nz, rods, p=params)
+        call(PATTERNS[pattern]["fn"], reg, nz, rods, p=params)
     else:
-        PATTERNS[pattern]["fn"](region, nz, rods)
-    if group > 1 and pattern in GROUPABLE:
+        PATTERNS[pattern]["fn"](reg, nz, rods)
+    if twist:
+        _untwist(rods, reg)
+    if ombre and len(ombre) >= 2:
+        recolour_ombre(rods, list(ombre), region.n)
+    elif group > 1 and pattern in GROUPABLE:
         regroup(rods, group, PATTERNS[pattern]["slots"])
+    if picture is not None:
+        recolour_picture(rods, *picture)
     return rods
+
+
+class _Twisted:
+    """A region seen in each course's own rotated frame: patterns lay rods as usual, then _untwist turns course i
+    by i x twist degrees. Clipping happens in the rotated frame, so every rod still ends inside the outline."""
+
+    def __init__(self, region, twist_deg):
+        self.r = region; self.tw = math.radians(twist_deg)
+        self.n, self.rod_h, self.extent = region.n, region.rod_h, region.extent
+        self.round, self.floor_courses, self.height = region.round, region.floor_courses, region.height
+
+    def z(self, i):
+        return self.r.z(i)
+
+    def angle(self, z):
+        return self.tw * round((z - self.rod_h / 2) / self.rod_h)
+
+    def sdf(self, z):
+        f = self.r.sdf(z); a = self.angle(z); c, s_ = math.cos(a), math.sin(a)
+        return lambda x, y: f(x * c - y * s_, x * s_ + y * c)
+
+
+def _untwist(rods, reg):
+    def rot(pt, z):
+        a = reg.angle(z); c, s_ = math.cos(a), math.sin(a)
+        return [pt[0] * c - pt[1] * s_, pt[0] * s_ + pt[1] * c, pt[2]]
+    rods.lines = {k: [(rot(a, a[2]), rot(b, b[2])) for a, b in v] for k, v in rods.lines.items()}
+    out = {}
+    for k, v in rods.paths.items():
+        out[k] = []
+        for P in v:
+            P = np.array(P, float); a = np.array([reg.angle(z) for z in P[:, 2]])
+            c, s_ = np.cos(a), np.sin(a)
+            out[k].append(np.column_stack([P[:, 0] * c - P[:, 1] * s_, P[:, 0] * s_ + P[:, 1] * c, P[:, 2]]))
+    rods.paths = out
+
+
+def _course(rods, z):
+    h = rods.nz.rod_h
+    return int(round((z - h / 2) / h))
+
+
+def _rebuild(rods, items):
+    """items: [(kind 'line'|'path', geometry, slot)] -> rods.lines / paths / layers."""
+    h = rods.nz.rod_h / 2
+    rods.lines, rods.paths, rods.layers = {}, {}, {}
+    for kind, g, sl in items:
+        if kind == "line":
+            rods.lines.setdefault(sl, []).append(g); z = g[0][2]
+            rods.layers.setdefault(sl, []).append((z - h, z + h))
+        else:
+            rods.paths.setdefault(sl, []).append(g)
+            rods.layers.setdefault(sl, []).append((g[:, 2].min() - h, g[:, 2].max() + h))
+
+
+def _all(rods):
+    return [("line", g, sl) for sl, v in rods.lines.items() for g in v] + \
+           [("path", np.asarray(g, float), sl) for sl, v in rods.paths.items() for g in v]
+
+
+def recolour_ombre(rods, stops, n_courses):
+    """Course colours fade bottom -> top through the stops: within each step a course takes the upper colour
+    when its height passes an ordered-dither threshold, so the mix ramps smoothly — one change per alternation."""
+    def slot_of(c):
+        t = min(max(c / max(n_courses - 1, 1), 0.0), 1.0) * (len(stops) - 1)
+        k = min(int(t), len(stops) - 2); tt = t - k
+        thr = (c * 0.6180339887 + 0.31) % 1.0
+        return stops[k + 1] if tt > thr else stops[k]
+    items = []
+    for kind, g, _ in _all(rods):
+        z = g[0][2] if kind == "line" else float(np.mean(g[:, 2]))
+        items.append((kind, g, slot_of(_course(rods, z))))
+    _rebuild(rods, items)
+
+
+def recolour_picture(rods, dark, first_course, step=0.4):
+    """Rods from first_course up are split where the picture changes; dark parts go to slot 1, light to slot 0.
+    Pieces end half a bead short of a colour change so neighbouring colours touch instead of overlapping;
+    specks shorter than a bead width take their neighbours' colour."""
+    rw = rods.nz.rod_w; items = []
+    for kind, g, sl in _all(rods):
+        P = np.array([g[0], g[1]], float) if kind == "line" else g
+        if _course(rods, float(P[0][2])) < first_course:
+            items.append((kind, g, sl)); continue
+        seg = np.hypot(*np.diff(P[:, :2], axis=0).T); cum = np.concatenate([[0], np.cumsum(seg)]); L = cum[-1]
+        if L < 1e-6:
+            items.append((kind, g, sl)); continue
+        ts = np.append(np.arange(0, L, step), L)
+        pts = np.column_stack([np.interp(ts, cum, P[:, k]) for k in range(3)])
+        d = np.asarray(dark(pts[:, 0], pts[:, 1], pts[:, 2]), bool)
+        runs, k = [], 0                                            # runs of one colour along the rod
+        while k < len(ts):
+            k2 = k
+            while k2 + 1 < len(ts) and d[k2 + 1] == d[k]:
+                k2 += 1
+            runs.append([ts[k], ts[k2] if k2 + 1 >= len(ts) else (ts[k2] + ts[k2 + 1]) / 2, d[k]])
+            if k2 + 1 < len(ts):
+                runs[-1][1] = (ts[k2] + ts[k2 + 1]) / 2
+            k = k2 + 1
+        for i_ in range(1, len(runs)):                              # starts meet the previous end
+            runs[i_][0] = runs[i_ - 1][1]
+        changed = True                                              # absorb specks
+        while changed and len(runs) > 1:
+            changed = False
+            for i_, r in enumerate(runs):
+                if r[1] - r[0] < rw:
+                    j = i_ - 1 if i_ > 0 else i_ + 1
+                    a, b = sorted((i_, j)); runs[a] = [runs[a][0], runs[b][1], runs[j][2]]; del runs[b]
+                    changed = True; break
+            merged = []
+            for r in runs:                                          # neighbours of one colour join
+                if merged and merged[-1][2] == r[2]:
+                    merged[-1][1] = r[1]
+                else:
+                    merged.append(r)
+            runs = merged
+        for i_, (a, b, dk) in enumerate(runs):
+            a2 = a + (rw / 2 if i_ > 0 else 0.0); b2 = b - (rw / 2 if i_ < len(runs) - 1 else 0.0)
+            if b2 - a2 < rw * 0.5:
+                continue
+            if kind == "line" and len(runs) == 1:
+                items.append(("line", g, 1 if dk else 0)); continue
+            sub = np.append(np.arange(a2, b2, 0.9), b2)
+            Q = np.column_stack([np.interp(sub, cum, P[:, k]) for k in range(3)])
+            if kind == "line":
+                items.append(("line", (list(Q[0]), list(Q[-1])), 1 if dk else 0))
+            else:
+                items.append(("path", Q, 1 if dk else 0))
+    _rebuild(rods, items)
 
 
 def regroup(rods, group, n_slots):

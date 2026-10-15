@@ -51,6 +51,19 @@ def catalogue():
                  options=["lid", "lid_texture", "lid_colours", "lid_height", "lid_knob", "lid_fit", "lid_plate",
                           "engrave_lid"]),
         engraving=["engrave_base", "engrave_lid", "engrave_font"],
+        woven_modifiers=dict(
+            applies_to="any woven (lattice) texture on any shape — options, set them from what the person describes",
+            weave_twist="degrees per course (-12..12): the whole lattice rotates as it climbs; 2-4 reads as a spiral, "
+                        "8+ as a strong swirl. Same colour changes, rods stay inside the outline",
+            weave_ombre="slots bottom->top, e.g. '0,1' or '0,1,2': each course takes a colour, dithered so it fades "
+                        "from the first to the last (one change per course; 3 stops need 3 colours)",
+            weave_picture="a picture key (text, lib:<name>, a drawn picture plugin): dark parts of the picture switch "
+                          "the rods to slot 1 — words, a logo or a motif woven into the rods. Uses text/font/"
+                          "picture_contrast/picture_invert like any picture",
+            weave_picture_on="top (seen from above: trays, dishes, coasters — carried by weave_picture_courses top "
+                             "courses, default 3) | wall (around the side: vessels, baskets). Default: by proportions",
+            limits="bold shapes only: one rod (~2.5 mm) is the pixel, so letters >= 14 mm tall, 1-6 short words; "
+                   "picture costs colour changes on every course it touches — check colour_changes"),
         cheaper_colour=["course_group 1-4 (woven)", "tower: off", "zones + zone_style courses (droop)"],
         palette=build.PALETTE, nozzles=list(printer.NOZZLES), plugins_dir=str(plugins.DIR),
         pictures_dir=str(pictures.LIB), saved_designs=saved)

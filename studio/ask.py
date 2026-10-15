@@ -35,6 +35,10 @@ RULES = """How to work (SKILL.md, sections "Custom pictures and patterns from a 
   at the preview PNG (halftone previews use raking light — judge the picture there). For budgets on time, colour
   changes or grams, confirm with `{py} -m text2print design slice {work}/<name>.json` (real Bambu Studio numbers
   and a sliced-layer preview PNG) and adjust until the design fits.
+- Woven looks take three modifiers (catalogue.woven_modifiers) — reach for them when the words call for it:
+  "spiral / swirling / twisted weave" -> weave_twist; "fades / ombré / gradient / sunset" on a weave -> weave_ombre;
+  "my name / a logo / a heart / a koi woven in" -> weave_picture (text, a library picture, or a PICTURE plugin you
+  draw). Check the preview: the picture must read at rod scale, or make it bolder / bigger.
 - Their taste and what prints well on their printer are below — respect them. When they state a lasting preference
   ("never…", "I love…"), append one line to {home}/taste.md.
 {memory}"""

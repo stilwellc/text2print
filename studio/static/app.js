@@ -41,8 +41,13 @@ const zonesOn = () => {
 };
 function pieceSlotCount() {
   if (!isMix() && zonesOn()) return Math.max(1, parseInt(state.options.zones || "1", 10));
-  if (!isMix()) return textureOf(state.texture).slots;
+  if (!isMix()) return Math.max(textureOf(state.texture).slots, ...ombreStops().map((i) => i + 1));
   return Math.max(1, ...state.bands.flatMap((b) => twoSlot(b.texture) ? [b.slot + 1, (b.slot2 ?? 1) + 1] : [b.slot + 1]));
+}
+const WEAVE_KEYS = ["weave_twist", "weave_ombre", "weave_picture", "weave_picture_on", "weave_picture_courses"];
+function ombreStops() {
+  const o = state.options.weave_ombre;
+  return o && textureOf(state.texture).family === "lattice" ? String(o).split(",").map((x) => parseInt(x, 10)).filter((x) => x >= 0) : [];
 }
 function slotCount() {                     // the piece's slots, plus any the lid's own colours use
   return Math.max(pieceSlotCount(), ...(typeof lidSlots === "function" ? lidSlots().map((i) => i + 1) : []));
@@ -55,7 +60,7 @@ function readUrl() {
   if (q.get("texture") && textureOf(q.get("texture"))) state.texture = q.get("texture");
   if (q.get("nozzle")) state.nozzle = parseFloat(q.get("nozzle"));
   if (q.get("c")) state.colours = q.get("c").split(",").map((h) => "#" + h.replace("#", ""));
-  const optKeys = Object.values(CAT.options).flat().map((o) => o.key).concat(["picture", "image"]).concat(TEXT_KEYS).concat(["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "tower", "engrave_base", "engrave_lid", "engrave_font"]);
+  const optKeys = Object.values(CAT.options).flat().map((o) => o.key).concat(["picture", "image"]).concat(TEXT_KEYS).concat(WEAVE_KEYS).concat(["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "tower", "engrave_base", "engrave_lid", "engrave_font"]);
   const toggleKeys = Object.values(CAT.options).flat().filter((o) => o.kind === "toggle").map((o) => o.key).concat(["text_invert", "picture_invert"]);
   for (const [k, v] of q) {
     if (k === "mix") { try { state.bands = JSON.parse(v); } catch (e) { /* a bad link keeps the default */ } }
@@ -81,6 +86,10 @@ function linkFor() {
   if (state.options.image && IMAGE_TEXTURES.includes(state.texture)) q.set("image", state.options.image);
   for (const k of ["engrave_base", "engrave_font"]) if (state.options[k]) q.set(k, state.options[k]);
   for (const [k, v] of Object.entries(state.options)) if (k.startsWith("pp_")) q.set(k, v);
+  if (textureOf(state.texture).family === "lattice") {
+    for (const k of WEAVE_KEYS) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k]);
+    if (state.options.weave_picture) for (const k of TEXT_KEYS) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k] === true ? "1" : state.options[k] === false ? "0" : state.options[k]);
+  }
   return "?" + q.toString();
 }
 const writeUrl = () => history.replaceState(null, "", linkFor());
@@ -289,6 +298,7 @@ function renderFinish() {
   const shown = familyOptions().filter((o) => {
     if (fam === "fabric" && o.key === "picture") return masked;               // picture only drives a mask here
     if (ONLY[o.key] && !ONLY[o.key].includes(state.texture)) return false;
+    if (["course_group", "colour_by"].includes(o.key) && ombreStops().length >= 2) return false;   // the ombré sets colour
     if (o.key === "course_group") return state.options.colour_by !== "height" && slotCount() > 1;
     if (o.key === "zones") return zonesOn();
     if (o.key === "zone_style") return zonesOn() && parseInt(state.options.zones || "1", 10) > 1;
@@ -300,6 +310,7 @@ function renderFinish() {
   kids.unshift(...pluginSliders(textureOf(state.texture).params));            // a plugin texture's own sliders
   if (IMAGE_TEXTURES.includes(state.texture) || masked) kids.splice(Math.min(2, kids.length), 0, uploader(state.options.image, (id) => { if (id) state.options.image = id; else delete state.options.image; renderFinish(); changed(); }));
   if (!["lattice", "flat"].includes(fam)) kids.push(...engraveControl("engrave_base", "Words under the base", after));
+  if (fam === "lattice") kids.push(...weaveModifiers(after));
   $("finishSec").hidden = !kids.length;
   $("finish").replaceChildren(...kids);
 }
@@ -477,6 +488,35 @@ function renderAsk() {
 
 // ── pictures: built-ins, text in any font, and library pictures (uploads and ones written from a prompt) ──
 const TEXT_KEYS = ["text", "font", "text_layout", "text_invert", "picture_place", "picture_size", "picture_lift", "picture_contrast", "picture_invert"];
+// twist / ombré / image in the weave: Claude sets them from a description; the person tunes or removes them here
+function weaveModifiers(after) {
+  const o = state.options, kids = [];
+  const drop = (keys) => el("button", { class: "ghost small", type: "button", onclick: () => { for (const k of keys) delete o[k]; after(); } }, "remove");
+  const head = (label, keys) => el("div", { class: "field-label" }, label, " ", el("span", { style: "opacity:.6;font-weight:400" }, "· set by Claude "), drop(keys));
+  if (parseFloat(o.weave_twist || "0")) {
+    kids.push(head("Twist", ["weave_twist"]));
+    kids.push(...rangeCtl("weave_twist", "Degrees per course", -12, 12, 0.5, 0, (v) => `${v > 0 ? "+" : ""}${v}° a course`).slice(1));
+  }
+  if (ombreStops().length >= 2) {
+    kids.push(head("Ombré", ["weave_ombre"]));
+    kids.push(el("div", { class: "ombre" }, ...ombreStops().map((i, k, all) => {
+      const b = el("button", { class: "chip-btn", style: `background:${state.colours[i]}`, title: `${k ? k === all.length - 1 ? "top" : "middle" : "bottom"}: AMS ${i + 1}, click to change`, "aria-label": `Ombré stop ${k + 1}` },
+        el("span", {}, String(i + 1)));
+      b.onclick = () => { const s = ombreStops(); s[k] = (s[k] + 1) % MAX_SLOTS; o.weave_ombre = s.join(","); after(); };
+      return b;
+    })));
+  }
+  if (o.weave_picture) {
+    const pic = (CAT.pictures.choices.find((c) => c.key === o.weave_picture) || {}).name || o.weave_picture;
+    kids.push(head(`Image in the weave: ${o.weave_picture === "text" ? `“${o.text || ""}”` : pic}`, ["weave_picture", "weave_picture_on", "weave_picture_courses"]));
+    const on = el("div", { class: "seg small", role: "radiogroup", "aria-label": "Where the image shows" });
+    seg(on, [["", "Auto"], ["top", "Top"], ["wall", "Wall"]], o.weave_picture_on || "", (v) => { if (v) o.weave_picture_on = v; else delete o.weave_picture_on; after(); });
+    kids.push(on);
+    if ((o.weave_picture_on || "") !== "wall") kids.push(...rangeCtl("weave_picture_courses", "Courses that carry it (top view)", 1, 8, 1, 3, (v) => `${v}`));
+    kids.push(...rangeCtl("picture_contrast", "Contrast", 0.3, 3, 0.1, 1, (v) => v.toFixed(1)));
+  }
+  return kids;
+}
 function rangeCtl(key, label, min, max, step, def, show) {
   const v = state.options[key] !== undefined ? parseFloat(state.options[key]) : def;
   const out = el("output", {}, show(v));
