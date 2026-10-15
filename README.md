@@ -161,6 +161,14 @@ stacked; rendered at the wall's real proportions so letters never stretch), and 
 fish-scale knit". `python -m text2print plugin check FILE` builds one on a sample piece, checks it and renders a
 preview; the studio lists it on its next load. Examples: `plugin_examples/` (Koi pond, Diamond weave, Fish scales).
 
+**Design with Claude.** The box at the top of the studio takes any sentence, and a photo if you like: "a tall
+vase, blue zigzag dripping into cream knit, fading to a plain neck, our name under the base". A headless Claude
+Code run composes the whole design from the catalogue and your saved designs, prepares photos, draws pictures or
+writes new weaves, stitches and shapes when needed, checks the build and its preview, and the studio loads it with
+a note on the trade-offs (colour changes, purge, time). Mix bands now **blend** — fade, dissolve, or meet along a
+wave, zigzag, scallop, drip or torn edge — and two colours either fade through a stripe gradient or follow the
+shaped edge.
+
 **Ask Claude from the studio.** Under the patterns, *Make a new one* takes a description ("an art deco sunburst",
 "a herringbone weave", "a planter with a rolled rim") and a headless Claude Code run writes the plugin, checks it,
 looks at its preview and hands it back selected — about a minute. Pictures get placement (wrap or front), size,
