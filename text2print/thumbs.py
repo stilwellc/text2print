@@ -34,7 +34,7 @@ def render_all(only=None):
         render([(m, c) for _, m, _, c in (b.preview or b.parts)], OUT / f"shape_{key}.png", size=360,
                view=(1.0, -0.95, 0.45 if tall else 0.8), zoom=1.12, rake=s.families == ("fabric",))
         print("shape", key, flush=True)
-    for key, t in build.TEXTURES.items():
+    for key, t in list(build.TEXTURES.items()):
         if only and f"texture_{key}" not in only:
             continue
         if t["family"] == "spiral":

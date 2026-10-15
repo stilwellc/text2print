@@ -23,7 +23,8 @@ from .fabric_presets import fabric_preset
 from .fabric import RELIEFS, relief
 from .fabric_wall import tri01
 
-WOVEN = ["grid", "twill", "ripple", "beat", "polar"]        # course-coloured patterns: one colour per course
+WOVEN = ["grid", "twill", "ripple", "beat", "polar", "chevron", "herringbone", "ogee", "basket", "brick", "trellis",
+         "frame"]                                              # course-coloured patterns: one colour per course
 MIXABLE = ["plain", "fuzzy", "zigzag", "domes", "wave", "garland", "drips", "melt", "halftone",
            "fringe", "swag", "curls", "unraveled"] + WOVEN
 TWO_SLOT = {"halftone"} | set(WOVEN)
