@@ -161,6 +161,20 @@ stacked; rendered at the wall's real proportions so letters never stretch), and 
 fish-scale knit". `python -m text2print plugin check FILE` builds one on a sample piece, checks it and renders a
 preview; the studio lists it on its next load. Examples: `plugin_examples/` (Koi pond, Diamond weave, Fish scales).
 
+**Ask Claude from the studio.** Under the patterns, *Make a new one* takes a description ("an art deco sunburst",
+"a herringbone weave", "a planter with a rolled rim") and a headless Claude Code run writes the plugin, checks it,
+looks at its preview and hands it back selected — about a minute. Pictures get placement (wrap or front), size,
+position, contrast and invert; a picture or words can also decide where a knit/zigzag/wave appears on a plain wall.
+Words can be debossed under the base and on a lid's top. Shapes can be plugins too (a round silhouette or a plan
+outline) and take every texture, lid and engraving.
+
+**Instant estimates.** Print time appears with every build (a model fit to 121 real P2S slices, typically within
+about 10 %); each texture card shows its colour-change cost before you pick it.
+
+**Proving plates.** Test plates now include *Woven band*, *Droop courses*, *Textured lids* and *Fur* — small
+coupons of the newest features to print before committing to a big piece. The printer dialog has *Test
+connection*, which logs in and reads the printer's status and AMS colours without starting a print.
+
 ## Shapes
 
 | Shape | Textures | Sizes |

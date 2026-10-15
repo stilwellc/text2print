@@ -641,3 +641,47 @@ def test_words_under_the_base_and_on_the_lid():
 def test_instant_print_time_estimate():
     b = build.make("bowl", "grid", colours=["#8B3A2F", "#EDE3D1"], draft=True)
     assert 300 < b.stats["minutes_est"] < 700                        # sliced: 497 min
+
+
+# ── shapes as plugins, proving plates, printer test, ask Claude ─────────────────────────────────────────
+def test_shape_plugins_take_every_family(tmp_path, monkeypatch):
+    import shutil, pathlib as pl
+    from text2print import plugins
+    from text2print.shapes import SHAPES
+    for f in ("planter.py", "pebble_dish.py"):
+        shutil.copy(pl.Path(__file__).resolve().parent.parent / "plugin_examples" / f, tmp_path / f)
+    monkeypatch.setattr(plugins, "DIR", tmp_path)
+    plugins.load_all()
+    assert {"s_planter", "s_pebble_dish"} <= set(SHAPES)
+    for shape in ("s_planter", "s_pebble_dish"):
+        for tex in ("domes", "twill", "halftone", "fringe"):
+            assert build.compatible(shape, tex)
+            _ok(build.make(shape, tex, colours=["#8B3A2F", "#EDE3D1"], draft=True))
+    lid = build.make("s_planter", "domes", options={"lid": "slip"}, draft=True)
+    assert lid.extras
+    monkeypatch.setattr(plugins, "DIR", tmp_path / "none"); plugins.load_all()
+    assert "s_planter" not in SHAPES
+
+
+@pytest.mark.parametrize("key", ["band", "courses", "lids", "fur"])
+def test_proving_plates_build(key):
+    p = sampler.plate(key)
+    assert p["objects"] and all(m.is_watertight for ob in p["objects"] for _, m, _ in ob["parts"])
+    if key == "lids":
+        assert any("Lid" in ob["name"] for ob in p["objects"])
+
+
+def test_printer_test_reports_failures_without_printing():
+    from text2print import lan
+    r = lan.test({"ip": "127.0.0.1", "serial": "X", "access_code": "0"}, timeout=1)
+    assert r["ftps"].startswith("failed") and r["mqtt"].startswith("failed")
+
+
+def test_ask_endpoint_validates_and_reports_missing_cli(monkeypatch):
+    from studio import ask, server
+    c = server.app.test_client()
+    monkeypatch.setattr(ask, "available", lambda: False)
+    assert c.post("/api/ask", json={"request": "koi"}).status_code == 400
+    monkeypatch.setattr(ask, "available", lambda: True)
+    assert c.post("/api/ask", json={"request": ""}).status_code == 400
+    assert c.get("/api/ask/nope").status_code == 404

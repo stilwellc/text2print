@@ -503,3 +503,46 @@ SHAPES["hextile"] = HexTile("hextile", "Hex tile", "A hexagonal tile — texture
     Param("width", "Flat to flat", 60, 200, 1, 120), Param("height", "Thickness", 4, 20, 0.5, 8, family="!flat")])
 SHAPES["tile"] = Tile("tile", "Photo tile", "A flat lithophane panel — one colour or full-colour CMYK", ("flat",), [
     Param("width", "Width", 60, 200, 1, 150), Param("depth", "Height", 60, 200, 1, 100)])
+
+
+# ── shapes written as plugins (see plugins.py): a round silhouette or a plan outline ───────────────────────
+class PluginRound(Profiled):
+    """SHAPE kind "round": the plugin's radius(v, z) -> mm, clamped to the overhang law (0.9 mm per mm out)."""
+    kind = "plugin"
+
+    def __init__(self, key, name, blurb, params, fn):
+        super().__init__(key, name, blurb, ("lattice",) + _WALL, params + _WOVEN_PARAMS, round=True)
+        self._fn = fn
+
+    def profile(self, v):
+        h = v["height"]
+        return _clamped(lambda z: float(self._fn(v, z)), h, rmin=8.0)
+
+
+class PluginOutline(Shape):
+    """SHAPE kind "outline": the plugin's outline(v) -> sdf(x, y) (negative inside), straight walls of `height`.
+    Wall families map onto the outline (Outline); woven builds a rod ring of `wall` around it."""
+
+    def __init__(self, key, name, blurb, params, fn, extent_fn):
+        super().__init__(key, name, blurb, ("lattice",) + _WALL, params + [
+            Param("wall", "Wall", 4, 16, 0.5, 8, family="lattice"), Param("floor", "Floor", 2, 10, 0.5, 4, family="lattice")])
+        self._fn, self._extent = fn, extent_fn
+
+    def outline(self, v):
+        return Outline(self._fn(v), self._extent(v))
+
+    def profile(self, v):
+        R = self.outline(v).R
+        return (lambda z: R), v["height"], R
+
+    def lattice(self, v, rod_h):
+        sdf = self._fn(v); wall = v.get("wall", 8.0)
+        nf = max(1, int(round(v.get("floor", 4) / rod_h))); nf += 1 - nf % 2
+        n = max(nf + 2, _odd_courses(v["height"], rod_h)); fz = nf * rod_h
+
+        def sdf_at(z):
+            def f(x, y):
+                d = sdf(x, y)
+                return d if z < fz else np.maximum(d, -(d + wall))
+            return f
+        return Region(n, rod_h, sdf_at, self._extent(v), False, nf)

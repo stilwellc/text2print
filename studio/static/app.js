@@ -351,7 +351,8 @@ $("addBand").addEventListener("click", () => {
   renderBands(); renderColours(); changed();
 });
 
-function renderAll() { renderShapes(); renderTextures(); renderBands(); renderSizes(); renderColours(); renderFinish(); renderLid(); }
+let askDrawn = false;
+function renderAll() { if (!askDrawn) { askDrawn = true; renderAsk(); } renderShapes(); renderTextures(); renderBands(); renderSizes(); renderColours(); renderFinish(); renderLid(); }
 
 function buildOptions() {
   const lidKeys = ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_plate", "tower", "engrave_base", "engrave_lid", "engrave_font"];
@@ -361,6 +362,47 @@ function buildOptions() {
   if (ls.length) o.lid_colours = ls.map((i) => state.colours[i]);
   delete o.lid_slot; delete o.lid_slot2;
   return o;
+}
+
+// ── ask Claude: a pattern in words -> a plugin written, checked and selected ─────────────────────────────
+let askJob = null;
+function renderAsk() {
+  const box = $("ask");
+  const inp = el("input", { type: "text", class: "words", placeholder: "Describe a pattern — “koi pond”, “herringbone weave”, “fish-scale knit”…", "aria-label": "Describe a pattern" });
+  const go = el("button", { class: "ghost" }, "Ask Claude");
+  const msg = el("p", { class: "hint" });
+  const send = async () => {
+    const words = inp.value.trim(); if (!words || askJob) return;
+    go.disabled = true; msg.textContent = "Claude is designing it — usually 1–4 minutes. Keep working; it appears here when ready.";
+    const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ request: words, shape: state.shape, texture: state.texture }) });
+    const d = await r.json();
+    if (!r.ok) { msg.textContent = d.error; go.disabled = false; return; }
+    askJob = d.id; poll();
+  };
+  const poll = async () => {
+    const d = await (await fetch(`/api/ask/${askJob}`)).json();
+    if (d.state === "running") { msg.textContent = `Claude is designing it… ${d.seconds}s`; return setTimeout(poll, 3000); }
+    askJob = null; go.disabled = false;
+    if (d.state === "error") { msg.textContent = d.error; return; }
+    const res = d.result || {};
+    CAT = await (await fetch("/api/catalogue")).json();                      // the new plugin is in the catalogue now
+    if (res.kind === "text") { state.options.picture = "text"; state.options.text = res.text || ""; if (!IMAGE_TEXTURES.includes(state.texture)) state.texture = "halftone"; }
+    else if (res.kind === "picture") { state.options.picture = res.key; if (!IMAGE_TEXTURES.includes(state.texture) && !["in", "out"].includes(state.options.mask)) state.texture = "halftone"; }
+    else if (res.kind === "shape" && CAT.shapes.find((x) => x.key === res.key)) {
+      state.shape = res.key; state.params = {};
+      if (!fits(shapeOf(res.key), textureOf(state.texture))) state.texture = "domes";
+    }
+    else if (res.key && CAT.textures.find((t) => t.key === res.key)) {
+      state.texture = res.key;
+      if (!fits(shapeOf(state.shape), textureOf(res.key))) state.shape = res.kind === "woven" ? "tray" : "cup";
+    }
+    msg.textContent = res.summary || "Done.";
+    renderAll(); changed(true);
+  };
+  inp.addEventListener("keydown", (e) => { if (e.key === "Enter") send(); });
+  go.addEventListener("click", send);
+  box.replaceChildren(el("div", { class: "field-label" }, "Make a new one"), el("div", { class: "askrow" }, inp, go), msg);
 }
 
 // ── pictures: built-ins, text in any font, and library pictures (uploads and ones written from a prompt) ──
@@ -636,7 +678,16 @@ $("printerBtn").addEventListener("click", async () => {
     f("Serial number", "serial", "text", "From the printer: Settings › Device"),
     f("LAN access code", "access_code", "password", cur.configured ? "Saved — type to replace" : "From the printer: Settings › Network"),
     el("div", { class: "row" }, el("button", { class: "secondary", type: "button", onclick: closeSheet }, "Cancel"),
+      el("button", { class: "secondary", type: "button", onclick: async (e) => {
+        const btn = e.currentTarget; btn.disabled = true; btn.textContent = "Testing…";
+        const r = await fetch("/api/printer/test", { method: "POST" }); const d = await r.json();
+        btn.disabled = false; btn.textContent = "Test connection";
+        if (!r.ok) return toast(d.error);
+        const ams = (d.ams || []).map((t) => `AMS ${t.slot}: ${t.type} ${t.colour}`).join(" · ");
+        result.textContent = `Files: ${d.ftps}. Status: ${d.mqtt}${d.state ? ` (${d.state})` : ""}.${ams ? " " + ams : ""}`;
+      } }, "Test connection"),
       el("button", { class: "primary", type: "submit" }, "Save")));
+  const result = el("p", { class: "hint" }, "Test connection checks the login and reads the printer's status — it never starts a print.");
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const body = Object.fromEntries(new FormData(form));
@@ -648,7 +699,7 @@ $("printerBtn").addEventListener("click", async () => {
   });
   sheet(el("h3", {}, "Your printer"),
     el("p", {}, "To send prints straight to your P2S over your network. Everything stays on this Mac (~/.text2print). Sending is experimental and always asks first."),
-    form);
+    form, result);
 });
 function renderPrinter() {
   $("printerName").textContent = CAT.lan.configured ? (CAT.lan.name || "Bambu Lab P2S") : "Bambu Lab P2S";

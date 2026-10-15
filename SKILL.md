@@ -166,10 +166,17 @@ make it — then hand back a studio link. Four routes, cheapest first:
    - `STITCH = dict(name, blurb)` + `displace(u, layer, band_layers, band, z_frac)` -> 0..1 of the stitch depth
      (u: 1 per stitch, odd bands shifted half a stitch). It is printed on the knit (domes) proportions. Keep
      layer-to-layer changes gentle. Example: plugin_examples/fish_scales.py.
-   Keys: woven/stitch -> texture `x_<file stem>`, picture -> `lib:<file stem>`.
+5. **A shape from a prompt** ("a planter with a rolled rim", "a pebble-shaped dish", "a pen cup"):
+   `SHAPE = dict(name, blurb, kind="round"|"outline", params=[(key, label, lo, hi, step, default[, unit])])`
+   plus `radius(v, z)` (round: outer radius in mm at height z; it is clamped to lean out <= 0.9 mm/mm) or
+   `outline(v)` returning `sdf(x, y)` (negative inside, ~mm distance) + `extent(v)` (outline: straight walls,
+   `height` param). Every texture family works on it (wall families map onto outlines; woven builds a rod ring),
+   and lids, engraving and pictures too. Examples: plugin_examples/planter.py, pebble_dish.py.
+   Keys: woven/stitch -> texture `x_<file stem>`, picture -> `lib:<file stem>`, shape -> `s_<file stem>`.
 
 Always: `python -m text2print plugin check ~/.text2print/plugins/<name>.py` -> builds it on a sample piece,
 checks watertight + overhang against the built-in stitches (verdict "ok"), renders a preview PNG — LOOK at the
 preview and iterate before handing over. Then `plugin list` (shows load errors) and give the studio link
 (`/?shape=vase&texture=x_<name>` or `/?shape=cup&texture=halftone&picture=lib:<name>`). The studio picks plugins
-up on the next load — no restart. `python -m text2print plugin new picture|woven|stitch NAME` writes a starter.
+up on the next load — no restart. `python -m text2print plugin new picture|woven|stitch|shape NAME` writes a starter. The studio's "Make a new
+one" box runs exactly this flow through a headless `claude -p` (studio/ask.py).

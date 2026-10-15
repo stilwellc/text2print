@@ -31,6 +31,20 @@ PLATES = {
     "fit": dict(name="Lid fit", coupons=[]),       # rims + lids at 5 clearances (extras.fit_test)
     "fabric": dict(name="Fabric & relief", coupons=[
         ("cup", s, {"diameter": 50, "height": 40}, {}) for s in ("zigzag", "domes", "wave", "garland", "drips", "melt")]),
+    # ── proving plates for the Oct 14 features (one family each: a plate shares one set of settings) ──
+    "band": dict(name="Woven band", note="the collar under a woven band and the cap above it", coupons=[
+        ("cup", "mix", {"diameter": d, "height": 50}, {"bands": [dict(texture="plain", share=20, slot=0),
+                                                                 dict(texture="twill", share=60, slot=0, slot2=1),
+                                                                 dict(texture="plain", share=20, slot=1)]})
+        for d in (50, 62)]),
+    "courses": dict(name="Droop courses", note="colour per strand row; loops tapering into the foot", coupons=[
+        ("cup", s, {"diameter": 50, "height": 45}, {"zones": "2", "zone_style": "courses"}) for s in ("fringe", "swag")]),
+    "lids": dict(name="Textured lids", note="caps that sit on the rim; slip fits on round and square", coupons=[
+        ("cup", "zigzag", {"diameter": 60, "height": 30}, {"lid": "slip", "lid_plate": "same"}),
+        ("tray", "domes", {"width": 80, "height": 22, "corner": 14}, {"lid": "slip", "lid_plate": "same"}),
+        ("cup", "wave", {"diameter": 60, "height": 30}, {"lid": "thread", "lid_plate": "same", "lid_knob": "button"})]),
+    "fur": dict(name="Fur", note="bridged hairs to a cut-away shell", coupons=[
+        ("cup", "fur", {"diameter": 44, "height": 30}, {"length": "short"})]),
 }
 
 
@@ -66,17 +80,30 @@ def plate(key, nozzle=0.4, colours=None):
         return _fit_plate(nozzle)
     spec = PLATES[key]; colours = colours or COLOURS
     builds = [build.make(s, t, p, nozzle=nozzle, colours=colours, options=o) for s, t, p, o in spec["coupons"]]
-    halves = [max(np.abs(m.bounds[:, :2]).max() for _, m, _, _ in b.parts) for b in builds]
-    pos = _layout(halves)
     used = []
+    items = []                                                     # (name, [(mesh, colour)], ranges, settings)
     for b in builds:
-        for _, _, _, c in b.parts:
+        items.append((b.title(), [(m, c) for _, m, _, c in b.parts], b.ranges, None))
+        groups = {}
+        for n, m, _, c in b.extras:                                 # lid coupons: caps and knobs, as printed
+            groups.setdefault(n, []).append((m, c))
+        from .build import SOLID_OBJECT
+        for n, g in groups.items():
+            items.append((f"{b.title()} — {n}", g, None, dict(SOLID_OBJECT)))
+    for _, g, _, _ in items:
+        for _, c in g:
             if c not in used:
                 used.append(c)
+    pos = _layout([max(float(np.abs(m.bounds[:, :2]).max()) for m, _ in g) for _, g, _, _ in items])
     objects = []
-    for b, (cx, cy) in zip(builds, pos):
-        parts = [(n, m, used.index(c) + 1) for n, m, _, c in b.parts]
-        objects.append({"name": b.title(), "position": (cx, cy), "parts": parts, "ranges": b.ranges})
+    for (name, g, rng, st), (cx, cy) in zip(items, pos):
+        ob = {"name": name, "position": (cx, cy),
+              "parts": [(f"{name} {k + 1}" if len(g) > 1 else name, m, used.index(c) + 1) for k, (m, c) in enumerate(g)]}
+        if rng:
+            ob["ranges"] = rng
+        if st:
+            ob["settings"] = st
+        objects.append(ob)
     # one family per plate: the first coupon's settings are the plate's; droop slots keep droop cooling
     over = dict(builds[0].overrides); over["flush_multiplier"] = ["1"]
     kinds = ["droop" if any(bb.family == "droop" or (bb.per_filament and "20" in bb.per_filament.get("fan_max_speed", [])) for bb in builds) else "normal"

@@ -76,8 +76,25 @@ def load_all():
             build.TEXTURES[key] = dict(family="fabric", slots=1, swaps="none", custom=True,
                                        name=m.STITCH.get("name", p.stem), blurb=m.STITCH.get("blurb", "A custom stitch"))
             seen.add(key)
+        if hasattr(m, "SHAPE"):
+            from . import extras, shapes
+            S = m.SHAPE; skey = f"s_{p.stem}"
+            params = [shapes.Param(*pp) if not isinstance(pp, shapes.Param) else pp for pp in S.get("params", [])]
+            if not any(pp.key == "height" for pp in params):
+                params.append(shapes.Param("height", "Height", 10, 240, 1, 80))
+            if S.get("kind", "round") == "outline" and callable(getattr(m, "outline", None)):
+                ext = getattr(m, "extent", None) or (lambda v: max(v.get("width", 100), v.get("depth", 100)) / 2 + 2)
+                shp = shapes.PluginOutline(skey, S.get("name", p.stem), S.get("blurb", "A custom shape"), params, m.outline, ext)
+            elif callable(getattr(m, "radius", None)):
+                shp = shapes.PluginRound(skey, S.get("name", p.stem), S.get("blurb", "A custom shape"), params, m.radius)
+            else:
+                shp = None
+            if shp is not None:
+                shapes.SHAPES[skey] = shp; extras.LID_SHAPES.add(skey); seen.add(skey)
     for key in _REGISTERED - seen:                                     # a deleted or broken file: unregister
+        from . import extras, shapes
         build.TEXTURES.pop(key, None); lattice.PATTERNS.pop(key, None); STITCHES.pop(key, None)
+        shapes.SHAPES.pop(key, None); extras.LID_SHAPES.discard(key)
     _REGISTERED.clear(); _REGISTERED.update(seen)
     return sorted(seen)
 
@@ -100,6 +117,17 @@ def check(path, out_dir=None):
                 Image.fromarray((np.clip(g, 0, 1) * 255).astype(np.uint8), "RGB")
         p = out_dir / f"{path.stem}_picture.png"; im.save(p)
         report["items"].append(dict(kind="picture", preview=str(p)))
+    if hasattr(m, "SHAPE"):
+        if path.parent.resolve() != DIR.resolve():
+            raise ValueError("put shape plugins in the plugin folder, then check them there")
+        load_all(); skey = f"s_{path.stem}"
+        for tex, cols in (("domes", ["#D2B48C"]), ("twill", ["#8B3A2F", "#EDE3D1"])):
+            b = build.make(skey, tex, colours=cols)
+            ok = all(mm.is_watertight for _, mm, _, _ in b.parts)
+            p = out_dir / f"{path.stem}_{tex}.png"
+            thumbs.render([(mm, c) for _, mm, _, c in b.parts], p, size=520, view=(1.0, -0.9, 0.45), zoom=1.1, rake=tex == "domes")
+            report["items"].append(dict(kind="shape", key=skey, texture=tex, watertight=ok, size=b.stats["size"],
+                                        preview=str(p), verdict="ok" if ok else "leaks"))
     if hasattr(m, "WOVEN") or hasattr(m, "STITCH"):
         keys = load_all(); key = f"x_{path.stem}"
         if path.parent.resolve() != DIR.resolve() or key not in keys:  # checking a file outside the plugin dir
@@ -129,6 +157,19 @@ def check(path, out_dir=None):
 
 
 TEMPLATES = {
+    "shape": '''"""Shape plugin: {name}."""
+import math
+
+SHAPE = dict(name="{title}", blurb="Describe the shape", kind="round",
+             params=[("diameter", "Widest", 60, 200, 1, 110), ("height", "Height", 40, 220, 1, 120)])
+
+
+def radius(v, z):
+    """Outer radius (mm) at height z for sizes v. Never lean out faster than ~0.9 mm per mm (it's clamped)."""
+    R, h = v["diameter"] / 2, v["height"]
+    t = z / h
+    return R * (0.7 + 0.3 * math.sin(math.pi * t))
+''',
     "picture": '''"""Picture plugin: {name}."""
 import numpy as np
 
@@ -173,7 +214,7 @@ def displace(u, layer, band_layers, band, z_frac):
 def new(kind, name):
     """Write a starter plugin into the plugin folder; returns its path."""
     if kind not in TEMPLATES:
-        raise ValueError("kind is picture, woven or stitch")
+        raise ValueError("kind is picture, woven, stitch or shape")
     DIR.mkdir(parents=True, exist_ok=True)
     stem = "".join(ch if ch.isalnum() else "_" for ch in name.lower()).strip("_") or kind
     path = DIR / f"{stem}.py"
