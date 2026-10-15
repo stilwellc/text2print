@@ -14,7 +14,7 @@ const el = (tag, attrs = {}, ...kids) => {
 const fmt = (n, d = 0) => Number(n).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
 const minutes = (m) => { const h = Math.floor(m / 60), r = Math.round(m % 60); return `${h ? h + " h " : ""}${r} min`; };
 const MAX_SLOTS = 4;
-const FAMILY_NAMES = { lattice: "Woven", fabric: "Fabric", droop: "Droop", halftone: "Halftone", spiral: "Vase mode",
+const FAMILY_NAMES = { lattice: "Woven", fabric: "Fabric", droop: "Droop", halftone: "Halftone", colourwork: "Colourwork", spiral: "Vase mode",
   shell: "Shell", flat: "Flat", mix: "Mix" };
 // options that only apply to some textures
 const ONLY = { course_group: ["grid", "twill", "kagome", "polar", "ripple", "selvedge", "beat"], folds: ["pleats", "flutes", "twist", "lowpoly", "ribs"], turn: ["twist", "lowpoly"], cell: ["voronoi"],
@@ -41,6 +41,8 @@ const zonesOn = () => {
 };
 function pieceSlotCount() {
   if (!isMix() && zonesOn()) return Math.max(1, parseInt(state.options.zones || "1", 10));
+  if (isChart()) return Math.max(1, ...chartBands().flatMap((b) => "plain" in b ? [b.plain + 1] : "stripes" in b ? b.stripes.map((x) => x + 1)
+    : (b.colours || [0, 1, 2]).slice(0, (b.art || ((CAT.colourwork.motifs.find((m) => m.key === (b.motif || b.chart)) || {}).art || []).join("").includes("o") || (b.tones || 2) >= 3) ? 3 : 2).map((x) => x + 1)));
   if (!isMix()) return Math.max(textureOf(state.texture).slots, ...ombreStops().map((i) => i + 1));
   return Math.max(1, ...state.bands.flatMap((b) => twoSlot(b.texture) ? [b.slot + 1, (b.slot2 ?? 1) + 1] : [b.slot + 1]));
 }
@@ -64,6 +66,7 @@ function readUrl() {
   const toggleKeys = Object.values(CAT.options).flat().filter((o) => o.kind === "toggle").map((o) => o.key).concat(["text_invert", "picture_invert"]);
   for (const [k, v] of q) {
     if (k === "mix") { try { state.bands = JSON.parse(v); } catch (e) { /* a bad link keeps the default */ } }
+    else if (k === "chart") { try { state.options.chart = JSON.parse(v); } catch (e) { /* a bad link keeps the preset */ } }
     else if (optKeys.includes(k) || k.startsWith("pp_")) state.options[k] = toggleKeys.includes(k) ? v === "1" : v;
     else if (!["shape", "texture", "nozzle", "c"].includes(k)) state.params[k] = parseFloat(v);
   }
@@ -73,12 +76,13 @@ function linkFor() {
   for (const p of shapeOf(state.shape).params) if (state.params[p.key] !== undefined && state.params[p.key] !== p.default) q.set(p.key, state.params[p.key]);
   q.set("c", state.colours.slice(0, slotCount()).map((h) => h.replace("#", "")).join(","));
   if (isMix()) q.set("mix", JSON.stringify(state.bands));
+  if (isChart() && Array.isArray(state.options.chart)) q.set("chart", JSON.stringify(state.options.chart));
   for (const o of familyOptions()) {
     const v = state.options[o.key] ?? o.default;
     if (v !== o.default) q.set(o.key, v === true ? "1" : v === false ? "0" : v);
   }
   if (state.options.image && textureOf(state.texture).family === "halftone") q.set("image", state.options.image);
-  if (IMAGE_TEXTURES.includes(state.texture) || isMix() || ["in", "out"].includes(state.options.mask))
+  if (IMAGE_TEXTURES.includes(state.texture) || isMix() || isChart() || ["in", "out"].includes(state.options.mask))
     for (const k of TEXT_KEYS) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k] === true ? "1" : state.options[k] === false ? "0" : state.options[k]);
   if (state.options.lid && state.options.lid !== "none" && shapeOf(state.shape).lid) {
     for (const k of ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "tower", "engrave_base", "engrave_lid", "engrave_font"]) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k]);
@@ -297,6 +301,8 @@ function renderFinish() {
   const masked = fam === "fabric" && ["in", "out"].includes(state.options.mask);
   const shown = familyOptions().filter((o) => {
     if (fam === "fabric" && o.key === "picture") return masked;               // picture only drives a mask here
+    if (fam === "colourwork" && o.key === "chart_preset") return false;       // lives in the Chart section
+    if (fam === "colourwork" && o.key === "picture") return chartBands().some((b) => "picture" in b && !b.picture);
     if (ONLY[o.key] && !ONLY[o.key].includes(state.texture)) return false;
     if (["course_group", "colour_by"].includes(o.key) && ombreStops().length >= 2) return false;   // the ombré sets colour
     if (o.key === "course_group") return state.options.colour_by !== "height" && slotCount() > 1;
@@ -374,8 +380,84 @@ $("addBand").addEventListener("click", () => {
   renderBands(); renderColours(); changed();
 });
 
+// colourwork chart: bands of motifs / pictures / plain / stripes (options.chart; a preset until edited)
+const isChart = () => textureOf(state.texture).family === "colourwork";
+function chartBands() {
+  if (Array.isArray(state.options.chart)) return state.options.chart;
+  const C = CAT.colourwork, key = state.options.chart_preset || C.default;
+  return (C.presets.find((p) => p.key === key) || C.presets[0]).bands;
+}
+function renderChart() {
+  $("chartSec").hidden = !isChart();
+  if (!isChart()) return;
+  const C = CAT.colourwork;
+  const edit = () => { renderChart(); renderColours(); renderFinish(); changed(); };
+  const mine = () => { if (!Array.isArray(state.options.chart)) state.options.chart = structuredClone(chartBands()); return state.options.chart; };
+  const presets = el("div", { class: "seg small", role: "radiogroup", "aria-label": "Chart presets" });
+  seg(presets, C.presets.map((p) => [p.key, p.name]), Array.isArray(state.options.chart) ? null : (state.options.chart_preset || C.default),
+    (k) => { delete state.options.chart; state.options.chart_preset = k; edit(); });
+  const bands = chartBands();
+  const chip = (get, set) => {
+    const i = get() ?? 0;
+    return el("button", { class: "chip-btn", style: `background:${state.colours[i]}`, title: `AMS ${i + 1} — click to change`, "aria-label": `Colour AMS ${i + 1}`,
+      onclick: () => { set((i + 1) % MAX_SLOTS); edit(); } }, el("span", {}, String(i + 1)));
+  };
+  const kindOf = (b) => "plain" in b ? "plain" : "stripes" in b ? "stripes" : "picture" in b ? "picture" : b.art ? "art" : `m:${b.motif || b.chart}`;
+  const accent = (b) => {
+    const m = C.motifs.find((x) => x.key === (b.motif || b.chart));
+    const art = b.art || (m && m.art);
+    return art ? art.join("").includes("o") : (b.tones || 2) >= 3;
+  };
+  const rows = bands.map((b, idx) => {
+    const groups = { Motifs: [], "Your charts": [] };
+    for (const m of C.motifs) groups[m.group].push([`m:${m.key}`, m.name]);
+    const opts = [["Motifs", groups.Motifs], ["Your charts", groups["Your charts"]],
+      ["Other", [...(b.art ? [["art", "Pixel art (Claude)"]] : []), ["picture", "Picture"], ["plain", "Plain"], ["stripes", "Stripes"]]]];
+    const sel = el("select", { "aria-label": "Band" }, ...opts.filter(([, xs]) => xs.length).map(([g, xs]) =>
+      el("optgroup", { label: g }, ...xs.map(([v, n]) => { const o = el("option", { value: v }, n); o.selected = v === kindOf(b); return o; }))));
+    sel.addEventListener("change", () => {
+      const B = mine(), cols = B[idx].colours || [0, 1, 2], v = sel.value;
+      B[idx] = v === "plain" ? { plain: cols[0], mm: 6 } : v === "stripes" ? { stripes: [cols[0], cols[1] ?? 1], mm: 8, layers: 2 }
+        : v === "picture" ? { picture: null, fill: true, colours: cols.slice(0, 2) } : { motif: v.slice(2), colours: cols };
+      edit();
+    });
+    const k = kindOf(b), chips = [];
+    if (k === "plain") chips.push(chip(() => b.plain, (x) => { mine()[idx].plain = x; }));
+    else if (k === "stripes") (b.stripes || [0, 1]).forEach((s_, j) => chips.push(chip(() => s_, (x) => { mine()[idx].stripes[j] = x; })));
+    else (b.colours || [0, 1, 2]).slice(0, accent(b) ? 3 : 2).forEach((s_, j) =>
+      chips.push(chip(() => s_, (x) => { const B = mine(); B[idx].colours = [...(B[idx].colours || [0, 1, 2])]; B[idx].colours[j] = x; })));
+    const kids = [sel, el("div", { class: "chips" }, ...chips),
+      el("button", { class: "x", title: "Remove band", "aria-label": "Remove band", disabled: bands.length < 2, onclick: () => { mine().splice(idx, 1); edit(); } }, "×")];
+    if (k === "plain" || k === "stripes" || (k === "picture" && !b.fill)) {
+      const mm = parseFloat(b.mm || (k === "picture" ? 40 : 6));
+      const out = el("output", {}, `${mm} mm`);
+      const r = el("input", { type: "range", min: 2, max: k === "picture" ? 200 : 60, step: 1, value: mm, "aria-label": "Band height" });
+      r.addEventListener("input", () => { out.textContent = `${r.value} mm`; });
+      r.addEventListener("change", () => { mine()[idx].mm = +r.value; edit(); });
+      kids.push(el("div", { class: "share" }, r, out));
+    }
+    if (k === "picture") {
+      const f = el("div", { class: "seg small sub" });
+      seg(f, [["fill", "Fill the rest"], ["mm", "Fixed height"], ["3", "3 tones"]].map(([v, l]) => [v, l]),
+        b.fill ? "fill" : "mm", (v) => { const B = mine()[idx]; if (v === "3") B.tones = (B.tones || 2) >= 3 ? 2 : 3; else if (v === "fill") B.fill = true; else { delete B.fill; B.mm = B.mm || 40; } edit(); });
+      kids.push(f);
+    } else if (k !== "plain" && k !== "stripes") {
+      const f = el("div", { class: "seg small sub" });
+      seg(f, [["1", "×1"], ["2", "×2"], ["3", "×3"]], String(b.repeat || 1), (v) => { mine()[idx].repeat = +v; edit(); });
+      kids.push(f);
+    }
+    return el("div", { class: "band" }, ...kids);
+  });
+  $("chartBands").replaceChildren(presets, ...rows.reverse());
+  $("addChartBand").disabled = bands.length >= 12;
+}
+$("addChartBand").addEventListener("click", () => {
+  const B = Array.isArray(state.options.chart) ? state.options.chart : (state.options.chart = structuredClone(chartBands()));
+  B.push({ motif: "zigzag", colours: [0, 1] }); renderChart(); renderColours(); changed();
+});
+
 let askDrawn = false;
-function renderAll() { if (!askDrawn) { askDrawn = true; renderAsk(); } renderShapes(); renderTextures(); renderBands(); renderSizes(); renderColours(); renderFinish(); renderLid(); }
+function renderAll() { if (!askDrawn) { askDrawn = true; renderAsk(); } renderShapes(); renderTextures(); renderBands(); renderChart(); renderSizes(); renderColours(); renderFinish(); renderLid(); }
 
 function buildOptions() {
   const lidKeys = ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_plate", "tower", "engrave_base", "engrave_lid", "engrave_font"];
@@ -660,7 +742,7 @@ function changed(newShape = false, dragging = false) {
 async function requestBuild(draft, quiet = false) {
   const seq = ++reqSeq;
   $("status").hidden = false; $("status").classList.toggle("quiet", quiet);
-  $("statusText").textContent = quiet ? "Refining…" : draft ? "Sketching…" : ({ fabric: "Knitting…", droop: "Spinning strands…", halftone: "Screening…", mix: "Stacking bands…", spiral: "Folding…", shell: "Shaping…", flat: "Mapping the picture…" }[textureOf(state.texture).family] || "Weaving…");
+  $("statusText").textContent = quiet ? "Refining…" : draft ? "Sketching…" : ({ fabric: "Knitting…", droop: "Spinning strands…", halftone: "Screening…", colourwork: "Knitting the chart…", mix: "Stacking bands…", spiral: "Folding…", shell: "Shaping…", flat: "Mapping the picture…" }[textureOf(state.texture).family] || "Weaving…");
   try {
     const res = await fetch("/api/build", { method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ shape: state.shape, texture: state.texture, nozzle: state.nozzle, params: state.params, draft,
@@ -703,13 +785,14 @@ function renderPrint(d) {
   $("dl3mf").href = `/api/job/${d.id}/download`; $("dlStl").href = `/api/job/${d.id}/stls`;
   const noz = CAT.nozzles.find((n) => n.size === s.nozzle);
   const notes = [...d.warnings];
-  if (tex.swaps === "layer" && s.colours > 1 && !["halftone", "flat"].includes(tex.family)) notes.push("This pattern changes colour about once per layer — expect a long print, or pick one colour.");
+  if (tex.swaps === "layer" && s.colours > 1 && !["halftone", "flat", "colourwork"].includes(tex.family)) notes.push("This pattern changes colour about once per layer — expect a long print, or pick one colour.");
   if ((tex.family === "halftone" || isMix()) && s.swaps > 300) notes.push(`${fmt(s.swaps)} colour changes — Lean purge, a 0.8 nozzle or a shorter halftone band cut that a lot.`);
   notes.push({
     lattice: "No supports, no infill — the rods are the object. Print on a clean plate, no brim.",
     fabric: "Vase mode off. The layer height must stay at " + noz.layer + " mm — the pattern is built on it.",
     droop: state.texture === "fur" ? "Hairs print as fast bridges at full fan, a little cooler, so they stay stiff — keep the project's cooling." : "Glossy or translucent PETG/PLA shows the strands best. Don't slow overhangs down or raise the fan — the strands only droop while molten.",
     halftone: `Prints at ${s.layer_h} mm layers with one ${s.line} mm line — keep those, the picture is built on them.`,
+    colourwork: `Prints at ${s.layer_h} mm layers with one ${s.line} mm line, ${s.stitches} stitches around (${s.stitch_mm} mm each) — keep those, the chart is built on them.`,
     ...{},
     shell: { voronoi: "Every cell has a pointed roof, so the holes print without supports.",
       litho: "The picture shows when lit from inside: an LED puck or tealight, never a flame.",
@@ -729,6 +812,7 @@ function renderPrint(d) {
           shell: [["Walls", state.texture === "litho" ? "solid (lithophane)" : "2–4 loops"], ["Infill", "0%"]],
           flat: [["Layer height", `${s.layer_h} mm`], ["Pixel", `${s.pixel} mm`], ["Solid", "100%"]],
           halftone: [["Line width", `${s.line} mm, 1 wall`], ["Infill", "0%"], ["Colour changes", "every layer"]],
+          colourwork: [["Line width", `${s.line} mm, 1 wall`], ["Infill", "0%"], ["Colour changes", "every layer in 2–3 colour bands"]],
           droop: [["Walls", "2 loops, strands 1 line"], ["Overhang slow-down", "off"], ["Fan", "≤ 20%"], ["Nozzle", "+5 °C"]] }[tex.family]),
     ["Supports", "none"], ["Filament", "Bambu PLA Matte"]];
   $("settings").replaceChildren(...set.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));

@@ -208,6 +208,29 @@ Composing well:
   "an autumn version of my tray" means start from that link's parameters.
 - Finish with the check's numbers in mind and say any trade-off in the summary (time, purge, colour changes).
 
+### Colourwork: jacquard ribs and bead knit, charted (Oct 15 vision board)
+Textures `jacquard` (each stitch a rib — folk-art vases, fair-isle) and `beads` (each stitch a dome — beaded boxes),
+on every shape halftone fits (+ `box`, `gourd`, `jar`). Built like halftone: a band's 2-3 colours take turns layer
+by layer and the stitches charted in that layer's colour bulge out (overhang <= half a line). One pixel = one stitch
+around x a whole number of colour cycles up (~square). Options: `chart` (bands, bottom->top) or `chart_preset`,
+`stitch_size` fine|regular|bold, `rim` none|braid|rope (+`rim_slot`), `band` 1|2 layers per colour.
+Bands: `{"motif": key, "colours": [g, m, a], "repeat", "gap"}` · `{"art": [rows, top first], "once"}` (. X o) ·
+`{"chart": stem}` (CHART plugin) · `{"picture": key, "fill"|"mm"|"rows", "tones": 2|3, ...picture options}` ·
+`{"plain": slot, "mm"}` · `{"stripes": [slots], "mm", "layers"}`. No `fill` band: the list repeats up the wall.
+Motifs tile a whole number of times around (spare columns become ground gaps), so nothing is cut at the seam.
+CHART plugins (`plugin new chart NAME`): `CHART = dict(name=...)` + `ART = [rows]` or `chart(cols, rows[, p])` -> int
+array (rows, cols) top first; `plugin check` renders a jacquard cup and `<stem>_pixels.png` — look at both.
+Colour changes: ~1 per layer inside 2-3 colour bands (3.6 per mm at 0.4), none in plain/stripe bands — warn on
+tall pieces, suggest `band: 2`, plain bands or a smaller size.
+
+### Lidded boxes, labyrinth lids, paneled vessels
+`box`: width/depth/height + roundness % (0 rounded rectangle, 100 stadium; square + 100 = round). Lid looks include
+`labyrinth`: rings that follow the outline (racetracks on a stadium), each broken at alternating sides with bridges
+between — raised over a two-colour weave, 3 colours; on a lid the rings print first on the bed so they end up on
+top (`weave_face` bottom, set automatically). Knob `tube`: a ribbed open cup. `gourd` / `jar`: revolved silhouettes
+cut into `sides` panels (5-16; 0 round) dished by `panel` % — wall families press the panels in after building,
+woven clips rods to the paneled outline.
+
 ### Woven modifiers: twist, ombré, image in the weave (Claude-only)
 These aren't texture cards — they're options Claude puts on any woven design when the request asks, and the studio
 then shows them under Finish ("set by Claude") to tune or remove:

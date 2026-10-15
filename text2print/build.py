@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import trimesh
 
-from . import bambu, compose, droop, extras, fabric, fittings, flat, halftone, lattice, printer, shell, spiral, verify
+from . import bambu, colourwork, compose, droop, extras, fabric, fittings, flat, halftone, lattice, printer, shell, spiral, verify
 from .meshops import volume as _vol, watertight as _wt
 from .shapes import SHAPES
 
@@ -32,6 +32,7 @@ TEXTURES = {**{k: dict(family="lattice", **{kk: vv for kk, vv in v.items() if kk
             **{k: dict(family="droop", slots=1, swaps="none", **v) for k, v in droop.STYLES.items()},
             "halftone": dict(family="halftone", slots=2, swaps="layer", name="Halftone",
                              blurb="Two colours alternate every layer; the one that ribs outward paints a picture"),
+            **{k: dict(family="colourwork", swaps="layer", **v) for k, v in colourwork.STYLES.items()},
             **{k: dict(family="spiral", slots=1, swaps="none", **v) for k, v in spiral.STYLES.items()},
             **{k: dict(family="shell", slots=1, swaps="none", **v) for k, v in shell.STYLES.items()},
             "flatlitho": dict(family="flat", slots=1, swaps="none", **flat.STYLES["litho"]),
@@ -66,6 +67,13 @@ OPTIONS = {
     "spiral": [("folds", "Folds", "seg", [("8", "8"), ("16", "16"), ("24", "24"), ("36", "36")], "24"),
                ("turn", "Twist", "seg", [("0", "None"), ("60", "60°"), ("120", "120°"), ("240", "240°")], "120")],
     "mix": [("purge", "Purge", "seg", [("standard", "Standard"), ("lean", "Lean — less waste, slight tint")], "standard")],
+    "colourwork": [("chart_preset", "Chart", "seg", [(k, p_["name"]) for k, p_ in colourwork.PRESETS.items()], colourwork.DEFAULT_PRESET),
+                   ("picture", "Picture", "seg", [(k, v["name"]) for k, v in halftone.PICTURES.items()], "flames"),
+                   ("stitch_size", "Stitch", "seg", [("fine", "Fine"), ("regular", "Regular"), ("bold", "Bold")], "regular"),
+                   ("rim", "Rim", "seg", [("none", "Plain"), ("braid", "Braid"), ("rope", "Rope")], "none"),
+                   ("band", "Layers per colour", "seg", [("1", "1 — sharpest"), ("2", "2 — half the changes")], "1"),
+                   ("purge_piece", "Purge into", "seg", [("tower", "Prime tower"), ("coaster", "A coaster too")], "tower"),
+                   ("purge", "Purge", "seg", [("standard", "Standard"), ("lean", "Lean — less waste, slight tint")], "standard")],
     "halftone": [("picture", "Picture", "seg", [(k, v["name"]) for k, v in halftone.PICTURES.items()], "flames"),
                  ("band", "Layers per colour", "seg", [("1", "1 — sharpest"), ("2", "2"), ("3", "3 — a third")], "1"),
                  ("area", "Picture on", "seg", [("full", "Whole piece"), ("half", "Lower half"), ("third", "Lower third")], "full"),
@@ -218,12 +226,12 @@ def lid_textures():
     (not droop: strands would point up once the lid is flipped on; not fuzzy/litho/flat)."""
     out = [dict(key="match", name="Match the piece", family="match"), dict(key="plain", name="Plain", family="plain")]
     for k, t in TEXTURES.items():
-        if t["family"] in ("lattice", "fabric", "halftone", "spiral") or k == "voronoi":
+        if t["family"] in ("lattice", "fabric", "halftone", "colourwork", "spiral") or k == "voronoi":
             out.append(dict(key=k, name=t["name"], family=t["family"]))
     return out
 
 
-LID_KNOBS = [("knob", "Knob"), ("button", "Flat button"), ("none", "None")]
+LID_KNOBS = [("knob", "Knob"), ("button", "Flat button"), ("tube", "Tube"), ("none", "None")]
 LID_SKIP = ("lid", "lid_fit", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
             "engrave_lid", "zones", "zone_style", "course_rows", "purge_piece", "floor", "rim_loops",
             "purge", "handles")
@@ -313,6 +321,11 @@ def _lid_cap(shape, S, T, texture, v, nz, colours, options, parts, ls, t_plate, 
         cp.setdefault("wall", 9.0); cp.setdefault("floor", 4.0)
         if "dish" in v:
             cp.update(dish=0, pillow=0, floor=Hs)
+    if TEXTURES[cap_tex]["family"] == "lattice":
+        cap_opts["weave_face"] = "bottom"                       # the lid's top prints on the bed
+    if cap_tex != "mix" and TEXTURES[cap_tex].get("slots", 1) >= 3 and len(cap_cols) < 3:
+        more = [c for c in list(colours) + DEFAULT_COLOURS if c not in cap_cols]
+        cap_cols = cap_cols + more[:3 - len(cap_cols)]
     cap = make(cap_shape, cap_tex, cp, nz.size, cap_cols, cap_opts, draft=draft, _raw=True)
     cparts = [(n_, m_, s_, c_) for n_, m_, s_, c_ in cap.parts]
     # the cap's floor (= the lid's top) thickness: where a vertical probe near the centre leaves the solid
@@ -366,7 +379,8 @@ def _lid_cap(shape, S, T, texture, v, nz, colours, options, parts, ls, t_plate, 
                     rest.append(("graft", piece, 1 + i % 2, cap_cols[i % 2]))
             grafted = rest
     kc = cap_cols[0] if len(set(cap_cols)) == 1 else (cap_cols[0] if pick != "match" else top_col)
-    knob_m = None if knob_style == "none" else (extras.button(ls["knob"]) if knob_style == "button" else ls["knob"])
+    knob_m = None if knob_style == "none" else (extras.button(ls["knob"]) if knob_style == "button" else
+                                                   extras.tube(ls["knob"]) if knob_style == "tube" else ls["knob"])
     lid_parts = [("Lid", m_, s_, c_) for _, m_, s_, c_ in grafted] + ([("Knob", knob_m, 1, kc)] if knob_m is not None else [])
     flip = trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0])
     assembled = []
@@ -565,7 +579,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         rods = lattice.weave(region, nz, texture, group=int(options.get("course_group", 1) or 1),
                              params=_pl.param_values(T.get("params"), options),
                              twist=float(options.get("weave_twist") or 0.0), ombre=_ombre_stops(options),
-                             picture=_weave_picture(region, options))
+                             picture=_weave_picture(region, options), face=options.get("weave_face", "top"))
         by_slot = rods.meshes()
         # same colour on two slots -> one part, one filament, no swaps between them
         merged = {}
@@ -658,6 +672,29 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         extra = dict(sections=info["sections"])
         warnings.append("Prints in spiral vase mode — one seamless wall, no colour changes. Dual or tri-colour silk "
                         "makes the folds flash between colours.")
+    elif T["family"] == "colourwork":
+        chart = options.get("chart")
+        if isinstance(chart, str):
+            chart = json.loads(chart)
+        if not chart:
+            chart = colourwork.PRESETS.get(options.get("chart_preset") or colourwork.DEFAULT_PRESET,
+                                           colourwork.PRESETS[colourwork.DEFAULT_PRESET])["bands"]
+        meshes, info = colourwork.build(S, v, nz, style=texture, chart=chart, size=options.get("stitch_size", "regular"),
+                                        band=int(options.get("band", 1) or 1), rim=options.get("rim", "none"),
+                                        rim_slot=options.get("rim_slot"), draft=draft, options=options)
+        merged, slot_col = {}, {}
+        for slot, mesh in sorted(meshes.items()):
+            merged.setdefault(colours[slot], []).append(mesh); slot_col[slot] = colours[slot]
+        parts = [(f"colour {k}", trimesh.util.concatenate(ms), k, col) for k, (col, ms) in enumerate(merged.items(), 1)]
+        seq = [colours[s_] for s_ in info["slot_seq"]]
+        transitions = [(a, b) for a, b in zip(seq, seq[1:]) if a != b]
+        swaps = len(transitions)
+        over = printer.overrides(nz.size, "halftone", slots=len(parts), floor_layers=info["floor_layers"],
+                                 layer_h=info["layer_h"], line_w=info["line_w"])
+        extra = dict(stitches=info["cols"], stitch_mm=info["stitch_mm"], layers=info["layers"], line=info["line_w"])
+        if swaps > 250:
+            warnings.append(f"{swaps} colour changes: long print. 'Layers per colour: 2', plain or stripe bands, or a "
+                            "smaller piece cut them.")
     elif T["family"] == "halftone":
         meshes, info = halftone.build(S, v, nz, picture_name=options.get("picture", "flames"),
                                       image_path=options.get("image"), band=int(options.get("band", 1)), draft=draft,
@@ -727,6 +764,13 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
                 warnings.append("Vase mode prints one unbroken wall, so this basket has no handle slots.")
             else:
                 parts = _cut_handles(parts, v, inf, locals().get("mix_preview"))
+    # ── paneled silhouettes: the wall families built it round; press the panels in (woven clips to them itself) ──
+    pw = S.panel(v) if (T["family"] not in ("lattice", "flat") and hasattr(S, "panel")) else None
+    if pw is not None:
+        seen_p = set(); inf = locals().get("info") or {}
+        for m in [m for _, m, _, _ in parts] + [inf.get("draped")] + [m for _, m, _, _ in (locals().get("mix_preview") or [])]:
+            if m is not None and id(m) not in seen_p:
+                seen_p.add(id(m)); pw(m)
     # ── colour zones: up to 4 colours by height (fabric, droop, and woven when coloured by height) ──
     zones = int(options.get("zones", 1) or 1)
     zoned = zones > 1 and (T["family"] in ("fabric", "droop", "shell") or
@@ -820,7 +864,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
                  triangles=int(sum(len(m.faces) for _, m, _, _ in parts)), colours=len({c for _, _, _, c in parts}), swaps=int(swaps),
                  grams_est=int(round(float(vol) * 1.26 + purge_g)),
                  grams_part=int(round(float(vol) * 1.26)), grams_purge=int(round(purge_g)), swap_minutes=round(swaps * SWAP_SECONDS / 60),
-                 layer_h=extra.pop("layer_h", None) or (halftone.RECIPE[nz.size][0] if T["family"] == "halftone" else nz.layer_h),
+                 layer_h=extra.pop("layer_h", None) or (halftone.RECIPE[nz.size][0] if T["family"] in ("halftone", "colourwork") else nz.layer_h),
                  nozzle=nz.size, verified=vstat, **extra)
     if max(hi[0] - lo[0], hi[1] - lo[1]) > 2 * printer.SAFE_HALF + 1:
         warnings.append("wider than 200 mm — the prime tower may not fit beside it")
@@ -857,7 +901,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     lid_parts, assembled = [], []
     style = options.get("lid", "none")
     style = "slip" if style == "lid" else style
-    woven_rect = T["family"] == "lattice" and shape in ("basket", "catchall")
+    woven_rect = T["family"] == "lattice" and shape in ("basket", "catchall", "box")
     if (outline is not None or woven_rect) and style in ("slip", "thread", "magnets") and shape in extras.LID_SHAPES:
         if style != "slip":
             warnings.append("Threads and magnets need a round rim — this piece gets a slip lid.")

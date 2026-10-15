@@ -387,7 +387,7 @@ def _amphora(v):
 _WOVEN_PARAMS = [Param("wall", "Wall", 4, 16, 0.5, 6, family="lattice"), Param("floor", "Floor", 2, 10, 0.5, 4, family="lattice")]
 KIND_PROFILES = {"cachepot": _cachepot, "sleeve": _sleeve, "lantern": _lantern, "pendant": _pendant,
                  "puck": _puck, "amphora": _amphora}
-_WALL = ("fabric", "droop", "halftone", "mix", "spiral", "shell")
+_WALL = ("fabric", "droop", "halftone", "colourwork", "mix", "spiral", "shell")
 for key, name, blurb, params in [
     ("cachepot", "Cachepot", "Covers a 3–8 in nursery pot; no water, so any texture works", [
         Param("pot", "Nursery pot", 3, 7, 1, 6, "in"), Param("extra", "Extra height", 0, 40, 1, 8)]),
@@ -546,3 +546,95 @@ class PluginOutline(Shape):
                 return d if z < fz else np.maximum(d, -(d + wall))
             return f
         return Region(n, rod_h, sdf_at, self._extent(v), False, nf)
+
+
+
+# ── lidded boxes: rounded rectangle -> stadium (pill) -> round, by one "roundness" slider ──────────────────
+class LidBox(Box):
+    """A box made for a lid: roundness 0 % = rounded rectangle, 100 % = stadium (or a circle when square)."""
+
+    def _v(self, v):
+        r = min(v["width"], v["depth"]) / 2
+        return dict(v, corner=max(6.0, r * v.get("round", 100) / 100.0 - 0.01), handles=0)
+
+    def lattice(self, v, rod_h):
+        return super().lattice(self._v(v), rod_h)
+
+    def outline(self, v):
+        return super().outline(self._v(v))
+
+    def profile(self, v):
+        return super().profile(self._v(v))
+
+
+SHAPES["box"] = LidBox("box", "Lidded box", "Round, oval-ended (stadium) or rounded-square box — made to take a lid",
+                       ("lattice", "fabric", "halftone", "mix", "spiral", "shell"), [
+    Param("width", "Width", 60, 220, 1, 170), Param("depth", "Depth", 50, 200, 1, 95), Param("height", "Height", 20, 120, 1, 50),
+    Param("round", "Roundness", 0, 100, 1, 100, "%"),
+    Param("wall", "Wall", 6, 16, 0.5, 9, family="lattice"), Param("floor", "Floor", 2, 10, 0.5, 4, family="lattice")])
+
+
+# ── paneled vessels: a revolved silhouette cut into flat or dished panels (sides >= 5), like faceted ceramics ──
+def panel_factor(theta, sides, depth_pct):
+    """Radius multiplier around the piece: 1 at the ridges, cos(pi/N) at a flat panel's middle, dished in by
+    depth % of the radius. Constant up the height, so no new overhang."""
+    N = int(round(sides))
+    if N < 5:
+        return np.ones_like(np.asarray(theta, float))
+    w = math.pi / N; phi = np.mod(np.asarray(theta, float), 2 * w) - w
+    return math.cos(w) / np.cos(phi) - depth_pct / 100.0 * (1 - (phi / w) ** 2)
+
+
+class Paneled(Profiled):
+    kind = "paneled"
+    POINTS = {}
+
+    def profile(self, v):
+        from scipy.interpolate import PchipInterpolator
+        R, h = v["diameter"] / 2, v["height"]
+        t, r = zip(*self.POINTS)
+        f = PchipInterpolator(np.array(t) * h, np.array(r) * R)
+        return _clamped(lambda z: float(f(min(max(z, 0), h))), h, rmin=14.0)
+
+    def panel(self, v):
+        """-> warp(mesh) in place, or None when round."""
+        if int(round(v.get("sides", 0))) < 5:
+            return None
+        def warp(mesh):
+            V = mesh.vertices; th = np.arctan2(V[:, 1], V[:, 0])
+            f = panel_factor(th, v["sides"], v.get("panel", 0))
+            mesh.vertices = np.column_stack([V[:, 0] * f, V[:, 1] * f, V[:, 2]])
+            return mesh
+        return warp
+
+    def lattice(self, v, rod_h):
+        reg = super().lattice(v, rod_h)
+        if int(round(v.get("sides", 0))) < 5:
+            return reg
+        base = reg._sdf_at
+
+        def sdf_at(z):
+            g = base(z)
+            def f(x, y):
+                k = panel_factor(np.arctan2(y, x), v["sides"], v.get("panel", 0))
+                return g(x / k, y / k) * k
+            return f
+        reg._sdf_at = sdf_at
+        return reg
+
+
+for key, name, blurb, pts, dflt in [
+    ("gourd", "Paneled gourd", "Two bellies and a flared lip, cut into panels — the faceted ceramic look",
+     [(0, .78), (.06, .92), (.24, 1.0), (.42, .82), (.55, .64), (.7, .8), (.8, .74), (.9, .5), (.97, .56), (1, .62)], (130, 220)),
+    ("jar", "Paneled jar", "A shouldered jar with a flared neck, cut into panels",
+     [(0, .84), (.06, .96), (.2, 1.0), (.7, 1.0), (.84, .8), (.9, .66), (.96, .7), (1, .78)], (110, 170)),
+]:
+    _p = Paneled(key, name, blurb, ("lattice",) + _WALL, [
+        Param("diameter", "Widest", 70, 190, 1, dflt[0]), Param("height", "Height", 60, 240, 1, dflt[1]),
+        Param("sides", "Panels", 0, 16, 1, 8, ""), Param("panel", "Panel dish", 0, 10, 0.5, 3, "%")] + _WOVEN_PARAMS, round=True)
+    _p.POINTS = pts
+    SHAPES[key] = _p
+
+for _s in list(SHAPES.values()):                    # colourwork goes wherever halftone does (same print recipe)
+    if "halftone" in _s.families and "colourwork" not in _s.families:
+        _s.families = tuple(_s.families) + ("colourwork",)

@@ -70,7 +70,7 @@ def split_by_height(mesh, edges, draft=False):
 
 # ── lids ──────────────────────────────────────────────────────────────────────
 LID_SHAPES = {"cup", "vase", "bowl", "dish", "tray", "custom", "cachepot", "sleeve", "lantern", "amphora",
-              "basket", "catchall", "platter"}
+              "basket", "catchall", "platter", "box", "jar"}
 FITS = {"snug": 0.15, "slip": 0.25, "loose": 0.40}          # per side, PLA (research §4.1)
 THREAD = dict(pitch=3.0, starts=2, depth=1.2, clear=0.2, height=9.0, ring=3.0)   # 45 deg flanks, 0.4 diametral
 MAGNET = dict(d=6.0, h=2.0, clear_d=0.15, clear_h=0.2, n=3, land=6.5)            # 6x2 N52, press fit
@@ -350,6 +350,19 @@ def prism(polys, z0, z1):
     ms = [trimesh.creation.extrude_polygon(p, z1 - z0) for p in polys]
     m = trimesh.util.concatenate(ms); m.apply_translation([0, 0, z0])
     return _m3d(m)
+
+
+def tube(knob):
+    """A ribbed tube knob, open on top like a little cup (the labyrinth lids' knob): printed open end down, a 1.6 mm
+    disc bridging its bore, then the same press-fit peg as the knob."""
+    import manifold3d as m3d
+    r = max(7.0, min(10.0, float(np.abs(knob.vertices[:, :2]).max()) * 0.62)); H = 13.0; bore = r - 2.0
+    body = m3d.Manifold.cylinder(H, r - 0.45, r - 0.45, 64)
+    ribs = [m3d.Manifold.cylinder(0.5, r, r, 64).translate([0, 0, z]) for z in np.arange(0.4, H - 1.0, 1.1)]
+    body = m3d.Manifold.batch_boolean([body] + ribs, m3d.OpType.Add)
+    body = body - m3d.Manifold.cylinder(H - 1.6, bore, bore, 64).translate([0, 0, -0.01])
+    peg = m3d.Manifold.cylinder(LID_T + 0.6, (KNOB_HOLE - 0.15) / 2, (KNOB_HOLE - 0.15) / 2, 48).translate([0, 0, H - 0.01])
+    return _tm(body + peg)
 
 
 def button(knob):

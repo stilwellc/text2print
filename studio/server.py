@@ -70,9 +70,15 @@ def _catalogue():
                pictures=[[c["key"], c["name"]] for c in pictures.choices() if c["key"] != "text"],
                noises=[[k, v] for k, v in __import__("text2print.shell", fromlist=["x"]).NOISE.items()],
                blends=[[k, v] for k, v in compose.BLEND_STYLES.items()], blendable=sorted(compose.BLENDABLE))
+    from text2print import colourwork as cw
+    charts = plugins.charts()
+    colourwork = dict(motifs=[dict(key=k, name=m["name"], art=m["art"], group="Motifs") for k, m in cw.MOTIFS.items()]
+                      + [dict(key=k, name=c["name"], art=c.get("art"), group="Your charts") for k, c in charts.items()],
+                      presets=[dict(key=k, name=v["name"], bands=v["bands"]) for k, v in cw.PRESETS.items()],
+                      default=cw.DEFAULT_PRESET)
     cfg = store.printer_config()
     return dict(printer=dict(name=printer.PRINTER, bed=printer.BED), nozzles=nozzles, shapes=shapes, options=options,
-                mix=mix, textures=textures, palette=build.PALETTE, colours=build.DEFAULT_COLOURS,
+                mix=mix, colourwork=colourwork, textures=textures, palette=build.PALETTE, colours=build.DEFAULT_COLOURS,
                 lid=dict(textures=build.lid_textures(), knobs=[list(k) for k in build.LID_KNOBS]),
                 pictures=dict(choices=pictures.choices(), fonts=[list(f) for f in pictures.fonts()],
                               layouts=[list(l) for l in pictures.LAYOUTS], errors=dict(plugins.ERRORS)),
