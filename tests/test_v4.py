@@ -857,3 +857,67 @@ def test_real_slicer_prints_the_new_weaves(tmp_path):
         assert "error" not in r, (w, r)
         g = zipfile.ZipFile(tmp_path / w / "sliced.3mf").read("Metadata/plate_1.gcode").decode(errors="ignore")
         assert len(re.findall(r"^M620 S\dA", g, re.M)) == b.stats["swaps"]
+
+
+# ── woven modifiers Claude sets: twist, ombré, image in the weave ───────────────────────────────────────────
+def test_twist_keeps_rods_inside_and_builds_watertight():
+    plain = build.make("vase", "grid", {"diameter": 90, "height": 90}, colours=["#8B3A2F", "#EDE3D1"])
+    b = build.make("vase", "grid", {"diameter": 90, "height": 90}, options={"weave_twist": 6},
+                   colours=["#8B3A2F", "#EDE3D1"])
+    assert all(m.is_watertight for _, m, _, _ in b.parts)
+    assert b.stats["swaps"] == plain.stats["swaps"]                  # twist costs no colour changes
+    for (_, m, _, _), (_, m0, _, _) in zip(b.parts, plain.parts):    # same footprint, different rods
+        assert np.allclose(m.bounds, m0.bounds, atol=1.0)
+    hi = lambda m: m.vertices[m.vertices[:, 2] > 60]                   # upper courses have turned
+    assert len(hi(b.parts[0][1])) != len(hi(plain.parts[0][1])) or not np.allclose(hi(b.parts[0][1]), hi(plain.parts[0][1]))
+
+
+def test_ombre_fades_colour_up_the_piece():
+    b = build.make("cup", "twill", {"diameter": 80, "height": 70}, options={"weave_ombre": "0,1"},
+                   colours=["#8B3A2F", "#EDE3D1"])
+    assert all(m.is_watertight for _, m, _, _ in b.parts)
+    v0 = b.parts[0][1].volume; v1 = b.parts[1][1].volume
+    z0 = b.parts[0][1].center_mass[2]; z1 = b.parts[1][1].center_mass[2]
+    assert z1 > z0 + 10                                              # first colour low, second high
+    assert 0.25 < v1 / (v0 + v1) < 0.75
+    three = build.make("cup", "twill", {"diameter": 80, "height": 70}, options={"weave_ombre": "0,1,2"},
+                       colours=["#8B3A2F", "#EDE3D1", "#2F4B6B"])
+    assert three.stats["colours"] == 3
+    zs = [m.center_mass[2] for _, m, _, _ in three.parts]
+    assert zs[0] < zs[1] < zs[2]
+
+
+@pytest.mark.parametrize("shape,dims,on", [("tray", {"width": 110, "height": 16, "dish": 0, "floor": 6}, None),
+                                           ("cup", {"diameter": 90, "height": 80}, "wall")])
+def test_picture_in_the_weave_splits_rods_without_overlap(shape, dims, on):
+    opts = {"weave_picture": "text", "text": "MOBI", "font": "impact"}
+    if on:
+        opts["weave_picture_on"] = on
+    plain = build.make(shape, "twill", dims, colours=["#8B3A2F", "#EDE3D1"])
+    b = build.make(shape, "twill", dims, options=opts, colours=["#8B3A2F", "#EDE3D1"])
+    assert all(m.is_watertight for _, m, _, _ in b.parts)
+    a, c = b.parts[0][1], b.parts[1][1]
+    inv = build.make(shape, "twill", dims, options=dict(opts, picture_invert=True), colours=["#8B3A2F", "#EDE3D1"])
+    assert abs(c.volume - plain.parts[1][1].volume) > 0.01 * c.volume  # the picture recoloured rods
+    assert abs(inv.parts[1][1].volume - c.volume) > 0.01 * c.volume                  # invert: the ground becomes slot 1
+    if on == "wall":
+        assert 0 < c.volume < 0.5 * (a.volume + c.volume)             # the words alone are slot 1, on a ground
+    import manifold3d as mf
+    def man(m):
+        return mf.Manifold(mf.Mesh(vert_properties=np.asarray(m.vertices, np.float32),
+                                   tri_verts=np.asarray(m.faces, np.uint32)))
+    assert (man(a) ^ man(c)).volume() < 1.0                          # colours never share plastic
+
+
+@pytest.mark.slicer
+def test_real_slicer_counts_weave_modifier_changes(tmp_path):
+    if not bambu.slicer_available():
+        pytest.skip("Bambu Studio not installed")
+    import re
+    b = build.make("cup", "twill", {"diameter": 60, "height": 40},
+                   options={"weave_twist": 4, "weave_picture": "text", "text": "HI", "font": "impact",
+                            "weave_picture_on": "wall"}, colours=["#8B3A2F", "#EDE3D1"])
+    r = bambu.slice_project(b.write_3mf(tmp_path / "w.3mf"), tmp_path / "s")
+    assert "error" not in r, r
+    g = zipfile.ZipFile(tmp_path / "s" / "sliced.3mf").read("Metadata/plate_1.gcode").decode(errors="ignore")
+    assert len(re.findall(r"^M620 S\dA", g, re.M)) == b.stats["swaps"]

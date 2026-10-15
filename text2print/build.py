@@ -484,6 +484,39 @@ def _course_edges(starts, gap, top, n, rows=1):
     return edges, [0] + [(i + 1) % n for i in range(len(picked))]
 
 
+def _ombre_stops(options):
+    o = options.get("weave_ombre")
+    if not o:
+        return None
+    stops = [int(x) for x in (o.split(",") if isinstance(o, str) else o)]
+    return stops if len(stops) >= 2 else None
+
+
+def _weave_picture(region, options):
+    """Image in the weave: (dark(x, y, z), first course) from the picture library, or None. Low pieces carry it
+    across the top courses (seen from above); tall ones around the wall (seen from the side)."""
+    key = options.get("weave_picture")
+    if not key:
+        return None
+    from . import pictures
+    pic = dict(options, picture=key)
+    on = options.get("weave_picture_on") or ("top" if region.height < 0.45 * 2 * region.extent else "wall")
+    if on == "top":
+        g = np.linspace(-region.extent, region.extent, 400); X, Y = np.meshgrid(g, g, indexing="ij")
+        ins = region.sdf(region.z(region.n - 1))(X, Y) <= 0
+        if not ins.any():
+            return None
+        x0, x1 = X[ins].min(), X[ins].max(); y0, y1 = Y[ins].min(), Y[ins].max()
+        f = pictures.darkness(pic, (x1 - x0) / max(y1 - y0, 1e-6))
+        courses = int(options.get("weave_picture_courses") or 3)
+        return (lambda x, y, z: f((x - x0) / (x1 - x0), (y - y0) / (y1 - y0)) > 0.5,
+                max(region.floor_courses if region.floor_courses < region.n - courses else 0, region.n - courses))
+    H = region.height
+    f = pictures.darkness(pic, 2 * math.pi * region.extent / max(H, 1e-6))
+    return (lambda x, y, z: f(np.mod(np.arctan2(y, x) / (2 * math.pi), 1.0), np.asarray(z) / H) > 0.5,
+            region.floor_courses)
+
+
 def _png_data_url(rgba, max_px=480):
     """Small PNG data URL of the backlit estimate (the studio shows it beside the 3D view)."""
     import base64, io
@@ -530,7 +563,9 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         region = S.lattice(v, nz.rod_h)
         from . import plugins as _pl
         rods = lattice.weave(region, nz, texture, group=int(options.get("course_group", 1) or 1),
-                             params=_pl.param_values(T.get("params"), options))
+                             params=_pl.param_values(T.get("params"), options),
+                             twist=float(options.get("weave_twist") or 0.0), ombre=_ombre_stops(options),
+                             picture=_weave_picture(region, options))
         by_slot = rods.meshes()
         # same colour on two slots -> one part, one filament, no swaps between them
         merged = {}

@@ -208,6 +208,18 @@ Composing well:
   "an autumn version of my tray" means start from that link's parameters.
 - Finish with the check's numbers in mind and say any trade-off in the summary (time, purge, colour changes).
 
+### Woven modifiers: twist, ombré, image in the weave (Claude-only)
+These aren't texture cards — they're options Claude puts on any woven design when the request asks, and the studio
+then shows them under Finish ("set by Claude") to tune or remove:
+- `weave_twist` (deg/course, -12..12): the lattice turns as it climbs (built by rotating each course's region,
+  weaving, and rotating back, so rods stay clipped inside the true outline). 2-4 = spiral, 8+ = swirl.
+- `weave_ombre` ("0,1" or "0,1,2"): per-course colour, ordered-dithered bottom->top (golden-ratio thresholds, so
+  no banding). Replaces course parity / course_group; still one change per course.
+- `weave_picture` (+ text/font/picture_* and `weave_picture_on` top|wall, `weave_picture_courses`): rods are split
+  where the picture is dark and that run prints in slot 1; pieces stop half a bead short of a colour change and
+  specks shorter than one rod merge into their neighbours. Top = flat pieces read from above (the last N courses);
+  wall = around the side (u = angle, v = height). A rod is the pixel: bold words/shapes, >= 14 mm letters.
+
 ### Sliders, budgets, variations, sets, memory, print reviews
 - **Sliders on every plugin.** Add `PARAMS = {"key": dict(label=..., lo=..., hi=..., default=..., step=..., unit=...)}`
   (2-4 of the knobs that matter: count, size, density, angle…) and take one more argument: `draw(u, v, aspect, p)`,

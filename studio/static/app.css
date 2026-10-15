@@ -302,3 +302,6 @@ h2 { font-size: 15px; margin-bottom: 12px; }
 .ask .askrow { flex-wrap: nowrap; }
 .ask .askrow .grow { flex: 1; }
 .ask .askrow .toggle span, .ask .askrow button { white-space: nowrap; }
+.ombre { display: flex; gap: 8px; margin: 2px 0 10px; }
+.ombre .chip-btn { width: 30px; height: 30px; border-radius: 50%; border: 1px solid rgba(0,0,0,.14); padding: 0; position: relative; cursor: pointer; }
+.ombre .chip-btn span { position: absolute; inset: 0; display: grid; place-items: center; font-size: 11px; font-weight: 600; color: rgba(255,255,255,.92); text-shadow: 0 0 2px rgba(0,0,0,.45); }
