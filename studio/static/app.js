@@ -59,7 +59,7 @@ function readUrl() {
   const toggleKeys = Object.values(CAT.options).flat().filter((o) => o.kind === "toggle").map((o) => o.key).concat(["text_invert", "picture_invert"]);
   for (const [k, v] of q) {
     if (k === "mix") { try { state.bands = JSON.parse(v); } catch (e) { /* a bad link keeps the default */ } }
-    else if (optKeys.includes(k)) state.options[k] = toggleKeys.includes(k) ? v === "1" : v;   // only checkboxes are booleans
+    else if (optKeys.includes(k) || k.startsWith("pp_")) state.options[k] = toggleKeys.includes(k) ? v === "1" : v;
     else if (!["shape", "texture", "nozzle", "c"].includes(k)) state.params[k] = parseFloat(v);
   }
 }
@@ -80,6 +80,7 @@ function linkFor() {
   }
   if (state.options.image && IMAGE_TEXTURES.includes(state.texture)) q.set("image", state.options.image);
   for (const k of ["engrave_base", "engrave_font"]) if (state.options[k]) q.set(k, state.options[k]);
+  for (const [k, v] of Object.entries(state.options)) if (k.startsWith("pp_")) q.set(k, v);
   return "?" + q.toString();
 }
 const writeUrl = () => history.replaceState(null, "", linkFor());
@@ -296,6 +297,7 @@ function renderFinish() {
     return true;
   });
   const kids = shown.flatMap((o) => o.key === "picture" ? pictureControl(o, after) : optionControl(o, after));
+  kids.unshift(...pluginSliders(textureOf(state.texture).params));            // a plugin texture's own sliders
   if (IMAGE_TEXTURES.includes(state.texture) || masked) kids.splice(Math.min(2, kids.length), 0, uploader(state.options.image, (id) => { if (id) state.options.image = id; else delete state.options.image; renderFinish(); changed(); }));
   if (!["lattice", "flat"].includes(fam)) kids.push(...engraveControl("engrave_base", "Words under the base", after));
   $("finishSec").hidden = !kids.length;
@@ -402,36 +404,75 @@ function applyDesign(d) {
   }
   state.options = o; state.family = textureOf(state.texture).family;
 }
+let thread = null;
 function renderAsk() {
   const box = $("ask");
-  const inp = el("textarea", { class: "words", rows: "3", placeholder: "Describe what you want — “a vase that starts woven at the base and dissolves into knit, ocean colours, with our name under it”, “use my dog's photo on a halftone cup”, “an autumn version of my saved tray”…", "aria-label": "Describe a design" });
+  const turns = el("div", { class: "turns" });
+  const inp = el("textarea", { class: "words", rows: "3", placeholder: "Describe what you want — “a vase that starts as a blue zigzag and drips into cream knit, our name under it”, “three ideas for a planter”, “a matching cup, coaster and tray in autumn colours”, “make something like this photo”…", "aria-label": "Describe a design" });
   const go = el("button", { class: "primary" }, "Design it");
-  const msg = el("p", { class: "hint" }, "Claude can compose any design, blend textures, prepare photos, draw pictures and write new weaves, stitches and shapes. It builds on your saved designs.");
+  const ideas = el("label", { class: "toggle" }, el("input", { type: "checkbox" }), el("span", {}, "3 ideas"));
+  const lim = (k, ph) => el("input", { type: "number", min: "0", placeholder: ph, class: "lim", "data-k": k, "aria-label": ph });
+  const limits = el("details", { class: "limits" }, el("summary", {}, "Limits"),
+    el("div", { class: "limrow" }, lim("hours", "max hours"), lim("changes", "max colour changes"), lim("grams", "max grams")));
+  const msg = el("p", { class: "hint" }, "Claude composes the whole design — blends, colours, pictures, new patterns and shapes — checks it, and loads it here. Follow up to refine it.");
+  const steps = el("ol", { class: "steps" });
+  const live = el("img", { class: "live", alt: "Claude's latest preview", hidden: true });
+  const cards = el("div", { class: "variants" });
+  const after = el("div", { class: "after", hidden: true });
   let photoId = null;
   const photo = uploader(null, (id) => { photoId = id; });
-  const send = async () => {
-    const words = inp.value.trim(); if (!words || askJob) return;
-    go.disabled = true; msg.textContent = "Claude is designing — usually 1–4 minutes. Keep working; it loads here when ready.";
-    const cur = currentDesign(); if (photoId) cur.options.image = photoId;
-    const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ request: words, current: cur }) });
+  const budget = () => Object.fromEntries([...limits.querySelectorAll("input")].filter((i) => i.value).map((i) => [i.dataset.k, +i.value]));
+  const send = async (mode = "design") => {
+    const words = inp.value.trim(); if ((!words && mode !== "review") || askJob) return;
+    go.disabled = true; cards.replaceChildren(); after.hidden = true; steps.replaceChildren(); live.hidden = true;
+    msg.textContent = mode === "review" ? "Claude is comparing your print with the design…" : "Claude is designing…";
+    const body = { request: words, current: currentDesign(), thread, mode, budget: budget(),
+                   variations: ideas.querySelector("input").checked ? 3 : 0 };
+    if (photoId) body.photo = photoId;
+    const r = await fetch("/api/ask", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     const d = await r.json();
     if (!r.ok) { msg.textContent = d.error; go.disabled = false; return; }
-    askJob = d.id; poll();
+    thread = d.id; askJob = d.id; inp.value = ""; poll();
   };
+  const drawTurns = (ts) => turns.replaceChildren(...(ts || []).map((t) => el("div", { class: `turn ${t.role}` }, t.text)));
   const poll = async () => {
     const d = await (await fetch(`/api/ask/${askJob}`)).json();
-    if (d.state === "running") { msg.textContent = `Claude is designing… ${d.seconds}s`; return setTimeout(poll, 3000); }
-    askJob = null; go.disabled = false;
+    drawTurns(d.turns);
+    steps.replaceChildren(...(d.steps || []).map((s) => el("li", {}, s.text)));
+    if (d.preview) { live.src = `/api/ask/${askJob}/file/${d.preview}?${d.seconds}`; live.hidden = false; }
+    if (d.state === "running") { msg.textContent = `Claude is working… ${d.seconds}s`; return setTimeout(poll, 2500); }
+    const tid = askJob; askJob = null; go.disabled = false;
     if (d.state === "error") { msg.textContent = d.error; return; }
-    CAT = await (await fetch("/api/catalogue")).json();             // new plugins / pictures are in the catalogue now
-    applyDesign(d.result.design || {});
+    CAT = await (await fetch("/api/catalogue")).json();             // new plugins / pictures / shapes
+    const ds = d.result.designs || [];
     msg.textContent = d.result.summary || "Done.";
-    renderAll(); changed(true);
+    live.hidden = true; steps.replaceChildren();
+    const load = (x) => { applyDesign(x.design || {}); renderAll(); changed(true); };
+    if (ds.length) load(ds[0]);
+    if (ds.length > 1) cards.replaceChildren(...ds.map((x, i) => el("button", { class: "variant" + (i === 0 ? " on" : ""),
+      onclick: (e) => { cards.querySelectorAll(".variant").forEach((c) => c.classList.remove("on")); e.currentTarget.classList.add("on"); load(x); } },
+      x.preview ? el("img", { src: `/api/ask/${tid}/file/${x.preview}`, alt: "" }) : "", el("b", {}, x.label || `Option ${i + 1}`),
+      el("span", {}, x.summary || ""))));
+    after.hidden = false;
   };
+  const noteIn = el("input", { type: "text", class: "lim", placeholder: "What's off? (optional — Claude remembers)", hidden: true });
+  const vote = async (verdict) => {
+    if (verdict === "dislike" && noteIn.hidden) { noteIn.hidden = false; noteIn.focus(); return; }
+    const note = verdict === "dislike" ? noteIn.value.trim() : ""; noteIn.hidden = true; noteIn.value = "";
+    await fetch("/api/taste", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ verdict, design: currentDesign(), note }) });
+    toast(verdict === "like" ? "Noted — Claude will lean this way" : "Noted — Claude will steer away");
+  };
+  after.replaceChildren(
+    el("button", { class: "ghost small", onclick: () => vote("like") }, "More like this"),
+    el("button", { class: "ghost small", onclick: () => vote("dislike") }, "Not this"), noteIn,
+    el("button", { class: "ghost small", onclick: () => { thread = null; turns.replaceChildren(); cards.replaceChildren(); after.hidden = true; msg.textContent = "New design — describe it."; } }, "Start over"));
+  const review = el("button", { class: "ghost small", title: "Photograph a finished print: Claude compares it with the design, records what it learned and proposes fixes",
+    onclick: () => { if (!photoId) { toast("Add a photo of the print first"); return; } send("review"); } }, "Review a print");
+  noteIn.addEventListener("keydown", (e) => { if (e.key === "Enter") vote("dislike"); });
   inp.addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) send(); });
-  go.addEventListener("click", send);
-  box.replaceChildren(inp, el("div", { class: "askrow" }, photo, go), msg);
+  go.addEventListener("click", () => send());
+  box.replaceChildren(turns, inp, el("div", { class: "askrow" }, ideas, el("span", { class: "grow" }), go),
+    el("div", { class: "askrow" }, photo, review), limits, msg, steps, live, cards, after);
 }
 
 // ── pictures: built-ins, text in any font, and library pictures (uploads and ones written from a prompt) ──
@@ -452,6 +493,8 @@ function pictureControl(o, after) {
     el("optgroup", { label: g }, ...cs.map((c) => { const op = el("option", { value: c.key }, c.name); op.selected = c.key === val; return op; }))));
   sel.addEventListener("change", () => { state.options.picture = sel.value; after(); });
   const kids = [el("div", { class: "field-label" }, "Picture"), sel];
+  const picMeta = P.choices.find((c) => c.key === val);
+  kids.push(...pluginSliders(picMeta && picMeta.params));                      // a drawn picture's sliders
   if (val === "text") {
     const inp = el("input", { type: "text", class: "words", placeholder: "Your words", value: state.options.text || "", "aria-label": "Words" });
     inp.addEventListener("input", () => { clearTimeout(textTimer); textTimer = setTimeout(() => { state.options.text = inp.value; changed(); }, 350); });
@@ -485,6 +528,17 @@ function engraveControl(key, label, after) {
       const op = el("option", { value: k }, lab); op.selected = (state.options.engrave_font || "futura") === k; return op; }));
     font.addEventListener("change", () => { state.options.engrave_font = font.value; changed(); });
     if (key === "engrave_base") out.push(el("div", { class: "field-label" }, "Engraving font"), font);
+  }
+  return out;
+}
+
+// sliders a plugin declares (PARAMS): tune what Claude wrote without asking Claude again
+function pluginSliders(params) {
+  const out = [];
+  for (const [k, spec] of Object.entries(params || {})) {
+    const step = spec.step ?? ((spec.hi - spec.lo) > 20 ? 1 : 0.05);
+    out.push(...rangeCtl(`pp_${k}`, spec.label || k, spec.lo, spec.hi, step, spec.default,
+      (x) => (Number.isInteger(step) ? String(Math.round(x)) : x.toFixed(2)) + (spec.unit ? ` ${spec.unit}` : "")));
   }
   return out;
 }
@@ -626,7 +680,7 @@ function renderPrint(d) {
   $("notes").replaceChildren(...notes.filter(Boolean).map((n) => el("li", {}, n)));
   const bl = $("backlit"); bl.hidden = !s.backlit;
   if (s.backlit) bl.replaceChildren(el("img", { src: s.backlit, alt: "The picture as it shows lit from behind" }),
-    el("figcaption", {}, "Lit from behind (estimate)"));
+    el("figcaption", {}, textureOf(state.texture).family === "shell" ? "Lit from inside, unrolled (estimate)" : "Lit from behind (estimate)"));
   const set = [["Printer", CAT.printer.name], ["Nozzle", `${s.nozzle} mm`], ["Layer height", `${s.layer_h} mm`],
     ...({ lattice: [["Rod", s.rod], ["Rod spacing", `${s.pitch} mm`], ["Walls", "rods only"], ["Infill", "0%"]],
           fabric: [["Walls", "2 loops"], ["Infill", "0%"], ["Top layers", "0"]],
@@ -647,8 +701,10 @@ function renderSlice(sl) {
   if (sl.state === "error") { $("slice").replaceChildren(el("span", { class: "sub" }, `Slicer: ${sl.error}${sl.detail ? " — " + sl.detail : ""}`)); return; }
   btn.disabled = true; btn.textContent = "Sliced";
   $("slice").replaceChildren(el("span", { class: "big" }, minutes(sl.minutes)),
-    el("span", { class: "sub" }, `${fmt(sl.grams, 0)} g · ${fmt(sl.layers)} layers`), el("br"),
-    el("span", { class: "sub" }, `Bambu Studio's own numbers for the P2S, AMS changes and purge included.`));
+    el("span", { class: "sub" }, `${fmt(sl.grams, 0)} g · ${fmt(sl.layers)} layers${sl.changes !== undefined ? ` · ${fmt(sl.changes)} colour changes` : ""}`), el("br"),
+    el("span", { class: "sub" }, `Bambu Studio's own numbers for the P2S, AMS changes and purge included.`),
+    sl.preview && job ? el("figure", { class: "sliced" }, el("img", { src: `/api/job/${job.id}/sliced.png?${Date.now()}`, alt: "The sliced print paths, seen from the front" }),
+      el("figcaption", {}, "As sliced — the paths the printer lays, from the front")) : "");
 }
 
 $("sliceBtn").addEventListener("click", async () => {
@@ -804,6 +860,18 @@ key.position.set(160, 260, 140); key.castShadow = true; key.shadow.mapSize.set(2
 Object.assign(key.shadow.camera, { left: -180, right: 180, top: 180, bottom: -180, near: 10, far: 900 });
 scene.add(key);
 const rim = new THREE.DirectionalLight(0xfff1e0, 0.6); rim.position.set(-200, 120, -160); scene.add(rim);
+// lighting: Studio (even) or Raking (low, from the side — how halftone ribs and fine texture read on a real print)
+const hemi = scene.children.find((c) => c.isHemisphereLight);
+let lighting = "studio";
+const keyHome = key.position.clone();
+function setLighting(mode) {
+  lighting = mode;
+  if (mode === "raking") { hemi.intensity = 0.45; key.intensity = 3.2; key.position.set(260, 40, 60); rim.intensity = 0.15; }
+  else { hemi.intensity = 1.35; key.intensity = 2.0; key.position.copy(keyHome); rim.intensity = 0.6; }
+  seg($("lightView"), [["studio", "Studio light", "Even light"], ["raking", "Raking light", "Low light from the side — how halftone and fine texture read on the print"]],
+    lighting, setLighting);
+}
+setTimeout(() => setLighting("studio"), 0);
 const BED = 256;
 const plate = new THREE.Mesh(new THREE.PlaneGeometry(BED, BED), new THREE.MeshStandardMaterial({ color: 0xe4ddd1, roughness: 0.95 }));
 plate.rotation.x = -Math.PI / 2; plate.position.y = -0.05; plate.receiveShadow = true; scene.add(plate);

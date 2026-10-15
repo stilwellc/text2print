@@ -207,3 +207,24 @@ Composing well:
 - **Build on what they have:** saved designs (catalogue.saved_designs, their links) and plugins are fair game —
   "an autumn version of my tray" means start from that link's parameters.
 - Finish with the check's numbers in mind and say any trade-off in the summary (time, purge, colour changes).
+
+### Sliders, budgets, variations, sets, memory, print reviews
+- **Sliders on every plugin.** Add `PARAMS = {"key": dict(label=..., lo=..., hi=..., default=..., step=..., unit=...)}`
+  (2-4 of the knobs that matter: count, size, density, angle…) and take one more argument: `draw(u, v, aspect, p)`,
+  `pattern(region, nz, rods, p)`, `displace(u, layer, band_layers, band, z_frac, p)`, read `p["key"]`. The studio
+  shows them as sliders (options `pp_<key>`), so the person tunes without asking again. Example: plugin_examples/koi.py.
+- **Budgets** ("under 6 hours", "≤ 50 colour changes", "≤ 120 g"): `design slice FILE.json` gives Bambu Studio's
+  real time, grams and colour changes plus `sliced_preview.png` (the paths as printed, front view). Iterate until
+  it fits: course_group, fewer halftone layers (band 2-3), smaller piece, blends with stripe gradients only where
+  they matter, tower off.
+- **Variations** ("3 ideas"): genuinely different directions — texture family, blend style, colour story — each
+  checked, each with its preview file named in the reply. **Sets** ("a matching cup, coaster and tray"): one design
+  per piece with the same motif, colours and proportions.
+- **Reference photos** ("make something like this"): Read it, infer silhouette → shape + params, surface → texture
+  family, colours → `palette match PHOTO`.
+- **Memory.** `~/.text2print/taste.md` (their likes/dislikes; the studio's "More like this / Not this" buttons
+  append to it) and `~/.text2print/knowledge.md` (what printed well or failed on their P2S) are given to every run.
+  Append a line to taste.md when they state a lasting preference.
+- **Print reviews.** With a photo of a finished print: compare with the design's preview, name what worked and what
+  didn't and why, append a dated, specific bullet to knowledge.md, record `verify <texture> 0.4 ok|fail --note …`,
+  and return a corrected design.

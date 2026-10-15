@@ -84,7 +84,7 @@ def relief(kind, th, z, R, z0, z1, depth):
     return out
 
 
-def build(shape, v, nozzle, stitch="zigzag", rim_loops=False, floor="solid", draft=False, mask=None):
+def build(shape, v, nozzle, stitch="zigzag", rim_loops=False, floor="solid", draft=False, mask=None, params=None):
     """-> (mesh, info). shape must support the fabric family (has .profile)."""
     prof, height, rmax = shape.profile(v)
     from . import plugins
@@ -116,7 +116,7 @@ def build(shape, v, nozzle, stitch="zigzag", rim_loops=False, floor="solid", dra
     def scaled(u, layer_in_band, band_layers, band, z_frac):
         s = local(z_frac)
         if custom:
-            d = np.asarray(custom(np.asarray(u, float), layer_in_band, band_layers, band, z_frac), float)
+            d = np.asarray(plugins.call(custom, np.asarray(u, float), layer_in_band, band_layers, band, z_frac, p=params), float)
             return depth * s * np.clip(np.broadcast_to(d, np.shape(u)), 0.0, 1.0)
         if stitch == "domes":
             env = math.sin(math.pi * (layer_in_band + 0.5) / band_layers)

@@ -26,6 +26,30 @@ HOME = pathlib.Path(os.environ.get("T2P_HOME", pathlib.Path.home() / ".text2prin
 DIR = pathlib.Path(os.environ.get("T2P_PLUGINS", HOME / "plugins"))
 
 _MODS = {}                     # path -> (mtime, module)
+
+
+def param_values(meta, options):
+    """{key: value} for a plugin's PARAMS from the design's options ("pp_<key>"), defaults otherwise."""
+    out = {}
+    for k, spec in (meta or {}).items():
+        v = (options or {}).get(f"pp_{k}", spec.get("default"))
+        try:
+            v = float(v)
+            v = min(max(v, float(spec.get("lo", v))), float(spec.get("hi", v)))
+        except (TypeError, ValueError):
+            v = spec.get("default")
+        out[k] = v
+    return out
+
+
+def call(fn, *args, p=None):
+    """Call a plugin function, handing it the slider values if it takes one more argument."""
+    import inspect
+    try:
+        n = len(inspect.signature(fn).parameters)
+    except (TypeError, ValueError):
+        n = len(args)
+    return fn(*args, p or {}) if n > len(args) else fn(*args)
 ERRORS = {}                    # stem -> traceback text of the last failed load
 _REGISTERED = set()
 
@@ -52,7 +76,7 @@ def _modules():
 
 def pictures():
     return {f"lib:{p.stem}": dict(name=m.PICTURE.get("name", p.stem), kind="program", path=str(p),
-                                  colour=bool(m.PICTURE.get("colour")), draw=m.draw)
+                                  colour=bool(m.PICTURE.get("colour")), draw=m.draw, params=getattr(m, "PARAMS", None) or {})
             for p, m in _modules() if hasattr(m, "PICTURE") and callable(getattr(m, "draw", None))}
 
 
@@ -68,13 +92,15 @@ def load_all():
         if hasattr(m, "WOVEN") and callable(getattr(m, "pattern", None)):
             meta = dict(name=m.WOVEN.get("name", p.stem), blurb=m.WOVEN.get("blurb", "A custom weave"),
                         slots=int(m.WOVEN.get("slots", 2)), swaps=m.WOVEN.get("swaps", "course"),
-                        round_only=bool(m.WOVEN.get("round_only", False)), custom=True)
+                        round_only=bool(m.WOVEN.get("round_only", False)), custom=True,
+                        params=getattr(m, "PARAMS", None) or {})
             lattice.PATTERNS[key] = dict(meta, fn=m.pattern)
             build.TEXTURES[key] = dict(family="lattice", **meta); seen.add(key)
         elif hasattr(m, "STITCH") and callable(getattr(m, "displace", None)):
             STITCHES[key] = m.displace
             build.TEXTURES[key] = dict(family="fabric", slots=1, swaps="none", custom=True,
-                                       name=m.STITCH.get("name", p.stem), blurb=m.STITCH.get("blurb", "A custom stitch"))
+                                       name=m.STITCH.get("name", p.stem), blurb=m.STITCH.get("blurb", "A custom stitch"),
+                                       params=getattr(m, "PARAMS", None) or {})
             seen.add(key)
         if hasattr(m, "SHAPE"):
             from . import extras, shapes

@@ -92,6 +92,13 @@ def build(shape, v, nz, style, options, draft=False):
             r_in[k] = np.maximum(r_in[k], r_in[k - 1] - 0.9 * (zs[k] - zs[k - 1]))
         mesh = _tube(zs, r_out, r_in, floor_t)
         info["note"] = "Lithophane: print in white or natural PLA and light it from inside with an LED."
+        # what it looks like lit from inside: light through the wall falls off with its thickness (unrolled)
+        thick = np.array(r_out) - np.array(r_in)                       # (z, u)
+        sel = (zs >= band0) & (zs <= band1)
+        light = np.exp(-1.15 * thick[sel])[::-1]                       # rows top-down
+        light = light / max(light.max(), 1e-6)
+        rgb = (np.clip(light, 0, 1)[..., None] * np.array([255, 236, 205])).astype(np.uint8)
+        info["backlit"] = np.dstack([rgb, np.full(light.shape, 255, np.uint8)])
         return mesh, [], info
     if style == "fuzzy":
         mesh = _plain(prof, height, rmax, 1.0, floor_t)

@@ -528,7 +528,9 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
 
     if T["family"] == "lattice":
         region = S.lattice(v, nz.rod_h)
-        rods = lattice.weave(region, nz, texture, group=int(options.get("course_group", 1) or 1))
+        from . import plugins as _pl
+        rods = lattice.weave(region, nz, texture, group=int(options.get("course_group", 1) or 1),
+                             params=_pl.param_values(T.get("params"), options))
         by_slot = rods.meshes()
         # same colour on two slots -> one part, one filament, no swaps between them
         merged = {}
@@ -606,6 +608,8 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         if texture == "voronoi":
             over["wall_loops"] = "4"
         extra = {k: info[k] for k in ("cells",) if k in info}
+        if info.get("backlit") is not None:                    # wall lithophane: the lit-from-inside view (unrolled)
+            extra["backlit"] = _png_data_url(info["backlit"], max_px=720)
         if info.get("note"):
             warnings.append(info["note"])
         if texture == "fuzzy":
@@ -656,7 +660,8 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     else:
         mesh, info = fabric.build(S, v, nz.size, stitch=texture, rim_loops=bool(options.get("rim_loops")),
                                   floor=options.get("floor", "solid"), draft=draft,
-                                  mask=options if options.get("mask") in ("in", "out") else None)
+                                  mask=options if options.get("mask") in ("in", "out") else None,
+                                  params=__import__("text2print.plugins", fromlist=["x"]).param_values(T.get("params"), options))
         parts = [("colour 1", mesh, 1, colours[0])]; swaps = 0
         over = printer.overrides(nz.size, "fabric", slots=1, floor_layers=info["floor_layers"],
                                  wall_speed=info["wall_speed"])

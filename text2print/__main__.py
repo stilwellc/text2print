@@ -36,8 +36,10 @@ def main(argv=None):
     vf.add_argument("result", choices=["ok", "fail"]); vf.add_argument("--note", default="")
     pc = sub.add_parser("pictures", help="list built-in, text and library pictures, and fonts")
     sub.add_parser("catalogue", help="everything a design can use, as JSON (for Claude)")
+    pm = sub.add_parser("palette", help="palette match PHOTO: the photo's main colours as filaments")
+    pm.add_argument("action", choices=["match"]); pm.add_argument("photo"); pm.add_argument("--k", type=int, default=4)
     dg = sub.add_parser("design", help="design check FILE.json: build, report, render a preview")
-    dg.add_argument("action", choices=["check"]); dg.add_argument("file"); dg.add_argument("--preview", default=None)
+    dg.add_argument("action", choices=["check", "slice"]); dg.add_argument("file"); dg.add_argument("--preview", default=None)
     dg.add_argument("--draft", action="store_true")
     pt = sub.add_parser("picture", help="picture text WORDS (preview) | picture prepare PHOTO --out NAME")
     pt.add_argument("kind", choices=["text", "prepare"]); pt.add_argument("words")
@@ -83,6 +85,14 @@ def main(argv=None):
     if a.cmd == "catalogue":
         from . import agent
         print(json.dumps(agent.catalogue(), indent=1)); return 0
+    if a.cmd == "palette":
+        from . import agent
+        print(json.dumps(agent.palette_match(pathlib.Path(a.photo).expanduser(), a.k), indent=1)); return 0
+    if a.cmd == "design" and a.action == "slice":
+        from . import agent
+        d = json.loads(pathlib.Path(a.file).expanduser().read_text())
+        work = pathlib.Path(a.file).expanduser().with_suffix("")
+        print(json.dumps(agent.slice_design(d, str(work) + "_slice"), indent=1, default=str)); return 0
     if a.cmd == "design":
         from . import agent
         d = json.loads(pathlib.Path(a.file).expanduser().read_text())

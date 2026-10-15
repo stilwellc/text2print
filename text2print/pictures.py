@@ -75,7 +75,7 @@ def choices():
     """Picker list: built-ins, text, then the library."""
     out = [dict(key=k, name=n, group="Built-in") for k, n in BUILTIN.items()]
     out.append(dict(key="text", name="Text…", group="Text"))
-    out += [dict(key=k, name=m["name"], group="Library") for k, m in library().items()]
+    out += [dict(key=k, name=m["name"], group="Library", params=m.get("params") or {}) for k, m in library().items()]
     return out
 
 
@@ -175,8 +175,11 @@ def image_for(options, aspect, colour=False):
         else:
             H = 600; W = max(64, int(round(H * max(0.2, min(aspect, 30.0)))))
             u, v = np.meshgrid((np.arange(W) + 0.5) / W, 1 - (np.arange(H) + 0.5) / H)
-            draw = meta.get("draw") or _load(meta["path"]).draw
-            g = np.asarray(draw(u, v, aspect), float)
+            mod = None if meta.get("draw") else _load(meta["path"])
+            draw = meta.get("draw") or mod.draw
+            pmeta = meta.get("params") or (getattr(mod, "PARAMS", None) if mod else None) or {}
+            from . import plugins
+            g = np.asarray(plugins.call(draw, u, v, aspect, p=plugins.param_values(pmeta, options)), float)
             if g.ndim == 3:                                            # a colour program: RGB 0..1
                 im = Image.fromarray((np.clip(g, 0, 1) * 255).astype(np.uint8), "RGB")
             else:                                                      # grey: 1 = dark

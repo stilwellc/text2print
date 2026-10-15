@@ -280,3 +280,25 @@ h2 { font-size: 15px; margin-bottom: 12px; }
   padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink); }
 .ask input.words { font: inherit; font-size: 13.5px; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line-strong);
   background: var(--panel); color: var(--ink); min-width: 0; }
+.sliced { margin: 12px 0 0; } .sliced img { width: 100%; border-radius: 12px; background: #F7F5F0; display: block; }
+.sliced figcaption { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+/* design with Claude: thread, steps, live preview, variations */
+.turns { display: grid; gap: 6px; margin-bottom: 8px; }
+.turn { font-size: 13px; line-height: 1.4; padding: 8px 10px; border-radius: 12px; }
+.turn.you { background: var(--card); border: 1px solid var(--line); justify-self: end; max-width: 92%; }
+.turn.claude { background: #EFEAE1; max-width: 96%; }
+.ask .limits { margin-top: 8px; font-size: 13px; color: var(--muted); }
+.ask .limrow { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 6px; }
+.ask .lim { font: inherit; font-size: 12.5px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line-strong); background: var(--panel); min-width: 0; }
+.ask .steps { margin: 6px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+.ask .live { width: 100%; border-radius: 12px; margin-top: 8px; background: #F7F5F0; }
+.variants { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; margin-top: 10px; }
+.variant { display: grid; gap: 4px; text-align: left; padding: 6px; border-radius: 12px; border: 1px solid var(--line); background: var(--card); font: inherit; cursor: pointer; }
+.variant.on { border-color: var(--ink); }
+.variant img { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 8px; background: #F7F5F0; }
+.variant b { font-size: 12.5px; } .variant span { font-size: 11.5px; color: var(--muted); line-height: 1.35; }
+.ask .after { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+.ask .askrow { flex-wrap: nowrap; }
+.ask .askrow .grow { flex: 1; }
+.ask .askrow .toggle span, .ask .askrow button { white-space: nowrap; }
