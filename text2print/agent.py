@@ -70,8 +70,10 @@ def check_design(design, preview=None, draft=False):
         from .thumbs import render
         view = (b.preview or b.parts) + list(b.assembled)
         tall = s["size"][2] > 0.6 * max(s["size"][:2])
+        halftone = b.family == "halftone" or any(bb.get("texture") == "halftone"
+                                                  for bb in (design.get("options") or {}).get("bands", []) or [])
         render([(m, c) for _, m, _, c in view], preview, size=720, view=(1.0, -0.9, 0.3 if tall else 0.7), zoom=1.08,
-               rake=len({c for *_, c in view}) == 1)
+               rake=halftone or len({c for *_, c in view}) == 1)      # raking light: halftone ribs read as they print
         out["preview"] = str(preview)
     return out
 
@@ -127,3 +129,53 @@ def prepare(src, out, crop=None, mode="halftone", contrast=1.0, gamma=1.0, equal
         g = 1.0 - g
     Image.fromarray((np.clip(g, 0, 1) * 255).astype(np.uint8), "L").save(out)
     return str(out)
+
+
+def slice_design(design, work):
+    """Real Bambu Studio numbers for a design + a sliced-layer preview (what the printer lays down)."""
+    import re
+    import zipfile
+    from . import bambu, build
+    work = pathlib.Path(work); work.mkdir(parents=True, exist_ok=True)
+    b = build.make(design["shape"], design["texture"], design.get("params") or {},
+                   nozzle=float(design.get("nozzle", 0.4)), colours=design.get("colours") or None,
+                   options=design.get("options") or {})
+    proj = b.write_3mf(work / "design.3mf")
+    r = bambu.slice_project(proj, work / "sliced")
+    if "error" in r:
+        return dict(error=r["error"])
+    sl = work / "sliced" / "sliced.3mf"
+    g = zipfile.ZipFile(sl).read("Metadata/plate_1.gcode").decode(errors="ignore")
+    out = dict(print_minutes=r["minutes"], print_time=r["time"], grams=r["grams"], layers=r["layers"],
+               colour_changes=len(re.findall(r"^M620 S\dA", g, re.M)), app_estimate_minutes=b.stats.get("minutes_est"))
+    try:
+        out["sliced_preview"] = bambu.gcode_preview(sl, work / "sliced_preview.png", list(b.colours) + [c for *_, c in b.extras])
+    except Exception as e:
+        out["sliced_preview_error"] = str(e)
+    if (work / "design-lid.3mf").exists():
+        rl = bambu.slice_project(work / "design-lid.3mf", work / "sliced_lid")
+        out["lid_print"] = rl
+    return out
+
+
+def palette_match(photo, k=4):
+    """Dominant colours of a photo -> the nearest filaments in the palette (k-means on a small copy)."""
+    from PIL import Image
+    from . import build
+    im = Image.open(photo).convert("RGB"); im.thumbnail((160, 160))
+    a = np.asarray(im, float).reshape(-1, 3)
+    rng = np.random.default_rng(1); c = a[rng.choice(len(a), k, replace=False)]
+    for _ in range(12):
+        lab = np.argmin(((a[:, None, :] - c[None]) ** 2).sum(-1), axis=1)
+        c = np.array([a[lab == i].mean(0) if (lab == i).any() else c[i] for i in range(k)])
+    share = np.bincount(lab, minlength=k) / len(lab)
+    from skimage.color import rgb2lab                      # perceptual distance: beige is near Bone White, not pink
+    lab_of = lambda rgb: rgb2lab(np.asarray(rgb, float).reshape(1, 1, 3) / 255.0)[0, 0]
+    pal = {n: lab_of([int(h[i:i + 2], 16) for i in (1, 3, 5)]) for n, h in build.PALETTE.items()}
+    out = []
+    for ci, sh in sorted(zip(c, share), key=lambda t: -t[1]):
+        lc = lab_of(ci)
+        name = min(pal, key=lambda n: ((pal[n] - lc) ** 2).sum())
+        out.append(dict(seen="#%02X%02X%02X" % tuple(int(v) for v in ci), share=round(float(sh), 2),
+                        filament=name, hex=build.PALETTE[name]))
+    return out

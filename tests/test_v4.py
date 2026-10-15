@@ -750,3 +750,63 @@ def test_ask_parses_the_last_json_object():
     text = 'Thinking {"a": 1} ... done.\n{"design": {"shape": "cup", "options": {"bands": [{"texture": "plain"}]}}, "summary": "ok"}'
     r = ask._last_json(text)
     assert r["design"]["shape"] == "cup" and r["summary"] == "ok"
+
+
+# ── deeper Claude: sliders, real-slice previews, palette, prompts, memory ───────────────────────────────
+def test_plugin_sliders_reach_the_picture(tmp_path, monkeypatch):
+    import shutil, pathlib as pl
+    from text2print import pictures, plugins
+    shutil.copy(pl.Path(__file__).resolve().parent.parent / "plugin_examples" / "koi.py", tmp_path / "koi.py")
+    monkeypatch.setattr(plugins, "DIR", tmp_path)
+    u, v = np.meshgrid(np.linspace(0, 1, 300), np.linspace(0, 1, 100))
+    a = pictures.darkness({"picture": "lib:koi", "pp_ripples": 0.0}, 3.0)(u, v)
+    b = pictures.darkness({"picture": "lib:koi", "pp_ripples": 1.0, "pp_fish": 4.0}, 3.0)(u, v)
+    assert b.mean() > a.mean() + 0.02
+    assert plugins.param_values({"n": dict(lo=1, hi=5, default=2)}, {"pp_n": 99}) == {"n": 5.0}
+    assert plugins.call(lambda a, b: a + b, 1, 2, p={"x": 1}) == 3 and plugins.call(lambda a, b, p: p["x"], 1, 2, p={"x": 7}) == 7
+
+
+def test_palette_match_finds_filaments(tmp_path):
+    from PIL import Image
+    from text2print import agent
+    im = Image.new("RGB", (100, 100), (216, 206, 190)); im.paste((120, 84, 52), (30, 30, 70, 70)); im.save(tmp_path / "p.png")
+    names = [m["filament"] for m in agent.palette_match(tmp_path / "p.png", k=2)]
+    assert names[0] in ("Bone White", "Ivory White", "Desert Tan") and len(names) == 2
+
+
+def test_wall_lithophane_has_a_lit_view():
+    b = build.make("cup", "litho", {"diameter": 70, "height": 60}, options={"picture": "text", "text": "HI"}, draft=True)
+    assert b.stats["backlit"].startswith("data:image/png;base64,")
+
+
+def test_design_prompts_carry_budget_variations_and_memory(tmp_path, monkeypatch):
+    from studio import ask
+    monkeypatch.setattr(ask, "HOME", tmp_path)
+    (tmp_path / "taste.md").write_text("- LIKED: twill in caramel\n")
+    T = dict(session=None, turns=[], work=tmp_path / "w")
+    p = ask._prompt(T, "three planters", {"shape": "cup"}, "py", tmp_path / "pl", None, "design", 3, {"hours": 6, "changes": 40})
+    assert "3 clearly different directions" in p and "print time ≤ 6 h" in p and "colour changes ≤ 40" in p
+    assert "twill in caramel" in p and "design slice" in p
+    T["session"] = "abc"
+    assert "replied in the studio" in ask._prompt(T, "longer", {}, "py", tmp_path, None, "design", 0, None)
+    r = ask._prompt(T, "lid tight", {}, "py", tmp_path, str(tmp_path / "photo.jpg"), "review", 0, None)
+    assert "knowledge.md" in r and "photo.jpg" in r
+    line = ask.note_taste("dislike", {"shape": "vase", "texture": "mix", "options": {"bands": [
+        {"texture": "zigzag"}, {"texture": "domes", "blend": {"style": "drip"}}]}}, "too busy")
+    assert "DISLIKED" in line and "domes~drip" in line and "too busy" in (tmp_path / "taste.md").read_text()
+
+
+def test_ask_file_endpoint_only_serves_pngs_of_a_thread():
+    from studio import server
+    c = server.app.test_client()
+    assert c.get("/api/ask/nope/file/x.png").status_code == 404
+
+
+@pytest.mark.slicer
+def test_sliced_preview_from_gcode(tmp_path):
+    if not bambu.slicer_available():
+        pytest.skip("Bambu Studio not installed")
+    from text2print import agent
+    d = {"shape": "cup", "texture": "zigzag", "params": {"diameter": 50, "height": 30}, "colours": ["#2E4E7E"], "options": {}}
+    r = agent.slice_design(d, tmp_path / "w")
+    assert r["print_minutes"] > 0 and pathlib.Path(r["sliced_preview"]).exists()

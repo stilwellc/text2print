@@ -5,9 +5,10 @@ badges come from real prints, not guesses. Record a print with:
 """
 import datetime
 import json
+import os
 import pathlib
 
-FILE = pathlib.Path(__file__).parent / "data" / "verified.json"
+FILE = pathlib.Path(os.environ.get("T2P_VERIFIED", pathlib.Path(__file__).parent / "data" / "verified.json"))
 PUBLISHED = {"halftone@0.4": "kowafatcompany's published 0.4 recipe", "halftone@0.8": "kowafatcompany's published 0.8 recipe"}
 
 

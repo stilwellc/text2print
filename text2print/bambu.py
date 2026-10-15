@@ -9,6 +9,7 @@ filament presets travel with the file (generalised from megalodon_bambu.py; same
 Meshes are in print orientation with Z >= 0; `position` is the object's XY centre on the bed."""
 import io
 import json
+import math
 import pathlib
 import uuid
 import zipfile
@@ -253,3 +254,73 @@ def slice_project(p3mf, workdir):
             "grams": round(sum(float(x) for x in re.search(r"; total filament weight \[g\] : ([\d.,]+)", g).group(1)
                                 .split(",") if x), 2),      # one number per filament: the total is their sum
             "layers": int(re.search(r"; total layer number: (\d+)", g).group(1))}
+
+
+def gcode_preview(sliced_3mf, out_png, colours=None, size=900):
+    """What actually prints: the extrusion paths of the sliced G-code, seen from the front, each in its filament's
+    colour, drawn back to front — layer lines, colour changes and halftone ribs as the printer lays them."""
+    import re
+    import zipfile
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.collections import LineCollection
+    z = zipfile.ZipFile(sliced_3mf)
+    g = z.read("Metadata/plate_1.gcode").decode(errors="ignore")
+    if colours is None:
+        try:
+            cfg = json.loads(z.read("Metadata/project_settings.config"))
+            colours = cfg.get("filament_colour") or ["#888888"]
+        except Exception:
+            colours = ["#888888"]
+    tool = 0; x = y = zc = 0.0; segs = []; cols = []; ys = []
+    rel_e = False; feature = ""; started = False
+    for ln in g.splitlines():
+        if ln.startswith("; FEATURE:"):
+            feature = ln[10:].strip(); continue
+        if ln.startswith("; CHANGE_LAYER"):
+            started = True
+        if ln.startswith("M620 S"):
+            m = re.match(r"M620 S(\d+)A", ln)
+            if m:
+                tool = int(m.group(1))
+            continue
+        if ln.startswith("M83"):
+            rel_e = True
+        if not (ln.startswith("G1 ") or ln.startswith("G0 ") or ln.startswith("G2 ") or ln.startswith("G3 ")):
+            continue
+        p = dict(re.findall(r"([XYZEIJ])(-?[\d.]+)", ln.split(";")[0]))
+        nx = float(p.get("X", x)); ny = float(p.get("Y", y)); nz_ = float(p.get("Z", zc))
+        e = float(p.get("E", 0.0))
+        if (e > 0 and (nx != x or ny != y) and nz_ > 0.05 and started
+                and feature not in ("Prime tower", "Wipe tower", "Skirt", "Brim")):
+            col = colours[tool % len(colours)]
+            if ln[1] in "23" and ("I" in p or "J" in p):             # arcs: follow the curve, not the chord
+                cx_, cy_ = x + float(p.get("I", 0)), y + float(p.get("J", 0))
+                a0 = math.atan2(y - cy_, x - cx_); a1 = math.atan2(ny - cy_, nx - cx_); r_ = math.hypot(x - cx_, y - cy_)
+                if ln[1] == "2":                                     # clockwise
+                    while a1 >= a0:
+                        a1 -= 2 * math.pi
+                else:
+                    while a1 <= a0:
+                        a1 += 2 * math.pi
+                k = max(2, int(abs(a1 - a0) * r_ / 1.5) + 1)
+                aa = np.linspace(a0, a1, k + 1)
+                px_, py_ = cx_ + r_ * np.cos(aa), cy_ + r_ * np.sin(aa)
+                for i in range(k):
+                    segs.append(((px_[i], zc), (px_[i + 1], nz_))); cols.append(col); ys.append((py_[i] + py_[i + 1]) / 2)
+            else:
+                segs.append(((x, zc), (nx, nz_))); cols.append(col); ys.append((y + ny) / 2)
+        x, y, zc = nx, ny, nz_
+    if not segs:
+        raise ValueError("no extrusion found in the G-code")
+    ys = np.asarray(ys); order = np.argsort(-ys)                     # back to front
+    cy = float(np.median(ys))
+    keep = order[ys[order] <= cy + 2.0]                                 # the front half: what you see
+    segs = [segs[i] for i in keep]; cols = [cols[i] for i in keep]
+    fig = plt.figure(figsize=(size / 100, size / 100), dpi=100); ax = fig.add_axes([0, 0, 1, 1])
+    ax.add_collection(LineCollection(segs, colors=cols, linewidths=0.55, capstyle="round"))
+    xs = [pt[0] for s in segs for pt in s]; zs = [pt[1] for s in segs for pt in s]
+    w = max(max(xs) - min(xs), max(zs) - min(zs)) * 1.06; mx = (max(xs) + min(xs)) / 2; mz = (max(zs) + min(zs)) / 2
+    ax.set_xlim(mx - w / 2, mx + w / 2); ax.set_ylim(mz - w / 2, mz + w / 2); ax.set_aspect("equal"); ax.axis("off")
+    fig.patch.set_facecolor("#F7F5F0"); fig.savefig(out_png, dpi=100, facecolor="#F7F5F0"); plt.close(fig)
+    return str(out_png)

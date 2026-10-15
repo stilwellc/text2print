@@ -57,7 +57,7 @@ def _catalogue():
         textures.append(dict(key=k, name=t["name"], blurb=t["blurb"], family=t["family"], slots=t["slots"],
                              swaps=t["swaps"], round_only=bool(t.get("round_only")), status=st,
                              thumb=(f"/static/thumbs/texture_{k}.png" if (THUMBS / f"texture_{k}.png").exists()
-                                    else f"/api/thumb/texture/{k}"), custom=bool(t.get("custom")),
+                                    else f"/api/thumb/texture/{k}"), custom=bool(t.get("custom")), params=t.get("params") or {},
                              fits=[s.key for s in SHAPES.values() if build.compatible(s.key, k)]))
     nozzles = [dict(size=n, rod=f"{printer.nozzle(n).rod_w:.2f} × {printer.nozzle(n).rod_h:.2f}",
                     layer=printer.nozzle(n).layer_h, verified=printer.nozzle(n).verified) for n in printer.NOZZLES]
@@ -203,7 +203,7 @@ def api_build():
         _, old = JOBS.popitem(last=False); shutil.rmtree(old["dir"], ignore_errors=True)
     cached = None if b.draft else store.get_slice(key)
     if cached:
-        JOBS[jid]["slice"] = dict(cached, state="done")
+        JOBS[jid]["slice"] = dict({k: v for k, v in cached.items() if k != "preview"}, state="done")
     return jsonify(id=jid, title=b.title(), params=b.params, stats=b.stats, warnings=b.warnings, seconds=round(secs, 2),
                    draft=b.draft, slice=JOBS[jid]["slice"],
                    parts=[dict(n=i, name=n, slot=s, colour=c, triangles=int(len(m.faces)), url=f"/api/job/{jid}/mesh/{i}")
@@ -223,35 +223,61 @@ def _job(jid):
 
 @app.post("/api/ask")
 def api_ask():
-    """A request in words -> Claude writes and checks a plugin (see studio/ask.py)."""
+    """Design with Claude: a first message, a follow-up in a thread, variations, a set, or a print review."""
     from text2print import plugins
     from . import ask
     if not ask.available():
         return jsonify(error="The Claude CLI isn't installed on this machine."), 400
     body = request.get_json(force=True) or {}
     words = (body.get("request") or "").strip()
-    if len(words) < 3:
-        return jsonify(error="Describe the pattern you want."), 400
-    cur = body.get("current") or {"shape": body.get("shape", ""), "texture": body.get("texture", "")}
+    mode = body.get("mode", "design")
+    if len(words) < 3 and mode != "review":
+        return jsonify(error="Describe what you want."), 400
+    cur = body.get("current") or {}
     photo = None
-    img = (cur.get("options") or {}).get("image") or body.get("image")
+    img = body.get("photo") or (cur.get("options") or {}).get("image")
     if img:
         pth = store.image_path(img)
         photo = str(pth) if pth and pathlib.Path(pth).exists() else None
-    jid, err = ask.start(words[:1500], cur.get("shape", ""), cur.get("texture", ""), sys.executable, plugins.DIR,
-                         current=cur, photo=photo)
+    if mode == "review" and not photo:
+        return jsonify(error="Add a photo of the print to review it."), 400
+    tid, err = ask.start(words[:2000] or "Here's how it printed.", cur, sys.executable, plugins.DIR, photo=photo,
+                         thread=body.get("thread"), mode=mode, variations=int(body.get("variations") or 0),
+                         budget=body.get("budget"))
     if err:
         return jsonify(error=err), 409
-    return jsonify(id=jid)
+    return jsonify(id=tid)
 
 
-@app.get("/api/ask/<jid>")
-def api_ask_status(jid):
+@app.get("/api/ask/<tid>")
+def api_ask_status(tid):
     from . import ask
-    st = ask.status(jid)
+    st = ask.status(tid)
     if st is None:
         abort(404)
     return jsonify(st)
+
+
+@app.get("/api/ask/<tid>/file/<name>")
+def api_ask_file(tid, name):
+    """Interim and final previews Claude rendered for a thread."""
+    from . import ask
+    T = ask.THREADS.get(tid)
+    if not T or "/" in name or not name.endswith(".png"):
+        abort(404)
+    p = T["work"] / name
+    if not p.exists():
+        abort(404)
+    return Response(p.read_bytes(), mimetype="image/png", headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/taste")
+def api_taste():
+    from . import ask
+    b = request.get_json(force=True) or {}
+    if b.get("verdict") not in ("like", "dislike"):
+        return jsonify(error="like or dislike"), 400
+    return jsonify(line=ask.note_taste(b["verdict"], b.get("design"), (b.get("note") or "")[:300]))
 
 
 @app.get("/api/thumb/shape/<key>")
@@ -360,6 +386,17 @@ def open_in_bambu(jid):
 def _slice_job(j):
     res = bambu.slice_project(_project(j), j["dir"] / "slice")
     if "error" not in res:
+        sl = j["dir"] / "slice" / "sliced.3mf"
+        try:                                                    # what actually prints: the sliced paths, front view
+            import re
+            import zipfile
+            g = zipfile.ZipFile(sl).read("Metadata/plate_1.gcode").decode(errors="ignore")
+            res["changes"] = len(re.findall(r"^M620 S\dA", g, re.M))
+            b = j["build"]
+            bambu.gcode_preview(sl, j["dir"] / "sliced.png", list(b.colours) + [c for *_, c in b.extras])
+            res["preview"] = True
+        except Exception as e:
+            res["preview_error"] = str(e)[:200]
         store.put_slice(j["key"], res)
     return res
 
@@ -384,6 +421,14 @@ def slice_start(jid):
 @app.get("/api/job/<jid>/slice")
 def slice_status(jid):
     return jsonify(_job(jid)["slice"] or {"state": "idle"})
+
+
+@app.get("/api/job/<jid>/sliced.png")
+def sliced_png(jid):
+    p = _job(jid)["dir"] / "sliced.png"
+    if not p.exists():
+        abort(404)
+    return Response(p.read_bytes(), mimetype="image/png", headers={"Cache-Control": "no-store"})
 
 
 # ── uploads, saved designs, test plates ───────────────────────────────────────

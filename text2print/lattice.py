@@ -384,11 +384,15 @@ PATTERNS = {
 GROUPABLE = {"grid", "twill", "kagome", "polar", "ripple", "selvedge", "beat"}   # colour follows the course
 
 
-def weave(region, nz, pattern, group=1):
+def weave(region, nz, pattern, group=1, params=None):
     """group > 1: colour changes every `group` courses instead of every course (bands, not colour by
     direction) — a half, a third or a quarter of the AMS changes."""
     rods = Rods(nz)
-    PATTERNS[pattern]["fn"](region, nz, rods)
+    if PATTERNS[pattern].get("custom"):                    # a plugin weave: its sliders' values
+        from .plugins import call
+        call(PATTERNS[pattern]["fn"], region, nz, rods, p=params)
+    else:
+        PATTERNS[pattern]["fn"](region, nz, rods)
     if group > 1 and pattern in GROUPABLE:
         regroup(rods, group, PATTERNS[pattern]["slots"])
     return rods
