@@ -182,7 +182,7 @@ def build(shape, v, nz, bands, draft=False):
         if t in fp:
             n = fp[t]["zigzags_around"] * fp[t]["samples_per_zigzag"]
         elif t in RELIEFS:
-            n = int(circ / 0.6)
+            n = int(circ / 1.0)                       # reliefs: 1 mm around is finer than a 0.42 mm line can show
         elif t == "halftone":
             n = _ribs(rmax, ht_lw) * 6
         else:

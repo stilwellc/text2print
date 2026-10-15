@@ -77,3 +77,51 @@ def send(sliced_3mf, cfg, name, ams_mapping, timeout=60):
     info = client.publish(f"device/{cfg['serial']}/request", json.dumps(cmd), qos=1); info.wait_for_publish(timeout)
     client.loop_stop(); client.disconnect()
     return cmd
+
+
+def test(cfg, timeout=12):
+    """Check the connection without printing: FTPS login + listing, then MQTT — ask for a status report (pushall)
+    and read the printer's state and the AMS colours. -> {'ftps': ..., 'mqtt': ..., 'state', 'ams': [...]}"""
+    check(cfg)
+    out = {"ftps": None, "mqtt": None, "state": None, "nozzle_temp": None, "ams": []}
+    try:
+        ftp = _ImplicitFTPS(context=_ctx(), timeout=timeout)
+        ftp.connect(cfg["ip"], 990); ftp.login("bblp", cfg["access_code"]); ftp.prot_p()
+        names = ftp.nlst(); ftp.quit()
+        out["ftps"] = f"ok — {len(names)} files on the printer"
+    except Exception as e:
+        out["ftps"] = f"failed: {type(e).__name__}: {e}"[:200]
+    try:
+        import paho.mqtt.client as mqtt
+        got = {}
+
+        def on_message(client, userdata, msg):
+            try:
+                d = json.loads(msg.payload)
+            except ValueError:
+                return
+            if "print" in d:
+                got.update(d["print"])
+
+        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id=f"text2print-test-{int(time.time())}")
+        client.username_pw_set("bblp", cfg["access_code"]); client.tls_set_context(_ctx()); client.tls_insecure_set(True)
+        client.on_message = on_message
+        client.connect(cfg["ip"], 8883, keepalive=30); client.loop_start()
+        client.subscribe(f"device/{cfg['serial']}/report")
+        client.publish(f"device/{cfg['serial']}/request", json.dumps({"pushing": {"sequence_id": "0", "command": "pushall"}}))
+        t0 = time.time()
+        while time.time() - t0 < timeout and "gcode_state" not in got:
+            time.sleep(0.2)
+        client.loop_stop(); client.disconnect()
+        if got:
+            out["mqtt"] = "ok"; out["state"] = got.get("gcode_state"); out["nozzle_temp"] = got.get("nozzle_temper")
+            for unit in (got.get("ams") or {}).get("ams", []):
+                for tray in unit.get("tray", []):
+                    if tray.get("tray_color"):
+                        out["ams"].append({"slot": int(unit.get("id", 0)) * 4 + int(tray.get("id", 0)) + 1,
+                                           "colour": "#" + tray["tray_color"][:6], "type": tray.get("tray_type", "")})
+        else:
+            out["mqtt"] = "connected, but no status report arrived — check the serial number"
+    except Exception as e:
+        out["mqtt"] = f"failed: {type(e).__name__}: {e}"[:200]
+    return out

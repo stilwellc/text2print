@@ -47,7 +47,8 @@ def _catalogue():
     shapes = [dict(key=s.key, name=s.name, blurb=s.blurb, families=list(s.families), round=s.round, lid=s.key in extras.LID_SHAPES,
                    params=[dict(key=p.key, label=p.label, lo=p.lo, hi=p.hi, step=p.step, default=p.default,
                                 unit=p.unit, family=p.family) for p in s.params],
-                   thumb=f"/static/thumbs/shape_{s.key}.png",
+                   thumb=(f"/static/thumbs/shape_{s.key}.png" if (THUMBS / f"shape_{s.key}.png").exists()
+                          else f"/api/thumb/shape/{s.key}"),
                    thumbs={f: f"/static/thumbs/shape_{s.key}__{f}.png" for f in s.families
                            if (THUMBS / f"shape_{s.key}__{f}.png").exists()}) for s in SHAPES.values()]
     textures = []
@@ -217,6 +218,51 @@ def _job(jid):
     if not j:
         abort(404)
     return j
+
+
+@app.post("/api/ask")
+def api_ask():
+    """A request in words -> Claude writes and checks a plugin (see studio/ask.py)."""
+    from text2print import plugins
+    from . import ask
+    if not ask.available():
+        return jsonify(error="The Claude CLI isn't installed on this machine."), 400
+    body = request.get_json(force=True) or {}
+    words = (body.get("request") or "").strip()
+    if len(words) < 3:
+        return jsonify(error="Describe the pattern you want."), 400
+    jid, err = ask.start(words[:500], body.get("shape", ""), body.get("texture", ""), sys.executable, plugins.DIR)
+    if err:
+        return jsonify(error=err), 409
+    return jsonify(id=jid)
+
+
+@app.get("/api/ask/<jid>")
+def api_ask_status(jid):
+    from . import ask
+    st = ask.status(jid)
+    if st is None:
+        abort(404)
+    return jsonify(st)
+
+
+@app.get("/api/thumb/shape/<key>")
+def shape_thumb(key):
+    """Plugin shapes: a card rendered on first view in a child process (macOS OpenGL), cached per file change."""
+    from text2print import plugins
+    from text2print.shapes import SHAPES
+    plugins.load_all()
+    if key not in SHAPES:
+        abort(404)
+    src = next((p for p in plugins.DIR.glob("*.py") if f"s_{p.stem}" == key), None)
+    out = plugins.HOME / "cache" / f"shape_{key}_{int(src.stat().st_mtime) if src else 0}.png"
+    if not out.exists():
+        out.parent.mkdir(parents=True, exist_ok=True)
+        r = subprocess.run([sys.executable, "-m", "text2print", "thumb-shape", key, str(out)],
+                           cwd=str(pathlib.Path(__file__).resolve().parent.parent), capture_output=True, timeout=180)
+        if r.returncode != 0 or not out.exists():
+            abort(500)
+    return Response(out.read_bytes(), mimetype="image/png")
 
 
 @app.get("/api/thumb/texture/<key>")
@@ -412,6 +458,15 @@ def printer_get():
 def printer_set():
     c = store.save_printer_config(request.get_json(force=True) or {})
     return jsonify(configured=bool(c["ip"] and c["serial"] and c["access_code"]), name=c["name"], ip=c["ip"])
+
+
+@app.post("/api/printer/test")
+def printer_test():
+    """Connection check — never starts a print."""
+    try:
+        return jsonify(lan.test(store.printer_config()))
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
 
 
 @app.post("/api/job/<jid>/send")

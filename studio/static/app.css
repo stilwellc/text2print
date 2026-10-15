@@ -273,3 +273,9 @@ h2 { font-size: 15px; margin-bottom: 12px; }
 .card .cost > span { position: static; color: var(--muted); }
 .card .cost .badge { position: absolute; }
 .card .cost .c2 { color: #8B3A2F; }
+
+/* ask Claude */
+.ask { margin-top: 14px; }
+.ask .askrow { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.ask input.words { font: inherit; font-size: 13.5px; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line-strong);
+  background: var(--panel); color: var(--ink); min-width: 0; }

@@ -103,7 +103,7 @@ def build(shape, v, nozzle, stitch="zigzag", rim_loops=False, floor="solid", dra
             z = z_frac * height
             return relief(stitch, th, z, prof(z), kw["solid_base_z"], height, depth * local(z_frac))
         kw["zigzag_layers"], kw["straight_layers"] = 1, 0
-        kw["zigzags_around"] = max(60, int(round(2 * math.pi * rmax / (4.8 if draft else 2.4))))
+        kw["zigzags_around"] = max(60, int(round(2 * math.pi * rmax / (6.0 if draft else 4.0))))   # 1 mm samples: features are 10 mm+
         kw["samples_per_zigzag"] = 4; n_around = kw["zigzags_around"]
         kw["stitch"] = scaled
         tm = fabric_solid(prof, height, **kw)

@@ -40,12 +40,19 @@ def main(argv=None):
     pt.add_argument("--font", default="futura"); pt.add_argument("--layout", default="center", choices=["center", "repeat", "stack"])
     pt.add_argument("--aspect", type=float, default=3.0); pt.add_argument("--invert", action="store_true")
     pt.add_argument("--out", default="text.png")
-    pg = sub.add_parser("plugin", help="plugins: list | check FILE | new picture|woven|stitch NAME")
+    pg = sub.add_parser("plugin", help="plugins: list | check FILE | new picture|woven|stitch|shape NAME")
     pg.add_argument("action", choices=["list", "check", "new"]); pg.add_argument("args", nargs="*")
     pg.add_argument("--out", default=None)
     tt = sub.add_parser("thumb-texture"); tt.add_argument("key"); tt.add_argument("out")   # studio helper
+    ts = sub.add_parser("thumb-shape"); ts.add_argument("key"); ts.add_argument("out")
     a = ap.parse_args(argv)
 
+    if a.cmd == "thumb-shape":
+        from . import build, plugins, thumbs
+        plugins.load_all()
+        b = build.make(a.key, "domes", colours=[thumbs.FABRIC_TONE], draft=True)
+        thumbs.render([(m, c) for _, m, _, c in b.parts], a.out, size=360, view=(1.0, -0.95, 0.45), zoom=1.12, rake=True)
+        return 0
     if a.cmd == "thumb-texture":
         from . import build, plugins, thumbs
         plugins.load_all()
