@@ -601,3 +601,43 @@ def test_plugin_check_reports_and_a_broken_plugin_never_breaks_the_catalogue(tmp
     c = server.app.test_client().get("/api/catalogue").get_json()
     assert "broken" in c["pictures"]["errors"] and any(t["key"] == "x_soft_ridges" for t in c["textures"])
     monkeypatch.setattr(plugins, "DIR", tmp_path / "none"); plugins.load_all()
+
+
+# ── picture controls, masks, engraving, time estimate ──────────────────────────────────────────────────
+def test_picture_front_placement_keeps_the_rest_plain():
+    from text2print import pictures
+    f = pictures.darkness({"picture": "text", "text": "HI", "picture_place": "front", "picture_size": 0.5}, 4.0)
+    import numpy as np
+    u = np.linspace(0, 1, 400)
+    back = f(np.full(50, 0.375), np.linspace(0, 1, 50))           # the side opposite the front
+    assert back.max() == 0 and f(np.full(400, pictures.FRONT_U), np.linspace(0.3, 0.7, 400)).max() > 0.5
+    inv = pictures.darkness({"picture": "fade", "picture_invert": "1"}, 3.0)
+    base = pictures.darkness({"picture": "fade"}, 3.0)
+    assert abs(inv(0.3, 0.2) - (1 - base(0.3, 0.2))) < 1e-9
+
+
+def test_fabric_mask_puts_the_stitch_only_inside_the_picture():
+    o = {"mask": "in", "picture": "text", "text": "I", "font": "impact", "picture_place": "front", "picture_size": 0.8}
+    m = build.make("cup", "domes", {"diameter": 80, "height": 60}, options=o, draft=True)
+    full = build.make("cup", "domes", {"diameter": 80, "height": 60}, draft=True)
+    plain = build.make("cup", "domes", {"diameter": 80, "height": 60}, options=dict(o, mask="out"), draft=True)
+    _ok(m); _ok(plain)
+    v = lambda b: b.parts[0][1].volume
+    assert v(m) < v(plain) < v(full) + 1e-6 or v(m) < v(full)
+
+
+def test_words_under_the_base_and_on_the_lid():
+    b = build.make("cup", "zigzag", {"diameter": 80, "height": 60}, draft=True,
+                   options={"engrave_base": "MOBI", "lid": "slip", "lid_texture": "plain", "engrave_lid": "Tea"})
+    plain = build.make("cup", "zigzag", {"diameter": 80, "height": 60}, draft=True, options={"lid": "slip", "lid_texture": "plain"})
+    _ok(b)
+    assert sum(m.volume for _, m, _, _ in b.parts) < sum(m.volume for _, m, _, _ in plain.parts) - 5
+    lid = lambda x: sum(m.volume for n, m, _, _ in x.extras if n == "Lid")
+    assert lid(b) < lid(plain) - 2
+    w = build.make("tray", "twill", draft=True, options={"engrave_base": "X"})
+    assert any("solid floor" in s for s in w.warnings)
+
+
+def test_instant_print_time_estimate():
+    b = build.make("bowl", "grid", colours=["#8B3A2F", "#EDE3D1"], draft=True)
+    assert 300 < b.stats["minutes_est"] < 700                        # sliced: 497 min

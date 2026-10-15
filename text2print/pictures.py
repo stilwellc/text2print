@@ -186,9 +186,33 @@ def image_for(options, aspect, colour=False):
     return im.convert("RGB" if colour else "L")
 
 
-def darkness(options, aspect):
-    """-> f(u, v) giving 0..1, 1 = dark (the halftone's front colour; the lithophane's thick part)."""
+FRONT_U = 0.875          # "front" = the side the studio camera looks at
+
+
+def natural_aspect(options):
+    """Width/height a picture wants when it isn't wrapped: an image's own shape, text's measured shape."""
     from PIL import Image
+    path = _image_path(options); pic = options.get("picture") or ""
+    if path:
+        w, h = Image.open(path).size; return w / max(h, 1)
+    if pic == "text":
+        im = render_text(options.get("text"), options.get("font", "futura"), options.get("text_layout", "center"), 8.0,
+                         height_px=200)
+        a = np.asarray(im) < 128
+        if not a.any():
+            return 3.0
+        ys, xs = np.where(a); bw = xs.max() - xs.min() + 1; bh = ys.max() - ys.min() + 1
+        return float((bw * 1.12) / (bh * 1.3))
+    if pic.startswith("lib:"):
+        meta = library().get(pic) or {}
+        if meta.get("kind") == "image":
+            w, h = Image.open(meta["path"]).size; return w / max(h, 1)
+        return 1.5
+    return 1.0
+
+
+def _base(options, aspect):
+    """The picture itself, as darkness f(u, v) over its own 0..1 square, drawn for width/height = aspect."""
     im = image_for(options, aspect)
     if im is None:
         from . import halftone
@@ -212,6 +236,48 @@ def darkness(options, aspect):
     def f(u, v):
         u = np.asarray(u, float) % 1.0; v = np.clip(np.asarray(v, float), 0, 1)
         return a[np.clip(((1 - v) * (h - 1)).round().astype(int), 0, h - 1), np.clip((u * (w - 1)).round().astype(int), 0, w - 1)]
+    return f
+
+
+def _num(options, key, default, lo, hi):
+    try:
+        return float(min(hi, max(lo, float(options.get(key, default)))))
+    except (TypeError, ValueError):
+        return default
+
+
+def darkness(options, aspect):
+    """-> f(u, v) giving 0..1, 1 = dark (the halftone's front colour; the lithophane's thick part), over a wall
+    whose picture zone is `aspect` wide per unit tall. Picture controls:
+      picture_place  wrap (all the way round) | front (the picture at its own proportions, on the front)
+      picture_size   share of the height it spans (0.15-1), picture_lift: where its centre sits (0 bottom - 1 top)
+      picture_contrast (0.3-3), picture_invert"""
+    place = options.get("picture_place", "wrap")
+    size = _num(options, "picture_size", 1.0, 0.15, 1.0)
+    lift = _num(options, "picture_lift", 0.5, 0.0, 1.0)
+    con = _num(options, "picture_contrast", 1.0, 0.3, 3.0)
+    inv = str(options.get("picture_invert", "")).lower() in ("1", "true", "yes")
+    if place == "front":
+        za = natural_aspect(options); base = _base(options, za)
+        uspan = min(1.0, za * size / max(aspect, 1e-6))
+    else:
+        za = aspect / size; base = _base(options, za); uspan = 1.0
+    v0 = size / 2 + (1 - size) * lift                        # the zone stays on the wall
+
+    def f(u, v):
+        u = np.asarray(u, float); v = np.asarray(v, float)
+        if place == "front":
+            uu = (((u - FRONT_U + 0.5) % 1.0) - 0.5) / uspan + 0.5
+        else:
+            uu = u % 1.0
+        vv = (v - v0) / size + 0.5
+        inside = (uu >= 0) & (uu <= 1) & (vv >= 0) & (vv <= 1)
+        g = np.where(inside, base(np.clip(uu, 0, 1), np.clip(vv, 0, 1)), 0.0)
+        if con != 1.0:
+            g = np.where(inside, np.clip((g - 0.5) * con + 0.5, 0, 1), g)
+        if inv:
+            g = np.where(inside, 1.0 - g, g)
+        return g
     return f
 
 

@@ -359,3 +359,56 @@ def button(knob):
     cap = m3d.Manifold.cylinder(3.0, r, r - 1.0, 64)
     peg = m3d.Manifold.cylinder(LID_T + 0.6, (KNOB_HOLE - 0.15) / 2, (KNOB_HOLE - 0.15) / 2, 48).translate([0, 0, 2.99])
     return _tm(cap + peg)
+
+
+# ── engraving: words debossed into a face (under the base, on a lid's top) ──────────────────────────────
+ENGRAVE_DEPTH = 0.6        # 3 layers at 0.2: crisp, and the floor keeps its strength
+
+
+def text_polygons(text, font="futura", height_mm=8.0):
+    """Words -> shapely geometry (letters with their holes), centred on the origin, `height_mm` tall."""
+    from PIL import Image, ImageDraw, ImageFont
+    from shapely.geometry import Polygon
+    import skimage.measure as skm
+    from . import pictures
+    lab, path, idx = pictures.FONTS.get(font, pictures.FONTS["helvetica"])
+    f = ImageFont.truetype(str(path), 220, index=idx) if path.exists() else ImageFont.load_default()
+    d0 = ImageDraw.Draw(Image.new("L", (10, 10)))
+    w = int(d0.textlength(text, font=f)) + 80
+    im = Image.new("L", (max(w, 100), 340), 0); ImageDraw.Draw(im).text((40, 40), text, font=f, fill=255)
+    a = np.asarray(im, float) / 255.0
+    a = np.pad(a, 2)
+    geom = None
+    for c in skm.find_contours(a, 0.5):
+        if len(c) < 8:
+            continue
+        poly = Polygon(np.column_stack([c[:, 1], -c[:, 0]])).buffer(0)
+        if poly.is_empty or poly.area < 4:
+            continue
+        geom = poly if geom is None else geom.symmetric_difference(poly)    # even-odd: holes in O, A, B …
+    if geom is None:
+        return None
+    x0, y0, x1, y1 = geom.bounds
+    k = height_mm / max(y1 - y0, 1e-6)
+    from shapely import affinity
+    geom = affinity.translate(geom, -(x0 + x1) / 2, -(y0 + y1) / 2)
+    return affinity.scale(geom, k, k, origin=(0, 0)).simplify(0.03)
+
+
+def engrave_cut(text, font, max_w, max_h, mirror="x", offset=(0.0, 0.0), depth=ENGRAVE_DEPTH):
+    """A manifold to subtract: the words fitted inside max_w x max_h, mirrored so they read correctly from the
+    side you look at (base: from below -> 'x'; a lid flipped onto its piece -> 'y'), from z = -1 to depth."""
+    from shapely import affinity
+    g = text_polygons(text, font, max_h)
+    if g is None:
+        return None
+    x0, y0, x1, y1 = g.bounds
+    if x1 - x0 > max_w:
+        g = affinity.scale(g, max_w / (x1 - x0), max_w / (x1 - x0), origin=(0, 0))
+    if mirror == "x":
+        g = affinity.scale(g, -1, 1, origin=(0, 0))
+    elif mirror == "y":
+        g = affinity.scale(g, 1, -1, origin=(0, 0))
+    g = affinity.translate(g, *offset)
+    polys = list(g.geoms) if hasattr(g, "geoms") else [g]
+    return prism([p for p in polys if p.area > 0.05], -1.0, depth)

@@ -263,6 +263,13 @@ h2 { font-size: 15px; margin-bottom: 12px; }
 .status.quiet { opacity: .72; transform: scale(.94); }
 
 /* picture library + text */
-#finish select, #finish input.words { font: inherit; font-size: 13.5px; padding: 7px 9px; border-radius: 9px;
+#finish select, #finish input.words, #lid input.words { font: inherit; font-size: 13.5px; padding: 7px 9px; border-radius: 9px;
   border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink); width: 100%; box-sizing: border-box; }
 #finish input.words { font-size: 15px; }
+#finish .height { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; }
+#finish .height input { width: 100%; accent-color: var(--ink); margin: 0; }
+#finish .height output { color: var(--muted); font-size: 12.5px; min-width: 64px; text-align: right; }
+.card .cost { display: flex; gap: 4px; flex-wrap: wrap; padding: 0 3px; font-size: 11px; line-height: 1.2; }
+.card .cost > span { position: static; color: var(--muted); }
+.card .cost .badge { position: absolute; }
+.card .cost .c2 { color: #8B3A2F; }
