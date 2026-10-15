@@ -51,6 +51,30 @@ def catalogue():
                  options=["lid", "lid_texture", "lid_colours", "lid_height", "lid_knob", "lid_fit", "lid_plate",
                           "engrave_lid"]),
         engraving=["engrave_base", "engrave_lid", "engrave_font"],
+        colourwork=dict(
+            textures={"jacquard": "ribs — folk-art panels, fair-isle, pictures", "beads": "domed stitches — beaded boxes"},
+            options={"chart": "list of bands bottom->top (below); omit to use chart_preset",
+                     "chart_preset": list(__import__("text2print.colourwork", fromlist=["x"]).PRESETS),
+                     "stitch_size": "fine (2.6 mm) | regular (3.2) | bold (4.4) — the pixel size",
+                     "rim": "none | braid | rope (a corded top edge, one colour)", "rim_slot": "AMS slot for the rim",
+                     "band": "1 | 2 layers per colour (2 halves the colour changes, softer chart)"},
+            band_kinds={
+                "motif": '{"motif": key, "colours": [ground, motif, accent], "repeat": 1, "gap": 1}',
+                "art": '{"art": ["..X..", ".XoX.", "XoooX"], "colours": [...], "once": false} — YOUR pixel art, top row '
+                       'first: . ground, X motif, o accent. Tiles around a whole number of times; once: centred front',
+                "chart": '{"chart": "<plugin stem>"} — a CHART plugin from the plugins folder',
+                "picture": '{"picture": "text"|"lib:x"|..., "fill": true | "mm": 40, "tones": 2|3, "colours": [...], '
+                           '+ text/font/picture_* options} — any picture posterised to the stitch grid',
+                "plain": '{"plain": slot, "mm": 6} — no colour changes',
+                "stripes": '{"stripes": [slot, slot], "mm": 10, "layers": 2} — fine stacked stripes'},
+            rules="No 'fill' band: the band list repeats up the wall. A pixel is one stitch wide x ~one stitch tall "
+                  "(a 90 mm cup is ~88 stitches around; a 7-row motif is ~22 mm tall at regular). Motif art reads best "
+                  "5-12 rows tall with 1-pixel lines; leave a ground column between repeats. Every 2-3 colour band "
+                  "changes colour each layer (~3.6 changes per mm of height) — plain/stripe bands are free; check "
+                  "colour_changes and keep pieces <= ~120 mm tall unless they asked for a statement piece.",
+            motifs={k: dict(name=m["name"], art=m["art"]) for k, m in __import__("text2print.colourwork", fromlist=["x"]).MOTIFS.items()},
+            your_charts=sorted(plugins.charts())),
+        lid_looks_for_boxes="lid_texture labyrinth (raised maze rings that follow the outline, 3 colours) + lid_knob tube",
         woven_modifiers=dict(
             applies_to="any woven (lattice) texture on any shape — options, set them from what the person describes",
             weave_twist="degrees per course (-12..12): the whole lattice rotates as it climbs; 2-4 reads as a spiral, "

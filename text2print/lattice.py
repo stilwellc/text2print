@@ -492,6 +492,66 @@ def p_frame(region, nz, rods):
                 break
 
 
+def _contour_rings(F, g, level, min_size):
+    import skimage.measure as skm
+    n = len(g); out = []
+    for cont in skm.find_contours(F, level):
+        pts = np.column_stack([np.interp(cont[:, 0], np.arange(n), g), np.interp(cont[:, 1], np.arange(n), g)])
+        if len(pts) < 8 or np.hypot(*(pts.max(0) - pts.min(0))) < min_size:
+            continue
+        seg = np.hypot(*np.diff(pts, axis=0).T)
+        keep = np.r_[0, np.where(np.diff(np.floor(np.concatenate([[0], np.cumsum(seg)]) / 0.9)) > 0)[0], len(pts) - 1]
+        out.append(pts[keep])
+    return out
+
+
+def p_labyrinth(region, nz, rods, rings=2, spacing=2.6):
+    """Labyrinth: rods follow the outline in concentric rings with a gap in each (alternating sides) and short
+    bridges between neighbours — one meandering path, like a classical labyrinth — raised over a two-colour weave.
+    The ring courses go on the piece's top face; a lid (printed upside down) gets them on its bed face, so they end
+    up on top once it's flipped on (region.face = "bottom"). A clear centre is kept for a knob."""
+    face = getattr(region, "face", "top")
+    ring_i = set(range(rings)) if face == "bottom" else set(range(region.n - rings, region.n))
+    E = region.extent + nz.pitch; n = int(2 * E / 0.5)
+    g = np.linspace(-E, E, n); X, Y = np.meshgrid(g, g, indexing="ij")
+    sp = spacing * nz.pitch; gap = 1.6 * nz.pitch; centre = 11.0
+    for i in range(region.n):
+        c = Course(region, nz, i)
+        if i not in ring_i:
+            for j, t0, t1, pf in c.lines((i % 2) * math.pi / 2, pitch=nz.pitch * 1.15):
+                rods.line(_pt(pf, t0, c.z), _pt(pf, t1, c.z), i % 2)
+            continue
+        F = c.sdf(X, Y); k = 0; levels = []
+        while F.min() < -k * sp and k < 200:
+            rs = _contour_rings(F, g, -k * sp, 2 * nz.rod_w)
+            rs = [r for r in rs if np.hypot(r[:, 0], r[:, 1]).max() > centre + sp]
+            if not rs:
+                break
+            levels.append(rs); k += 1
+        for k, rs in enumerate(levels):
+            for r in rs:
+                if k == 0:                                             # the frame: unbroken
+                    rods.path(np.column_stack([r, np.full(len(r), c.z)]), 2); continue
+                ang = np.arctan2(r[:, 1], r[:, 0]); rad = np.hypot(r[:, 0], r[:, 1])
+                at = 0.0 if k % 2 else math.pi                         # the gap alternates sides ring to ring
+                d = np.abs((ang - at + math.pi) % (2 * math.pi) - math.pi) * rad
+                keep = d > gap / 2
+                if keep.all():
+                    rods.path(np.column_stack([r, np.full(len(r), c.z)]), 2); continue
+                cut = np.where(~keep)[0]                               # roll so the gap sits at the ends
+                r2 = np.roll(r[:-1] if np.allclose(r[0], r[-1]) else r, -int(cut[-1]) - 1, axis=0)
+                k2 = np.roll(keep[:-1] if np.allclose(r[0], r[-1]) else keep, -int(cut[-1]) - 1)
+                seg = r2[k2]
+                if len(seg) >= 2:
+                    rods.path(np.column_stack([seg, np.full(len(seg), c.z)]), 2)
+                if k + 1 < len(levels) and k % 2 == 1 and i == min(ring_i):   # a bridge inward beside the gap
+                    for end in (seg[0], seg[-1])[:1]:
+                        inner = np.vstack(levels[k + 1]); dd = np.hypot(*(inner - end).T)
+                        q = inner[int(np.argmin(dd))]
+                        if dd.min() < 1.6 * sp:
+                            rods.line([float(end[0]), float(end[1]), c.z], [float(q[0]), float(q[1]), c.z], 2)
+
+
 PATTERNS = {
     "grid":      dict(name="Weave", blurb="The classic: rods cross at right angles, colour by direction", slots=2, fn=p_grid, swaps="course"),
     "twill":     dict(name="Twill", blurb="Every 4th rod skipped on alternate courses — a drifting diagonal", slots=2, fn=lambda r, n, o: p_grid(r, n, o, twill=4), swaps="course"),
@@ -512,18 +572,22 @@ PATTERNS = {
 }
 
 
+PATTERNS["labyrinth"] = dict(name="Labyrinth", blurb="Raised rings that follow the outline, broken into a maze, over a "
+                             "two-colour weave — made for lids (3 colours)", slots=3, fn=p_labyrinth, swaps="course")
 GROUPABLE = {"grid", "twill", "kagome", "polar", "ripple", "selvedge", "beat", "chevron", "herringbone", "ogee",
              "basket", "brick", "trellis", "frame"}                                    # colour follows the course
 
 
-def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, picture=None):
+def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, picture=None, face="top"):
     """group > 1: colour changes every `group` courses instead of every course (bands, not colour by
     direction) — a half, a third or a quarter of the AMS changes.
     Modifiers Claude sets from a description (any weave):
       twist   degrees each course turns about the centre — the weave spirals up the piece
       ombre   slots bottom -> top, e.g. [0, 1] or [0, 2, 1]: course colours fade through them (ordered dither)
-      picture (dark(x, y, z) -> bool, first_course): rods split and coloured by a picture — dark parts in slot 1"""
+      picture (dark(x, y, z) -> bool, first_course): rods split and coloured by a picture — dark parts in slot 1
+    face: "top" or "bottom" — which face shows (a lid prints upside down); patterns like labyrinth read it"""
     rods = Rods(nz)
+    region.face = face
     reg = _Twisted(region, twist) if twist else region
     if PATTERNS[pattern].get("custom"):                    # a plugin weave: its sliders' values
         from .plugins import call
@@ -549,6 +613,7 @@ class _Twisted:
         self.r = region; self.tw = math.radians(twist_deg)
         self.n, self.rod_h, self.extent = region.n, region.rod_h, region.extent
         self.round, self.floor_courses, self.height = region.round, region.floor_courses, region.height
+        self.face = getattr(region, "face", "top")
 
     def z(self, i):
         return self.r.z(i)

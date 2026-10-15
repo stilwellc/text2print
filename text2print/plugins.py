@@ -11,6 +11,11 @@ A file defines any of:
     def pattern(region, nz, rods): ...                   # lattice API: Course(region, nz, i).lines(theta, ...),
                                                          # rods.line(a, b, slot), rods.path(pts, slot)
 
+    CHART = dict(name="Folk birds", rows=14)             # a colourwork chart (jacquard / bead knit motif)
+    ART = ["..X..", ".XoX.", ...]                         # pixel art, top row first: . ground, X motif, o accent
+    def chart(cols, rows): ...                           # ...or computed: -> int array (rows, cols), 0/1/2, top first
+                                                         # (narrower than cols tiles around; full width is used as is)
+
     STITCH = dict(name="Fish scales", blurb="...")       # a fabric stitch: displacement of the wall
     def displace(u, layer, band_layers, band, z_frac):   # u: stitch coordinate (1 per stitch, +0.5 on odd bands)
         ...                                              # -> 0..1 of the stitch depth (0 = the wall)
@@ -80,6 +85,17 @@ def pictures():
             for p, m in _modules() if hasattr(m, "PICTURE") and callable(getattr(m, "draw", None))}
 
 
+def charts():
+    """Colourwork charts: {stem: dict(name, art | fn, rows, params)} — usable as a band's "motif"/"chart"."""
+    out = {}
+    for p, m in _modules():
+        if hasattr(m, "CHART") and (getattr(m, "ART", None) is not None or callable(getattr(m, "chart", None))):
+            out[p.stem] = dict(name=m.CHART.get("name", p.stem), art=getattr(m, "ART", None),
+                               fn=getattr(m, "chart", None), rows=m.CHART.get("rows"), path=str(p),
+                               params=getattr(m, "PARAMS", None) or {})
+    return out
+
+
 STITCHES = {}                  # "x_<stem>" -> displace(u, layer, band_layers, band, z_frac)
 
 
@@ -143,6 +159,27 @@ def check(path, out_dir=None):
                 Image.fromarray((np.clip(g, 0, 1) * 255).astype(np.uint8), "RGB")
         p = out_dir / f"{path.stem}_picture.png"; im.save(p)
         report["items"].append(dict(kind="picture", preview=str(p)))
+    if hasattr(m, "CHART"):
+        import numpy as np
+        from . import colourwork as cw
+        band = {"art": list(m.ART)} if getattr(m, "ART", None) is not None else None
+        if band is None:
+            g = np.clip(np.rint(np.asarray(call(m.chart, 88, int(m.CHART.get("rows") or 12),
+                                                p=param_values(getattr(m, "PARAMS", None), {})))), 0, 2).astype(int)
+            band = {"art": ["".join(".Xo"[x] for x in row) for row in g]}
+        art = cw.art_grid(band["art"]); band["colours"] = [0, 1, 2]
+        chart = [{"plain": 0, "mm": 4}, band, {"plain": 0, "mm": 4}]
+        b = build.make("cup", "jacquard", {"diameter": 90, "height": max(40, 3.1 * art.shape[0] + 16)},
+                       colours=["#8B3A2F", "#F4F1E8", "#C58A3F"], options={"chart": chart})
+        ok = all(mm.is_watertight for _, mm, _, _ in b.parts)
+        p = out_dir / f"{path.stem}_chart.png"
+        thumbs.render([(mm, c) for _, mm, _, c in b.parts], p, size=560, view=(-1.0, 0.0, 0.25), zoom=1.1, rake=True)
+        from PIL import Image                                       # the chart itself, 12 px a stitch
+        pal = np.array([[139, 58, 47], [244, 241, 232], [197, 138, 63]], np.uint8)
+        Image.fromarray(pal[art]).resize((art.shape[1] * 12, art.shape[0] * 12), Image.NEAREST).save(out_dir / f"{path.stem}_pixels.png")
+        report["items"].append(dict(kind="chart", key=path.stem, rows=int(art.shape[0]), cols=int(art.shape[1]),
+                                    watertight=ok, swaps=b.stats["swaps"], preview=str(p),
+                                    pixels=str(out_dir / f"{path.stem}_pixels.png"), verdict="ok" if ok else "leaks"))
     if hasattr(m, "SHAPE"):
         if path.parent.resolve() != DIR.resolve():
             raise ValueError("put shape plugins in the plugin folder, then check them there")
@@ -222,6 +259,19 @@ def pattern(region, nz, rods):
         for j, t0, t1, pf in c.lines(theta, pitch=nz.pitch):
             rods.line(_pt(pf, t0, c.z), _pt(pf, t1, c.z), i % 2)
 ''',
+    "chart": '''"""Chart plugin: {name} — a colourwork motif (jacquard / bead knit)."""
+
+CHART = dict(name="{title}")
+
+# top row first: "." ground, "X" motif, "o" accent. Narrower than the piece: it tiles around (whole repeats).
+ART = [
+    "...X...",
+    "..XoX..",
+    ".XoooX.",
+    "..XoX..",
+    "...X...",
+]
+''',
     "stitch": '''"""Stitch plugin: {name}."""
 import numpy as np
 
@@ -240,7 +290,7 @@ def displace(u, layer, band_layers, band, z_frac):
 def new(kind, name):
     """Write a starter plugin into the plugin folder; returns its path."""
     if kind not in TEMPLATES:
-        raise ValueError("kind is picture, woven, stitch or shape")
+        raise ValueError("kind is picture, woven, stitch, chart or shape")
     DIR.mkdir(parents=True, exist_ok=True)
     stem = "".join(ch if ch.isalnum() else "_" for ch in name.lower()).strip("_") or kind
     path = DIR / f"{stem}.py"

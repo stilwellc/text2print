@@ -52,7 +52,7 @@ def main(argv=None):
     pt.add_argument("--font", default="futura"); pt.add_argument("--layout", default="center", choices=["center", "repeat", "stack"])
     pt.add_argument("--aspect", type=float, default=3.0); pt.add_argument("--invert", action="store_true")
     pt.add_argument("--out", default="text.png")
-    pg = sub.add_parser("plugin", help="plugins: list | check FILE | new picture|woven|stitch|shape NAME")
+    pg = sub.add_parser("plugin", help="plugins: list | check FILE | new picture|woven|stitch|chart|shape NAME")
     pg.add_argument("action", choices=["list", "check", "new"]); pg.add_argument("args", nargs="*")
     pg.add_argument("--out", default=None)
     tt = sub.add_parser("thumb-texture"); tt.add_argument("key"); tt.add_argument("out")   # studio helper
@@ -121,6 +121,8 @@ def main(argv=None):
                 print(f"  {k:24s} {TEXTURES[k]['family']:8s} {TEXTURES[k]['name']}")
             for k, m in plugins.pictures().items():
                 print(f"  {k:24s} picture  {m['name']}")
+            for k, m in plugins.charts().items():
+                print(f"  {k:24s} chart    {m['name']}")
             for stem, err in plugins.ERRORS.items():
                 print(f"  ! {stem}: {err.strip().splitlines()[-1]}")
             return 0

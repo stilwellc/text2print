@@ -35,6 +35,15 @@ RULES = """How to work (SKILL.md, sections "Custom pictures and patterns from a 
   at the preview PNG (halftone previews use raking light — judge the picture there). For budgets on time, colour
   changes or grams, confirm with `{py} -m text2print design slice {work}/<name>.json` (real Bambu Studio numbers
   and a sliced-layer preview PNG) and adjust until the design fits.
+- Colourwork (textures jacquard / beads: fair-isle bands, folk-art panels, beaded boxes) is where you shine: compose
+  options.chart from catalogue.colourwork (motif, art, picture, plain, stripes bands) and DRAW new motifs as pixel
+  art — inline {{"art": [rows]}} for a one-off, or a CHART plugin (`{py} -m text2print plugin new chart NAME`, then
+  `plugin check` and LOOK at the _pixels.png) when it's worth keeping. Pixel art rules: 1-pixel lines, 5-14 rows per
+  motif, a ground column between repeats, symmetric folk shapes read best; a figurative panel (animals, people) can
+  be 20-40 rows with "once": true. Mood boards / reference photos of knitted, beaded or woven pieces: match the band
+  rhythm (stripes, motif, plain), the stitch (ribs vs beads) and the palette, and say what you matched.
+- Lidded boxes: shape "box" (roundness 100 = stadium), options lid "slip", lid_texture "labyrinth", lid_knob "tube".
+  Paneled vessels: shapes "gourd" and "jar" (sides 0 = round, 6-12 panels).
 - Woven looks take three modifiers (catalogue.woven_modifiers) — reach for them when the words call for it:
   "spiral / swirling / twisted weave" -> weave_twist; "fades / ombré / gradient / sunset" on a weave -> weave_ombre;
   "my name / a logo / a heart / a koi woven in" -> weave_picture (text, a library picture, or a PICTURE plugin you
