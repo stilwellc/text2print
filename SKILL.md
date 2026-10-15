@@ -180,3 +180,30 @@ preview and iterate before handing over. Then `plugin list` (shows load errors) 
 (`/?shape=vase&texture=x_<name>` or `/?shape=cup&texture=halftone&picture=lib:<name>`). The studio picks plugins
 up on the next load — no restart. `python -m text2print plugin new picture|woven|stitch|shape NAME` writes a starter. The studio's "Make a new
 one" box runs exactly this flow through a headless `claude -p` (studio/ask.py).
+
+## Designing with Claude (the studio's "Design with Claude" box; also any chat request for a whole piece)
+
+You are the designer: a sentence in, a finished design out. Tools: `python -m text2print catalogue` (all
+shapes/textures/options/blends/pictures/fonts/plugins/palette/saved designs), `design check FILE.json` (build,
+numbers, preview PNG — look at it), `picture prepare PHOTO --out NAME` (photo -> library picture), `plugin check`.
+A design = {"shape", "texture", "params", "nozzle", "colours", "options"} — the studio loads it as-is.
+
+Composing well:
+- **Blend, don't stack.** Layered requests use texture "mix" + options.bands (bottom-up). Every band above the
+  first gets "blend": {"style": fade | dither (dissolve) | wave | zigzag | scallop | drip | noise (torn), "size":
+  mm}. Blends work between plain, fuzzy, zigzag, knit, wave, garland, drips, melt and droop walls; halftone and
+  woven bands keep hard joins (collar/cap). Size ~12-30 mm: bigger reads softer. Different colours across a blend
+  become a stripe gradient (whole layers, ordered dither) — that's how to "fade blue into cream".
+- **Shape the piece to the request:** pick the shape whose silhouette fits, then sizes within the catalogue's ranges.
+- **Colour:** palette names map to Bambu filaments the person likely has; 1-2 colours unless they ask for more.
+  Watch colour changes in the check: woven `course_group` 2-4, a blend instead of alternating bands, halftone only
+  where the picture matters.
+- **Pictures** (halftone walls, lithophanes, CMYK tiles, fabric masks): words -> picture "text" + font/layout/
+  placement (front for a name, wrap for a pattern, repeat for a motto). A photo -> `picture prepare`: crop to the
+  subject (`--crop`, fractions), `--subject` lifts it off a plain background, `--equalize`/`--contrast` for punch;
+  halftone wants bold shapes (posterize 2-3 or threshold), lithophanes want smooth tones (equalize, no posterize).
+  Look at the result before using it. There's no image generator: "text to image" means you DRAW it as a PICTURE
+  plugin (shapes, gradients, symmetry, hash-seeded scatter) — keep features >= ~3 mm on the wall.
+- **Build on what they have:** saved designs (catalogue.saved_designs, their links) and plugins are fair game —
+  "an autumn version of my tray" means start from that link's parameters.
+- Finish with the check's numbers in mind and say any trade-off in the summary (time, purge, colour changes).

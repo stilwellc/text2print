@@ -189,6 +189,30 @@ def build(shape, v, nz, bands, draft=False):
             n = max(180, int(circ / 1.2))
         return max(120, n // (3 if draft else 1))
 
+    def wall_contour(bi, k, z0, z1):
+        """Outer contour of band bi's texture at its k-th layer (k may run past the band: blends use it),
+        as an array over that texture's own theta grid, or None for a smooth wall."""
+        b = bands[bi]; t = b["texture"]; n = n_theta(t); zm = (z0 + z1) / 2; R = prof(zm)
+        th = np.linspace(0, 2 * np.pi, n, endpoint=False); za, zb = zs[bi], zs[bi + 1]
+        if t in ("plain", "fuzzy") or t in droop.STYLES:
+            return None
+        if t in fp:
+            f = fp[t]; cyc = f["zigzag_layers"] + f["straight_layers"]; p = k
+            if p % cyc >= f["zigzag_layers"]:
+                return np.full(n, R)
+            band = p // cyc; u = f["zigzags_around"] * th / (2 * np.pi) + 0.5 * (band % 2)
+            d = f["zigzag_depth"] * max(0.35, R / rmax)
+            stand = 0.02 * (1 + band % 2) + 0.001 * (p % cyc)
+            if t == "domes":
+                env = math.sin(math.pi * ((p % cyc) + 0.5) / f["zigzag_layers"])
+                return R + stand + d * env * np.sin(np.pi * np.mod(u, 1.0)) ** 2
+            if t == "wave":
+                return R + stand + 0.5 * d * np.sin(2 * np.pi * u)
+            return R + stand + d * tri01(u)
+        if t in RELIEFS:
+            return R + 0.02 * (k % 2) + relief(t, th, zm, R, za, zb, fp["zigzag"]["zigzag_depth"] * max(0.35, R / rmax))
+        return None
+
     layers = []          # dicts: z0, z1, slot, r (array) or None (smooth), band, lh
     ranges, droop_bands = [], []
     for bi, b in enumerate(bands):
@@ -247,6 +271,9 @@ def build(shape, v, nz, bands, draft=False):
                 entry["r"] = R + amp * g * (0.5 - 0.5 * np.cos(ribs * th))
                 entry["slot"] = b["slot"] if colour == 0 else b["slot2"]
             layers.append(entry); k += 1
+
+    colour_cuts = []
+    _blend(layers, bands, zs, wall_contour, prof, floor_z, rmax, n_theta, colour_cuts)
 
     # runs: consecutive layers of one band and one colour
     # runs: consecutive layers of one colour. A run may cross into the next band when the wall is the same
@@ -322,6 +349,10 @@ def build(shape, v, nz, bands, draft=False):
                 parts[slot] = walls
         preview[slot] = trimesh.util.concatenate([walls] + hung.get(slot, []))
 
+    for cut in colour_cuts:                                         # carve each shaped colour edge
+        if cut["lo"] in parts:
+            parts, preview = _carve(parts, preview, cut, rmax, draft)
+
     seq = [L["slot"] for L in layers]
     swaps = sum(1 for x, y in zip(seq, seq[1:]) if x != y)
     kinds = {}
@@ -333,9 +364,149 @@ def build(shape, v, nz, bands, draft=False):
                 kinds.setdefault(s_, "normal")
     info = dict(layers=len(layers), bands=[(b["texture"], round(zs[i + 1] - zs[i], 2)) for i, b in enumerate(bands)],
                 swaps=swaps, floor_layers=n_floor, droop=bool(droop_bands), height=round(total_h, 2), woven=bool(wplan),
+                recount=bool(colour_cuts),
                 strands=sum(len(x) for x in flat.values()), reach=round(reach, 1), ranges=ranges, kinds=kinds,
                 layer_slots=[(round(L["z0"], 4), round(L["z1"], 4), L["slot"]) for L in layers])
     return parts, preview, info
+
+
+BLEND_STYLES = {"hard": "Hard line", "fade": "Fade", "dither": "Dissolve", "wave": "Wave edge", "zigzag": "Zigzag edge",
+                "scallop": "Scallops", "drip": "Drips", "noise": "Torn edge"}
+BLENDABLE = {"plain", "fuzzy", "zigzag", "domes", "wave", "garland", "drips", "melt", "fringe", "swag", "curls", "unraveled"}
+
+
+def _edge_cutter(cut, rmax):
+    """Watertight ring solid whose bottom follows the edge curve zc(theta) and whose top is the zone's top."""
+    th, zc = cut["th"], np.clip(cut["zc"], cut["z_lo"], cut["z_hi"] - 0.05)
+    n = len(th); r0, r1 = 1.0, rmax + 40.0; ztop = cut["z_hi"]
+    c, s_ = np.cos(th), np.sin(th)
+    V = np.vstack([np.column_stack([r0 * c, r0 * s_, zc]), np.column_stack([r1 * c, r1 * s_, zc]),
+                   np.column_stack([r1 * c, r1 * s_, np.full(n, ztop)]), np.column_stack([r0 * c, r0 * s_, np.full(n, ztop)])])
+    j = np.arange(n); jn = (j + 1) % n; F = []
+    for a, b in ((0, 1), (1, 2), (2, 3), (3, 0)):                  # the four sides of the swept quad
+        A, B = a * n, b * n
+        F += [np.column_stack([A + j, A + jn, B + j]), np.column_stack([A + jn, B + jn, B + j])]
+    m = trimesh.Trimesh(V, np.vstack(F), process=False)
+    from .meshops import volume
+    if volume(m) < 0:
+        m.invert()
+    return m
+
+
+def _carve(parts, preview, cut, rmax, draft):
+    """Move the part of the lower colour that lies above the shaped edge into the upper colour."""
+    import manifold3d as m3d
+    from .meshops import manifold_to_trimesh
+    C = _edge_cutter(cut, rmax)
+    to_m = lambda t: m3d.Manifold(m3d.Mesh(vert_properties=np.asarray(t.vertices, np.float32), tri_verts=np.asarray(t.faces, np.int32)))
+    if draft:                                                      # sketch: colour the faces above the curve
+        A = parts[cut["lo"]]; tc = A.triangles_center
+        ang = np.mod(np.arctan2(tc[:, 1], tc[:, 0]), 2 * np.pi)
+        zc = np.interp(ang, cut["th"], cut["zc"], period=2 * np.pi)
+        up = (tc[:, 2] > zc) & (tc[:, 2] < cut["z_hi"])
+        hi = A.submesh([np.where(up)[0]], append=True); lo = A.submesh([np.where(~up)[0]], append=True)
+    else:
+        a, c = to_m(parts[cut["lo"]]), to_m(C)
+        lo, hi = manifold_to_trimesh(a - c, split=False), manifold_to_trimesh(a ^ c, split=False)
+    parts = dict(parts); parts[cut["lo"]] = lo
+    parts[cut["hi"]] = trimesh.util.concatenate([parts[cut["hi"]], hi]) if cut["hi"] in parts else hi
+    preview = dict(preview); preview[cut["lo"]] = lo
+    preview[cut["hi"]] = trimesh.util.concatenate([preview[cut["hi"]], hi]) if cut["hi"] in preview else hi
+    return parts, preview
+
+
+def _hash01(*k):
+    import hashlib
+    return int.from_bytes(hashlib.sha1(repr(k).encode()).digest()[:4], "big") / 2 ** 32
+
+
+def _noise(th, z, scale_mm, R, seed=0):
+    """Smooth value noise over the unrolled wall (mm units), 0..1."""
+    x = th * R / scale_mm; y = z / scale_mm
+    out = np.zeros_like(th, dtype=float); amp = 0.5; tot = 0.0
+    for o in range(3):                                            # three octaves of shifted sines: cheap, seamless
+        f = 2 ** o; ph = 6.283 * _hash01(seed, o)
+        n_around = max(1, int(round(2 * math.pi * R / scale_mm * f)))
+        out += amp * np.sin(n_around * th + 1.7 * np.sin(f * y + ph) + ph) * np.cos(f * y * 1.3 + ph * 0.7)
+        tot += amp; amp *= 0.5
+    return 0.5 + 0.5 * out / tot
+
+
+def _edge(style, th, R, period_mm, seed=0):
+    """Boundary offset in -1..1 around the wall for edge blends."""
+    n = max(3, int(round(2 * math.pi * R / period_mm)))
+    if style == "wave":
+        return np.sin(n * th)
+    if style == "zigzag":
+        x = (n * th / (2 * math.pi)) % 1.0; return 1 - 4 * np.abs(x - 0.5)
+    if style == "scallop":
+        return 1 - 2 * np.abs(np.sin(n * th / 2))
+    if style == "drip":                                           # narrow drips of different lengths from a high line,
+        out = np.full_like(th, 0.75)                              # each a tapered run ending in a rounded tip
+        n2 = max(4, int(n * 1.6))
+        for k in range(n2):
+            c = 2 * math.pi * (k + 0.8 * _hash01(seed, k)) / n2
+            w = (0.10 + 0.12 * _hash01(seed, k, 1)) * 2 * math.pi / n2 * 2.2
+            L = 0.35 + 1.3 * _hash01(seed, k, 2)                  # how far it runs (0.75 - L: never past the zone)
+            d = np.abs((th - c + math.pi) % (2 * math.pi) - math.pi) / w
+            body = np.clip(1 - d ** 2, 0, 1) ** 0.15             # near-flat across: a narrow run with a round end
+            out = np.minimum(out, np.where(d < 1, 0.75 - min(L, 1.7) * body, 0.75))
+        return np.clip(out, -0.98, 1)
+    return 2 * _noise(th, np.zeros_like(th), period_mm, R, seed) - 1     # "noise": a torn edge
+
+
+def _blend(layers, bands, zs, wall_contour, prof, floor_z, rmax, n_theta, cuts=None):
+    """Blend each band into the band below it (band["blend"] = {"style", "size" mm}): the transition zone's
+    layers get both textures' contours on a common grid, combined by a fade, a dissolve (noise mask) or a shaped
+    edge; when the two colours differ, the zone becomes a stripe gradient (ordered dither of whole layers)."""
+    cuts = cuts if cuts is not None else []
+    for bi in range(1, len(bands)):
+        spec = bands[bi].get("blend") or {}
+        style = spec.get("style", "hard")
+        lo_b, hi_b = bands[bi - 1], bands[bi]
+        if style == "hard" or lo_b["texture"] not in BLENDABLE or hi_b["texture"] not in BLENDABLE:
+            continue
+        size = float(spec.get("size", 14.0)); zb = zs[bi]
+        z_lo = max(zb - size / 2, floor_z + 0.5, zs[bi - 1] + 1.0); z_hi = min(zb + size / 2, zs[bi + 1] - 1.0)
+        if z_hi - z_lo < 1.0:
+            continue
+        colours_differ = lo_b["slot"] != hi_b["slot"]
+        n_c = max(n_theta(lo_b["texture"]), n_theta(hi_b["texture"]))
+        th = np.linspace(0, 2 * np.pi, n_c, endpoint=False)
+        R0 = prof(zb)
+        edge = _edge(style, th, R0, max(6.0, size * 1.2), seed=bi) if style in ("wave", "zigzag", "scallop", "drip", "noise") else None
+        first = {b_: next(i for i, L in enumerate(layers) if L["band"] == b_) for b_ in (bi - 1, bi)}
+        for i, L in enumerate(layers):
+            zm = (L["z0"] + L["z1"]) / 2
+            if not (z_lo <= zm <= z_hi) or L["band"] not in (bi - 1, bi):
+                continue
+            t = (zm - z_lo) / (z_hi - z_lo)
+            kA = i - first[bi - 1]; kB = i - first[bi]
+            R = prof(zm)
+            def on_grid(r):
+                if r is None:
+                    return np.full(n_c, R)
+                if len(r) == n_c:
+                    return r
+                src = np.linspace(0, 2 * np.pi, len(r), endpoint=False)
+                return np.interp(th, src, r, period=2 * np.pi)
+            rA = on_grid(wall_contour(bi - 1, kA, L["z0"], L["z1"]))
+            rB = on_grid(wall_contour(bi, kB, L["z0"], L["z1"]))
+            if style == "fade":
+                r = R + (1 - t) * (rA - R) + t * (rB - R)
+            elif style == "dither":
+                r = np.where(_noise(th, np.full(n_c, zm), 7.0, R, seed=bi) < t, rB, rA)
+            else:
+                r = np.where(zm > zb + edge * (z_hi - z_lo) / 2, rB, rA)
+            L["r"] = r; L["n"] = n_c
+            if colours_differ and edge is not None:                # colour follows the shaped edge: the zone prints
+                L["slot"] = lo_b["slot"]; L["band"] = bi - 1        # in the lower colour, then the part above the
+            elif colours_differ:                                   # edge is carved into the upper one (below)
+                L["slot"] = hi_b["slot"] if t > ((i * 0.6180339887) % 1.0) else lo_b["slot"]   # stripe gradient
+                L["band"] = bi if L["slot"] == hi_b["slot"] else bi - 1
+        if colours_differ and edge is not None:
+            cuts.append(dict(lo=lo_b["slot"], hi=hi_b["slot"], z_lo=z_lo, z_hi=z_hi, th=th,
+                             zc=zb + edge * (z_hi - z_lo) / 2))
 
 
 def _ribs(rmax, lw):

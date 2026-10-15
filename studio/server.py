@@ -68,7 +68,8 @@ def _catalogue():
                presets=[dict(key=k, name=v["name"], bands=v["bands"]) for k, v in compose.PRESETS.items()],
                default=compose.DEFAULT_PRESET, droop_options=[list(c) for c in build.OPTIONS["droop"][0][3]],
                pictures=[[c["key"], c["name"]] for c in pictures.choices() if c["key"] != "text"],
-               noises=[[k, v] for k, v in __import__("text2print.shell", fromlist=["x"]).NOISE.items()])
+               noises=[[k, v] for k, v in __import__("text2print.shell", fromlist=["x"]).NOISE.items()],
+               blends=[[k, v] for k, v in compose.BLEND_STYLES.items()], blendable=sorted(compose.BLENDABLE))
     cfg = store.printer_config()
     return dict(printer=dict(name=printer.PRINTER, bed=printer.BED), nozzles=nozzles, shapes=shapes, options=options,
                 mix=mix, textures=textures, palette=build.PALETTE, colours=build.DEFAULT_COLOURS,
@@ -231,7 +232,14 @@ def api_ask():
     words = (body.get("request") or "").strip()
     if len(words) < 3:
         return jsonify(error="Describe the pattern you want."), 400
-    jid, err = ask.start(words[:500], body.get("shape", ""), body.get("texture", ""), sys.executable, plugins.DIR)
+    cur = body.get("current") or {"shape": body.get("shape", ""), "texture": body.get("texture", "")}
+    photo = None
+    img = (cur.get("options") or {}).get("image") or body.get("image")
+    if img:
+        pth = store.image_path(img)
+        photo = str(pth) if pth and pathlib.Path(pth).exists() else None
+    jid, err = ask.start(words[:1500], cur.get("shape", ""), cur.get("texture", ""), sys.executable, plugins.DIR,
+                         current=cur, photo=photo)
     if err:
         return jsonify(error=err), 409
     return jsonify(id=jid)
