@@ -368,6 +368,130 @@ def p_overunder(region, nz, rods):
             rods.line(_pt(pf, t0, c.z), _pt(pf, t1, c.z), 0)
 
 
+# ── more weaves (Oct 2026): curved rods, broken rods, outline rods ─────────────────────────────────────────
+def _tri(x):
+    """Triangle wave, period 1, -1..1."""
+    x = np.mod(x, 1.0)
+    return 4 * np.abs(x - 0.5) - 1
+
+
+def _curved(c, rods, theta, pitch, offset, slot, keep=None):
+    """Parallel curved rods (offset(t, j) sideways from straight), clipped and laid as paths."""
+    for j, t0, t1, pf in c.lines(theta, pitch=pitch, keep=keep, offset=offset, step=0.6):
+        ts = np.linspace(t0, t1, max(3, int((t1 - t0) / 0.9)))
+        rods.path(np.column_stack([*pf(ts), np.full(len(ts), c.z)]), slot)
+
+
+def p_chevron(region, nz, rods, period=4.0, rise=0.42):
+    """Parallel zigzag rods (V after V) crossed by straight ones: chevron stripes."""
+    P = nz.pitch * period; A = P * rise / 2
+    for i in range(region.n):
+        c = Course(region, nz, i)
+        if i % 2 == 0:
+            _curved(c, rods, 0.0, nz.pitch * 1.1, lambda t, j: A * _tri(np.asarray(t) / P), 0)
+        else:
+            for j, t0, t1, pf in c.lines(math.pi / 2):
+                rods.line(_pt(pf, t0, c.z), _pt(pf, t1, c.z), 1)
+
+
+def p_herringbone(region, nz, rods, period=4.0, rise=0.42):
+    """Zigzag rods in both directions: the woven herringbone of tweed."""
+    P = nz.pitch * period; A = P * rise / 2
+    for i in range(region.n):
+        c = Course(region, nz, i)
+        _curved(c, rods, (i % 2) * math.pi / 2, nz.pitch * 1.1,
+                lambda t, j: A * _tri(np.asarray(t) / P + (0.5 if (j // 3) % 2 else 0.0)), i % 2)
+
+
+def p_ogee(region, nz, rods, period=7.0):
+    """Wavy rods mirrored pairwise: neighbours swell apart and pinch together into onion-shaped lenses."""
+    pitch = nz.pitch * 1.6; A = max(0.4, (pitch - nz.rod_w - 0.5) / 2); P = nz.pitch * period
+    for i in range(region.n):
+        c = Course(region, nz, i)
+        _curved(c, rods, (i % 2) * math.pi / 2, pitch,
+                lambda t, j: A * np.sin(2 * math.pi * np.asarray(t) / P) * (1 if j % 2 == 0 else -1), i % 2)
+
+
+def _segments(c, rods, theta, pitch, slot, present, min_len):
+    """Straight rods broken where present(x, y, j) is False; a piece must cross >= 2 rods below (min_len)."""
+    for j, t0, t1, pf in c.lines(theta, pitch=pitch):
+        ts = np.arange(t0, t1, 0.4); x, y = pf(ts)
+        on = present(x, y, j)
+        k = 0
+        while k < len(ts):
+            if not on[k]:
+                k += 1; continue
+            k2 = k
+            while k2 + 1 < len(ts) and on[k2 + 1]:
+                k2 += 1
+            a, b = ts[k], min(ts[k2] + 0.4, t1)
+            if b - a >= min_len:
+                rods.line(_pt(pf, a, c.z), _pt(pf, b, c.z), slot)
+            k = k2 + 1
+
+
+def p_basket(region, nz, rods, cells=3):
+    """Basketweave: checkerboard blocks where the across rods drop away and the course beneath shows through."""
+    S = nz.pitch * cells
+    for i in range(region.n):
+        c = Course(region, nz, i)
+        if i % 2 == 1 or i < 2:                                # full: the first floor courses and every Y course
+            for j, t0, t1, pf in c.lines((i % 2) * math.pi / 2):
+                rods.line(_pt(pf, t0, c.z), _pt(pf, t1, c.z), i % 2)
+        else:
+            _segments(c, rods, 0.0, nz.pitch, 0,
+                      lambda x, y, j: ((np.floor(x / S) + np.floor(y / S)) % 2) == 0, 2 * nz.pitch)
+
+
+def p_brick(region, nz, rods, length=4.0):
+    """Brick bond: rods broken into bricks, every other row offset by half a brick."""
+    L = nz.pitch * length; g = nz.pitch * 0.9
+    for i in range(region.n):
+        c = Course(region, nz, i)
+        if i % 2 == 1 or i < 2:
+            for j, t0, t1, pf in c.lines((i % 2) * math.pi / 2):
+                rods.line(_pt(pf, t0, c.z), _pt(pf, t1, c.z), i % 2)
+        else:
+            _segments(c, rods, 0.0, nz.pitch, 0,
+                      lambda x, y, j: np.mod(x + (L + g) / 2 * (j % 2), L + g) < L, 2 * nz.pitch)
+
+
+def p_trellis(region, nz, rods):
+    """Rods at +45 and -45 degrees: an open diamond trellis."""
+    for i in range(region.n):
+        c = Course(region, nz, i)
+        for j, t0, t1, pf in c.lines(math.pi / 4 if i % 2 == 0 else -math.pi / 4, pitch=nz.pitch * 1.35):
+            rods.line(_pt(pf, t0, c.z), _pt(pf, t1, c.z), i % 2)
+
+
+def p_frame(region, nz, rods):
+    """Picture frame: rods that follow the piece's own outline in concentric rings, crossed by straight rods."""
+    import skimage.measure as skm
+    E = region.extent + nz.pitch; n = int(2 * E / 0.5)
+    g = np.linspace(-E, E, n); X, Y = np.meshgrid(g, g, indexing="ij")
+    for i in range(region.n):
+        c = Course(region, nz, i)
+        if i % 2 == 1:
+            for j, t0, t1, pf in c.lines(math.pi / 2 if (i // 2) % 2 else 0.0, pitch=nz.pitch * 1.25):
+                rods.line(_pt(pf, t0, c.z), _pt(pf, t1, c.z), 1)
+            continue
+        F = c.sdf(X, Y); k = 0
+        while True:
+            level = -k * nz.pitch
+            if F.min() > level:
+                break
+            for cont in skm.find_contours(F, level):
+                pts = np.column_stack([np.interp(cont[:, 0], np.arange(n), g), np.interp(cont[:, 1], np.arange(n), g)])
+                seg = np.hypot(*np.diff(pts, axis=0).T)                 # resample to ~0.9 mm spacing
+                pts = pts[np.r_[0, np.where(np.diff(np.floor(np.concatenate([[0], np.cumsum(seg)]) / 0.9)) > 0)[0], len(pts) - 1]]
+                if len(pts) < 4 or np.hypot(*(pts.max(0) - pts.min(0))) < 2 * nz.rod_w:
+                    continue
+                rods.path(np.column_stack([pts, np.full(len(pts), c.z)]), 0)
+            k += 1
+            if k > 400:
+                break
+
+
 PATTERNS = {
     "grid":      dict(name="Weave", blurb="The classic: rods cross at right angles, colour by direction", slots=2, fn=p_grid, swaps="course"),
     "twill":     dict(name="Twill", blurb="Every 4th rod skipped on alternate courses — a drifting diagonal", slots=2, fn=lambda r, n, o: p_grid(r, n, o, twill=4), swaps="course"),
@@ -377,11 +501,19 @@ PATTERNS = {
     "selvedge":  dict(name="Selvedge", blurb="Rod ends join in loops — a woven hem on every edge", slots=2, fn=p_selvedge, swaps="course"),
     "beat":      dict(name="Moiré", blurb="Two rod spacings that beat into large bands", slots=2, fn=lambda r, n, o: p_grid(r, n, o, cross_pitch=1.18), swaps="course"),
     "overunder": dict(name="Over-under", blurb="A true weave — rods pass over and under each other", slots=2, fn=p_overunder, swaps="layer"),
+    "chevron":   dict(name="Chevron", blurb="Parallel zigzag rods crossed by straight ones — stacked Vs", slots=2, fn=p_chevron, swaps="course"),
+    "herringbone": dict(name="Herringbone", blurb="Zigzag rods both ways, flipping in blocks — woven tweed", slots=2, fn=p_herringbone, swaps="course"),
+    "ogee":      dict(name="Ogee", blurb="Wavy rods mirrored in pairs, pinching into onion-shaped lenses", slots=2, fn=p_ogee, swaps="course"),
+    "basket":    dict(name="Basketweave", blurb="Checkerboard blocks where one direction drops away to show the other", slots=2, fn=p_basket, swaps="course"),
+    "brick":     dict(name="Brick bond", blurb="Rods broken into staggered bricks over a full cross course", slots=2, fn=p_brick, swaps="course"),
+    "trellis":   dict(name="Trellis", blurb="Rods at ±45° — an open diamond trellis", slots=2, fn=p_trellis, swaps="course"),
+    "frame":     dict(name="Picture frame", blurb="Rods follow the piece's own outline in concentric rings", slots=2, fn=p_frame, swaps="course"),
     "tartan":    dict(name="Tartan", blurb="Colour runs along both directions — plaid", slots=2, fn=lambda r, n, o: p_grid(r, n, o, tartan=((3, 1), (2, 2))), swaps="layer"),
 }
 
 
-GROUPABLE = {"grid", "twill", "kagome", "polar", "ripple", "selvedge", "beat"}   # colour follows the course
+GROUPABLE = {"grid", "twill", "kagome", "polar", "ripple", "selvedge", "beat", "chevron", "herringbone", "ogee",
+             "basket", "brick", "trellis", "frame"}                                    # colour follows the course
 
 
 def weave(region, nz, pattern, group=1, params=None):

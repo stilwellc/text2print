@@ -810,3 +810,50 @@ def test_sliced_preview_from_gcode(tmp_path):
     d = {"shape": "cup", "texture": "zigzag", "params": {"diameter": 50, "height": 30}, "colours": ["#2E4E7E"], "options": {}}
     r = agent.slice_design(d, tmp_path / "w")
     assert r["print_minutes"] > 0 and pathlib.Path(r["sliced_preview"]).exists()
+
+
+# ── the bigger woven library ────────────────────────────────────────────────────────────────────────────
+NEW_WEAVES = ["chevron", "herringbone", "ogee", "basket", "brick", "trellis", "frame"]
+
+
+@pytest.mark.parametrize("weave", NEW_WEAVES)
+@pytest.mark.parametrize("shape,dims", [("coaster", {"width": 70, "height": 6, "dish": 0}), ("cup", {"diameter": 70, "height": 40}),
+                                        ("basket", {"width": 120, "depth": 90, "height": 40})])
+def test_new_weaves_build_clean_with_one_change_per_course(weave, shape, dims):
+    b = build.make(shape, weave, dims, colours=["#8B3A2F", "#EDE3D1"], draft=True)
+    _ok(b)
+    assert len(b.parts) == 2 and b.stats["rods"] > 20
+    one = build.make(shape, weave, dims, colours=["#8B3A2F", "#8B3A2F"], draft=True)
+    assert one.stats["swaps"] == 0
+
+
+@pytest.mark.parametrize("weave", ["chevron", "basket", "frame"])
+def test_new_weaves_work_as_mix_bands(weave):
+    bands = [dict(texture="plain", share=20, slot=0), dict(texture=weave, share=60, slot=0, slot2=1),
+             dict(texture="plain", share=20, slot=1)]
+    b = build.make("cup", "mix", {"diameter": 60, "height": 50}, options={"bands": bands},
+                   colours=["#8B3A2F", "#EDE3D1"], draft=True)
+    _ok(b)
+
+
+def test_broken_rods_always_cross_two_rods_below():
+    from text2print import lattice, printer
+    nz = printer.nozzle(0.4); S = SHAPES["tray"]; v = S.resolve({"width": 100, "height": 16, "dish": 0, "floor": 6})
+    reg = S.lattice(v, nz.rod_h)
+    for w in ("basket", "brick"):
+        rods = lattice.weave(reg, nz, w)
+        L = [np.hypot(b[0] - a[0], b[1] - a[1]) for ls in rods.lines.values() for a, b in ls]
+        assert min(L) >= 2 * nz.pitch - 0.5
+
+
+@pytest.mark.slicer
+def test_real_slicer_prints_the_new_weaves(tmp_path):
+    if not bambu.slicer_available():
+        pytest.skip("Bambu Studio not installed")
+    import re
+    for w in ("herringbone", "ogee", "frame"):
+        b = build.make("coaster", w, {"width": 60, "height": 6, "dish": 0}, colours=["#8B3A2F", "#EDE3D1"])
+        r = bambu.slice_project(b.write_3mf(tmp_path / f"{w}.3mf"), tmp_path / w)
+        assert "error" not in r, (w, r)
+        g = zipfile.ZipFile(tmp_path / w / "sliced.3mf").read("Metadata/plate_1.gcode").decode(errors="ignore")
+        assert len(re.findall(r"^M620 S\dA", g, re.M)) == b.stats["swaps"]

@@ -36,7 +36,7 @@ from `--slice` plus the AMS change estimate in `stats`.
 Shapes (`text2print/shapes.py`): tray, platter, dish (round), coaster, cup, shade, basket, catchall, hextile, and every round Profiled vessel (bowl, vase, goblet, custom, cachepot, sleeve, amphora via `Profiled.lattice`: ring follows the profile, course-to-course step <= LEAN 0.8 mm/mm both faces, fitted kinds grow outward) — woven; cup, bowl, vase, goblet — fabric;
 cup, bowl, vase, goblet, candle (solid bell + taper socket) — droop.
 Woven textures (`lattice.PATTERNS`): grid "Weave", twill, kagome, polar "Rose window" (round shapes only),
-ripple, selvedge, beat "Moiré", overunder, tartan. Fabric (`fabric.STITCHES`): zigzag, domes "Knit", wave;
+ripple, selvedge, beat "Moiré", overunder, tartan, chevron, herringbone, ogee, basket "Basketweave", brick "Brick bond", trellis, frame "Picture frame" (outline-following rings; works on every shape). Broken rods (basket, brick) always cross >= 2 rods below; all but tartan/over-under colour by course and work as mix bands. Fabric (`fabric.STITCHES`): zigzag, domes "Knit", wave;
 options rim_loops and floor = solid | diamonds | lens. Droop (`droop.STYLES`): fringe, swag, curls, unraveled;
 options density = sparse | medium | dense, length = short | medium | long. Multi-colour droop: zones 2-4 with
 zone_style courses (default for droop; woven-style, colour per strand row via droop.courses() cut-safe row

@@ -73,6 +73,13 @@ course and change about once per layer).
 | Moiré | Two rod spacings that beat into large bands |
 | Over-under | A true weave: rods pass over and under each other |
 | Tartan | Colour runs along both directions: plaid |
+| Chevron | Parallel zigzag rods crossed by straight ones: stacked Vs |
+| Herringbone | Zigzag rods both ways, flipping in blocks: woven tweed |
+| Ogee | Wavy rods mirrored in pairs, pinching into onion-shaped lenses |
+| Basketweave | Checkerboard blocks where one direction drops away to show the other |
+| Brick bond | Rods broken into staggered bricks over a full cross course |
+| Trellis | Rods at ±45°: an open diamond trellis |
+| Picture frame | Rods follow the piece's own outline in concentric rings, on any shape |
 
 **Printed fabric.** A two-loop wall whose layers alternate between mid-air stitches and straight rings.
 
