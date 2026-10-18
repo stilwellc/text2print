@@ -177,11 +177,14 @@ def plan(chart, cols, n_layers, lh, row_mm, col_mm, econ, options):
     def layers_of(b, rows_left_layers):
         slots = b.get("colours") or [0, 1, 2]
         if "plain" in b:
+            last[0] = int(b["plain"])
             return [("plain", int(b["plain"]), None)] * max(1, int(round(float(b.get("mm", 4)) / lh)))
         if "stripes" in b:
             seq = [int(s) for s in b["stripes"]] or [0]; per = max(1, int(b.get("layers", 2)))
             n = max(1, int(round(float(b.get("mm", 8)) / lh)))
-            return [("plain", seq[(k // per) % len(seq)], None) for k in range(n)]
+            out = [("plain", seq[(k // per) % len(seq)], None) for k in range(n)]
+            last[0] = out[-1][1]
+            return out
         R2 = rows_for(2)
         cells = _band_cells(b, cols, R2 * lh, col_mm, max(1, rows_left_layers // R2), options)
         used = sorted(set(np.unique(cells).tolist()))
@@ -192,10 +195,22 @@ def plan(chart, cols, n_layers, lh, row_mm, col_mm, econ, options):
         out = []
         slot_cells = np.vectorize(lambda i: int(slots[i]) if i < len(slots) else int(slots[0]))(cells)
         for r in range(cells.shape[0]):
+            here = [s for s in order if (slot_cells[r] == s).any()]          # only the colours this row shows
+            if len(here) == 1:                                               # one colour: every stitch bulges every
+                for l in range(R):                                           # layer — the ribs carry on, no changes
+                    out.append(("cw", here[0], (np.ones(cols, bool), (l + 0.5) / R)))
+                continue
+            k = here.index(last[0]) if last[0] in here else 0                # start on the colour already loaded
+            cyc = here[k:] + here[:k]
             for l in range(R):
-                s = order[(l // econ) % len(order)]
-                out.append(("cw", s, (slot_cells[r] == s, (l + 0.5) / R)) if len(order) > 1 else ("plain", s, None))
+                s = cyc[(l // econ) % len(cyc)]
+                out.append(("cw", s, (slot_cells[r] == s, (l + 0.5) / R)))
+            last[0] = out[-1][1]
+        if out:
+            last[0] = out[-1][1]
         return out
+
+    last = [None]                                              # the colour loaded at the end of the previous row
 
     fill = [i for i, b in enumerate(bands) if b.get("fill")]
     if fill:

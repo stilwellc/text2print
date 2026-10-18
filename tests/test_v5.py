@@ -44,8 +44,9 @@ def test_colours_follow_the_chart_layer_by_layer():
     n_plain = int(round(10 / lh))
     fl = info["floor_layers"]
     assert set(seq[:fl + n_plain]) == {0}
-    mid = seq[fl + n_plain: fl + n_plain + 12]
-    assert mid == [0, 1] * 6 or mid == [1, 0] * 6
+    mid = seq[fl + n_plain: fl + n_plain + 10]                    # first chart row (10 layers): alternates,
+    assert mid == [0, 1] * 5                                      # starting on the colour already loaded
+    assert seq[fl + n_plain + 10] == seq[fl + n_plain + 9]        # next row carries on with it: no extra change
     txt = "".join(map(str, seq))                                  # then the plain band in colour 2 (the chart repeats)
     assert "1" * n_plain in txt                                  # (the last chart layer may run into it: no change)
 
@@ -53,8 +54,19 @@ def test_colours_follow_the_chart_layer_by_layer():
 def test_three_colour_band_cycles_three():
     _, info = cw.build(SHAPES["cup"], SHAPES["cup"].resolve({"diameter": 60, "height": 40}), printer.nozzle(0.4),
                        chart=[{"motif": "diamonds", "colours": [0, 1, 2], "gap": 0}])
-    s = info["slot_seq"][info["floor_layers"]:info["floor_layers"] + 9]
-    assert len(set(s)) == 3 and s[:3] == s[3:6] == s[6:9]
+    seq = info["slot_seq"][info["floor_layers"]:]
+    assert set(seq) == {0, 1, 2}
+    trip = [seq[i:i + 3] for i in range(len(seq) - 2)]
+    assert any(len(set(t)) == 3 for t in trip)                    # accent rows cycle all three colours
+
+
+def test_one_colour_rows_cost_no_changes_and_keep_the_ribs():
+    nz = printer.nozzle(0.4); S = SHAPES["cup"]; v = S.resolve({"diameter": 60, "height": 40})
+    m, info = cw.build(S, v, nz, chart=[{"art": ["XXXX", "X..X"], "colours": [0, 1], "gap": 3}])
+    seq = info["slot_seq"][info["floor_layers"]:]
+    runs = "".join(map(str, seq))
+    assert "0" * 20 in runs                                      # the 3 ground rows: one colour, no alternation
+    assert info["swaps"] < 0.75 * len(seq)
 
 
 def test_band_two_halves_the_changes():
