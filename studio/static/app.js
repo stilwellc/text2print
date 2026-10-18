@@ -1012,7 +1012,9 @@ function renderDropView(d) {
     [false, "As printed", fur ? "Hairs bridged to the shell you cut away" : "The flat strands the printer lays"]],
     draped, async (v) => { draped = v; renderDropView(job); await showModel(job); });
 }
+const PERF = (window.__t2pPerf = window.__t2pPerf || []);
 async function showModel(d) {
+  const t0 = performance.now(); let tNorm = 0;
   const list = (d.preview && draped ? d.preview : d.parts).concat(d.lid || []);
   const meshes = await Promise.all(list.map(async (p) => {
     const buf = await (await fetch(p.url)).arrayBuffer();
@@ -1020,7 +1022,7 @@ async function showModel(d) {
     const g = new THREE.BufferGeometry();
     g.setAttribute("position", new THREE.BufferAttribute(new Float32Array(buf, 8, nv * 3), 3));
     g.setIndex(new THREE.BufferAttribute(new Uint32Array(buf, 8 + nv * 12, nf * 3), 1));
-    g.rotateX(-Math.PI / 2); g.computeVertexNormals();
+    const tn = performance.now(); g.rotateX(-Math.PI / 2); g.computeVertexNormals(); tNorm += performance.now() - tn;
     const m = new THREE.Mesh(g, new THREE.MeshStandardMaterial({ color: new THREE.Color(p.colour), roughness: 0.82, metalness: 0 }));
     m.castShadow = true; m.receiveShadow = true; return m;
   }));
@@ -1030,6 +1032,9 @@ async function showModel(d) {
   scene.remove(model); model.traverse((o) => { if (o.geometry) { o.geometry.dispose(); o.material.dispose(); } });
   model = next; scene.add(model);
   if (reframe) { frame(); reframe = false; }
+  const tr = performance.now(); renderer.render(scene, camera);
+  PERF.push({ texture: state.texture, total: Math.round(performance.now() - t0), normals: Math.round(tNorm), firstFrame: Math.round(performance.now() - tr),
+              tris: d.parts.reduce((a, p) => a + p.triangles, 0) });
 }
 function frame() {
   const box = new THREE.Box3().setFromObject(model), size = box.getSize(new THREE.Vector3());
