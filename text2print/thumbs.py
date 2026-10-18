@@ -11,7 +11,9 @@ FABRIC_TONE = "#D2B48C"     # fabric relief reads in a light tone under raking l
 SHAPE_LOOK = {"tray": "twill", "platter": "grid", "dish": "polar", "coaster": "selvedge", "cup": "grid",
               "shade": "kagome", "bowl": "zigzag", "vase": "wave", "goblet": "swag", "candle": "curls", "custom": "garland",
               "cachepot": "twist", "sleeve": "zigzag", "lantern": "voronoi", "pendant": "fringe", "puck": "voronoi",
-              "amphora": "flutes", "basket": "twill", "catchall": "grid", "hextile": "kagome", "tile": "cmyk"}
+              "amphora": "flutes", "basket": "twill", "catchall": "grid", "hextile": "kagome", "tile": "cmyk",
+              "box": "beads", "gourd": "jacquard", "jar": "twill"}
+COLOURWORK = {"jacquard": (["#2E4E7E", "#F4F1E8", "#5E9E4A"], "fairisle"), "beads": (["#C3302C", "#E9B7C4", "#8B3A2F"], "hearts")}
 HALFTONE_COLOURS = ["#F3D34A", "#C3302C"]
 SAMPLE = {"lattice": ("coaster", {"width": 70, "height": 8, "dish": 0, "corner": 12, "pillow": 0}),
           "lattice_round": ("dish", {"diameter": 70, "height": 9, "dish": 0, "pillow": 0}),
@@ -20,7 +22,7 @@ SAMPLE = {"lattice": ("coaster", {"width": 70, "height": 8, "dish": 0, "corner":
 
 def render_all(only=None):
     OUT.mkdir(parents=True, exist_ok=True)
-    for key, s in SHAPES.items():
+    for key, s in list(SHAPES.items()):
         if only and f"shape_{key}" not in only:
             continue
         fab = "lattice" not in s.families
@@ -28,8 +30,11 @@ def render_all(only=None):
         if look in ("cmyk", "flatlitho"):
             _backlit_thumb(look, key, {}, OUT / f"shape_{key}.png"); continue
         fab = fab and look not in ("cmyk",)
-        b = build.make(key, look, colours=[FABRIC_TONE] if fab else None)
-        tall = key in ("cup", "vase", "shade", "bowl", "goblet", "candle", "custom", "cachepot", "sleeve", "lantern",
+        if look in COLOURWORK:
+            b = build.make(key, look, colours=COLOURWORK[look][0], options={"chart_preset": COLOURWORK[look][1]}, draft=True)
+        else:
+            b = build.make(key, look, colours=[FABRIC_TONE] if fab else None)
+        tall = key in ("gourd", "jar", "cup", "vase", "shade", "bowl", "goblet", "candle", "custom", "cachepot", "sleeve", "lantern",
                        "pendant", "puck", "amphora", "basket")
         render([(m, c) for _, m, _, c in (b.preview or b.parts)], OUT / f"shape_{key}.png", size=360,
                view=(1.0, -0.95, 0.45 if tall else 0.8), zoom=1.12, rake=s.families == ("fabric",))
@@ -52,6 +57,11 @@ def render_all(only=None):
                            options={"bands": compose.PRESETS["flame"]["bands"]})
             render([(m, c) for _, m, _, c in (b.preview or b.parts)], OUT / f"texture_{key}.png", size=360,
                    view=(1.0, -0.9, 0.3), zoom=1.1)
+        elif t["family"] == "colourwork":
+            cols, preset = COLOURWORK.get(key, (["#2E4E7E", "#F4F1E8", "#5E9E4A"], "fairisle"))
+            b = build.make("cup", key, {"diameter": 80, "height": 90}, colours=cols, options={"chart_preset": preset})
+            render([(m, c) for _, m, _, c in b.parts], OUT / f"texture_{key}.png", size=360,
+                   view=(1.0, -0.9, 0.25), zoom=1.1)
         elif t["family"] == "halftone":
             b = build.make("cup", key, {"diameter": 80, "height": 90}, nozzle=0.8, colours=HALFTONE_COLOURS)
             render([(m, c) for _, m, _, c in b.parts], OUT / f"texture_{key}.png", size=360,
@@ -111,9 +121,9 @@ def docs_sheet(path=None, cols=8, cell=230):
     return path
 
 
-FAMILY_LOOK = {"lattice": "twill", "fabric": "domes", "droop": "fringe", "halftone": "halftone", "mix": "mix",
+FAMILY_LOOK = {"lattice": "twill", "fabric": "domes", "droop": "fringe", "halftone": "halftone", "mix": "mix", "colourwork": "jacquard",
                "spiral": "flutes", "shell": "voronoi", "flat": "cmyk"}
-TALL = ("cup", "vase", "shade", "bowl", "goblet", "candle", "custom", "cachepot", "sleeve", "lantern", "pendant", "puck",
+TALL = ("gourd", "jar", "cup", "vase", "shade", "bowl", "goblet", "candle", "custom", "cachepot", "sleeve", "lantern", "pendant", "puck",
         "amphora", "basket")
 
 
@@ -123,7 +133,7 @@ def family_thumb_path(key, fam):
 
 def render_family_shapes(only=None, skip_existing=False):
     """One card per shape per family it takes, so the shape grid shows what the picked family looks like."""
-    for key, s in SHAPES.items():
+    for key, s in list(SHAPES.items()):
         for fam in s.families:
             path = family_thumb_path(key, fam)
             if (only and key not in only) or (skip_existing and path.exists()):
@@ -138,7 +148,10 @@ def render_family_shapes(only=None, skip_existing=False):
             if fam == "flat":
                 _backlit_thumb(look, key, {}, path); continue
             cols = (HALFTONE_COLOURS if fam in ("halftone", "mix") else None if fam == "lattice" else [FABRIC_TONE])
-            b = build.make(key, look, colours=cols)
+            opts = {}
+            if fam == "colourwork":
+                cols, preset = COLOURWORK[look]; opts = {"chart_preset": preset}
+            b = build.make(key, look, colours=cols, options=opts, draft=fam == "colourwork")
             render([(m, c) for _, m, _, c in (b.preview or b.parts)], path, size=360,
-                   view=(1.0, -0.95, 0.45 if key in TALL else 0.8), zoom=1.12, rake=fam != "lattice")
+                   view=(1.0, -0.95, 0.45 if key in TALL else 0.8), zoom=1.12, rake=fam not in ("lattice", "colourwork"))
             print("family card", key, fam, flush=True)
