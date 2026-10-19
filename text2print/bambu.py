@@ -122,7 +122,7 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
     for ob in objects:
         part_ids = list(range(next_id, next_id + len(ob["parts"])))
         obj_id = next_id + len(ob["parts"]); next_id = obj_id + 1
-        sub_path = f"/3D/Objects/object_{obj_id}.model"
+        sub_path = f"/3D/Objects/object_{len(object_files) + 1}.model"     # numbered in sequence, as Bambu Studio writes them
         object_files[sub_path] = (f'<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="en-US" {NS}>\n'
                                   f' <metadata name="BambuStudio:3mfVersion">1</metadata>\n <resources>\n'
                                   + "".join(_mesh_xml(pid, m) for pid, (_, m, _) in zip(part_ids, ob["parts"]))
@@ -186,6 +186,11 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
             cfg[key] = (cfg[key] + [cfg[key][-1]] * n_fil)[:n_fil]
     for key, vals in (per_filament or {}).items():
         cfg[key] = [str(v) for v in vals][:n_fil]
+    # flag every process value we changed as edited against the system preset; with this list empty, Bambu Studio treats
+    # the project as stock "0.20mm Standard" and swaps our profile back to the preset's values on open (285 g, not 159)
+    ref = dict(base) if base is not None else json.loads(BASE_SETTINGS.read_text())
+    changed = sorted(k for k, v in overrides.items() if ref.get(k) != v and not k.startswith(("filament_", "flush_")))
+    cfg["different_settings_to_system"] = [";".join(changed)] + [""] * n_fil + [""]
 
     content_types = ('<?xml version="1.0" encoding="UTF-8"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
                      ' <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n'
