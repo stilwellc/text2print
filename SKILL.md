@@ -97,6 +97,11 @@ above (none if top band), range wall_loops=rod_lines over the band, woven speeds
   apart, strands never intersect in the mesh (`_never_touch`), strand faces on the 1/4-layer grid and wall
   rings on the 3/4-layer grid (coplanar unions leave slivers). Print: overhang slow-down OFF, fan <= 20 %,
   nozzle +5 C — slow strands freeze and don't droop. Verify with a G-code layer plot: one line out, one back.
+- Bambu GUI "The file does not contain any geometry data" = a per-filament list whose length != the filament
+  count (verified Oct 19: a 1-filament project with filament_self_index ['1','2']). The writer forces EXACT length
+  (`bambu.fix_filament_lists`); repair an old file with `python -m text2print.bambu repair FILE.3mf`. The CLI slicer
+  ignores the mismatch and `--export-3mf` copies it through — a CLI slice passing never proves the GUI opens a file,
+  and never "fix" a file by re-saving it through the CLI. Only repair files we made.
 - Bambu CLI facts (verified Oct 14): it honours part->AMS slot when every per-filament list is n_fil long (the
   writer pads them); layer ranges live in Metadata/layer_config_ranges.xml keyed by build position, must include
   layer_height, must NOT include line widths or extruder; the prime tower needs identical ranges on every object.

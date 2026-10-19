@@ -111,6 +111,51 @@ def _x(s):
     return _esc(str(s), {'"': "&quot;"})
 
 
+PER_FILAMENT_PREFIXES = ("filament_", "nozzle_temperature", "fan_", "overhang_fan", "additional_cooling", "slow_down_",
+                         "close_fan", "cool_plate", "hot_plate", "textured_plate", "eng_plate", "supertack_plate")
+NOT_PER_FILAMENT = ("flush_volumes_vector", "flush_volumes_matrix", "filament_dev_ams_drying_ams_limitations")
+
+
+def fix_filament_lists(cfg, n_fil):
+    """Make every per-filament list in a project config EXACTLY n_fil long (padded when short, cut when long).
+
+    Bambu Studio's GUI refuses a project whose per-filament lists disagree with its filament count — e.g. a
+    1-filament project carrying filament_self_index ['1', '2'] from the 2-colour base config — and reports it as
+    "The file does not contain any geometry data" (Oct 19 2026). The CLI slicer doesn't care, and its --export-3mf
+    copies the mismatch through, so a CLI slice passing proves nothing about the GUI opening the file."""
+    for key in list(cfg):
+        if key.startswith(PER_FILAMENT_PREFIXES) and key not in NOT_PER_FILAMENT \
+                and isinstance(cfg[key], list) and len(cfg[key]) >= 1 and len(cfg[key]) != n_fil:
+            cfg[key] = (cfg[key] + [cfg[key][-1]] * n_fil)[:n_fil]
+    cfg["filament_self_index"] = [str(i + 1) for i in range(n_fil)]
+    return cfg
+
+
+def repair_3mf(path):
+    """Fix the per-filament lists of an existing .3mf in place (see fix_filament_lists). Returns the keys changed."""
+    import shutil
+    import tempfile
+    with zipfile.ZipFile(path) as z:
+        if "Metadata/project_settings.config" not in z.namelist():
+            return []                                          # not a Bambu project (plain 3MF): nothing to fix
+        cfg = json.loads(z.read("Metadata/project_settings.config"))
+        before = json.dumps(cfg, sort_keys=True)
+        n_fil = len(cfg.get("filament_colour") or [1])
+        old = {k: v for k, v in cfg.items()}
+        fix_filament_lists(cfg, n_fil)
+        changed = sorted(k for k in cfg if cfg[k] != old.get(k))
+        if json.dumps(cfg, sort_keys=True) == before:
+            return []
+        tmp = tempfile.mktemp(suffix=".3mf")
+        with zipfile.ZipFile(tmp, "w", zipfile.ZIP_DEFLATED) as out:
+            for item in z.infolist():
+                data = json.dumps(cfg, indent=4).encode() if item.filename == "Metadata/project_settings.config" else z.read(item)
+                out.writestr(item, data)
+    shutil.move(tmp, path)
+    return changed
+
+
+
 def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), overrides=DEFAULT_OVERRIDES, base=None,
               per_filament=None):
     """objects: [{name, position, parts: [(name, mesh, slot)], ranges?: [(z0, z1, {opt: value})]}].
@@ -179,11 +224,7 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
     cfg["flush_volumes_vector"] = ["140"] * (2 * n_fil)
     cfg["filament_density"] = ["1.26"] * n_fil; cfg["filament_cost"] = ["19.99"] * n_fil
     cfg["filament_vendor"] = ["Bambu Lab"] * n_fil; cfg["filament_ids"] = ["GFA00"] * n_fil
-    for key in list(cfg):                                   # every per-filament list must be n_fil long
-        if key.startswith(("filament_", "nozzle_temperature", "fan_", "overhang_fan", "additional_cooling",
-                           "slow_down_", "close_fan", "cool_plate", "hot_plate", "textured_plate", "eng_plate")) \
-                and isinstance(cfg[key], list) and 1 <= len(cfg[key]) < n_fil and key != "flush_volumes_vector":
-            cfg[key] = (cfg[key] + [cfg[key][-1]] * n_fil)[:n_fil]
+    fix_filament_lists(cfg, n_fil)
     for key, vals in (per_filament or {}).items():
         cfg[key] = [str(v) for v in vals][:n_fil]
     # flag every process value we changed as edited against the system preset; with this list empty, Bambu Studio treats
@@ -329,3 +370,11 @@ def gcode_preview(sliced_3mf, out_png, colours=None, size=900):
     ax.set_xlim(mx - w / 2, mx + w / 2); ax.set_ylim(mz - w / 2, mz + w / 2); ax.set_aspect("equal"); ax.axis("off")
     fig.patch.set_facecolor("#F7F5F0"); fig.savefig(out_png, dpi=100, facecolor="#F7F5F0"); plt.close(fig)
     return str(out_png)
+
+
+if __name__ == "__main__":                                    # python -m text2print.bambu repair FILE.3mf ...
+    import sys
+    if len(sys.argv) > 2 and sys.argv[1] == "repair":
+        for f in sys.argv[2:]:
+            ch = repair_3mf(f)
+            print(("fixed " + ", ".join(ch)) if ch else "ok", "-", f)
