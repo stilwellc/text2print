@@ -50,7 +50,10 @@ def _thumbnail(objects, colours, size, bed=256.0):
     ax = fig.add_axes([0, 0, 1, 1]); ax.set_facecolor(GROUND); fig.patch.set_facecolor(GROUND)
     for ob in objects:
         px, py = ob["position"]
-        for (_, m, slot) in ob["parts"]:
+        for p in ob["parts"]:
+            if len(p) > 3 and p[3].get("modifier"):
+                continue                      # a modifier volume prints nothing — not in the thumbnail
+            _, m, slot = p[:3]
             sec = m.section(plane_origin=[0, 0, 0.02], plane_normal=[0, 0, 1])
             if sec is None:
                 continue
@@ -158,9 +161,11 @@ def repair_3mf(path):
 
 def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), overrides=DEFAULT_OVERRIDES, base=None,
               per_filament=None):
-    """objects: [{name, position, parts: [(name, mesh, slot)], ranges?: [(z0, z1, {opt: value})]}].
+    """objects: [{name, position, parts: [(name, mesh, slot) | (name, mesh, slot, opts)], ranges?: [(z0, z1, {opt: value})]}].
+    opts (optional): {"modifier": True} makes the part a modifier volume (it prints nothing; its "settings"
+    apply to whatever it overlaps — e.g. fuzzy skin on one surface); {"settings": {key: value}} sets per-part options.
     per_filament: {key: [value per filament]} for filament-level settings (fan, temperature)."""
-    n_fil = max(slot for ob in objects for _, _, slot in ob["parts"])
+    n_fil = max(p[2] for ob in objects for p in ob["parts"])
     ident = "1 0 0 0 1 0 0 0 1 0 0 0"
     next_id = 1
     object_files, root_objects, build_items, settings_objects, plate_instances, rels, cut_objs = {}, "", "", "", "", "", ""
@@ -170,7 +175,7 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
         sub_path = f"/3D/Objects/object_{len(object_files) + 1}.model"     # numbered in sequence, as Bambu Studio writes them
         object_files[sub_path] = (f'<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="en-US" {NS}>\n'
                                   f' <metadata name="BambuStudio:3mfVersion">1</metadata>\n <resources>\n'
-                                  + "".join(_mesh_xml(pid, m) for pid, (_, m, _) in zip(part_ids, ob["parts"]))
+                                  + "".join(_mesh_xml(pid, p[1]) for pid, p in zip(part_ids, ob["parts"]))
                                   + ' </resources>\n <build/>\n</model>\n')
         rels += (f' <Relationship Target="{sub_path}" Id="rel-{obj_id}" '
                  'Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>\n')
@@ -182,11 +187,15 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
         build_items += (f'  <item objectid="{obj_id}" p:UUID="{uuid.uuid4()}" '
                         f'transform="1 0 0 0 1 0 0 0 1 {px} {py} 0" printable="1"/>\n')
         part_xml = ""
-        for pid, (name, m, slot) in zip(part_ids, ob["parts"]):
-            part_xml += (f'    <part id="{pid}" subtype="normal_part" uuid="{uuid.uuid4()}">\n'
+        for pid, p in zip(part_ids, ob["parts"]):
+            name, m, slot = p[:3]
+            opts = p[3] if len(p) > 3 else {}
+            subtype = "modifier_part" if opts.get("modifier") else "normal_part"
+            extra = "".join(f'      <metadata key="{k}" value="{_x(v)}"/>\n' for k, v in (opts.get("settings") or {}).items())
+            part_xml += (f'    <part id="{pid}" subtype="{subtype}" uuid="{uuid.uuid4()}">\n'
                          f'      <metadata key="name" value="{_x(name)}"/>\n'
                          f'      <metadata key="matrix" value="1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1"/>\n'
-                         f'      <metadata key="extruder" value="{slot}"/>\n'
+                         f'      <metadata key="extruder" value="{slot}"/>\n{extra}'
                          f'      <mesh_stat face_count="{len(m.faces)}" edges_fixed="0" degenerate_facets="0" '
                          f'facets_removed="0" facets_reversed="0" backwards_edges="0"/>\n    </part>\n')
         obj_meta = "".join(f'    <metadata key="{k}" value="{_x(val)}"/>\n' for k, val in (ob.get("settings") or {}).items())
@@ -194,7 +203,7 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
         # whatever its part says — a blue knob beside a red piece came out red
         obj_meta = f'    <metadata key="extruder" value="{ob["parts"][0][2]}"/>\n' + obj_meta
         settings_objects += (f'  <object id="{obj_id}">\n    <metadata key="name" value="{_x(ob["name"])}"/>\n{obj_meta}'
-                             f'    <metadata face_count="{sum(len(m.faces) for _, m, _ in ob["parts"])}"/>\n{part_xml}  </object>\n')
+                             f'    <metadata face_count="{sum(len(p[1].faces) for p in ob["parts"])}"/>\n{part_xml}  </object>\n')
         plate_instances += (f'    <model_instance>\n      <metadata key="object_id" value="{obj_id}"/>\n'
                             f'      <metadata key="instance_id" value="0"/>\n      <metadata key="identify_id" value="{obj_id * 100}"/>\n'
                             f'    </model_instance>\n')
@@ -231,7 +240,12 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
     # the project as stock "0.20mm Standard" and swaps our profile back to the preset's values on open (285 g, not 159)
     ref = dict(base) if base is not None else json.loads(BASE_SETTINGS.read_text())
     changed = sorted(k for k, v in overrides.items() if ref.get(k) != v and not k.startswith(("filament_", "flush_")))
-    cfg["different_settings_to_system"] = [";".join(changed)] + [""] * n_fil + [""]
+    # bed/nozzle temps and fans are FILAMENT-preset keys: flagged in the process slot, Bambu Studio sees the filament
+    # as stock and re-applies the preset (or the AMS spool's preset) on open — the shadowbox asked for a 60/65 bed and
+    # printed at 50 (Oct 20). Flag them in each filament's own slot so the GUI keeps them.
+    fil = [k for k in changed if k.startswith(PER_FILAMENT_PREFIXES) and k not in NOT_PER_FILAMENT]
+    proc = [k for k in changed if k not in fil]
+    cfg["different_settings_to_system"] = [";".join(proc)] + [";".join(fil)] * n_fil + [""]
 
     content_types = ('<?xml version="1.0" encoding="UTF-8"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
                      ' <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n'
