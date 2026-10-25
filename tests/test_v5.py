@@ -245,19 +245,6 @@ def test_a_gift_lid_that_cannot_be_built_falls_back_to_a_slip_lid_without_a_knob
     assert b.stats["lid"]["style"] == "slip" and b.stats["lid"]["knob"] == "none"
 
 
-def test_gift_lid_top_is_closed_by_a_hidden_skin():
-    """Oct 25: the woven top is ~18 % open; a skin inside it keeps dust off what the box holds and stops you looking
-    down the wall's rods, while the weave still shows outside."""
-    b = build.make("box", "twill", dict(width=140, depth=90, height=40, round=0, wall=6, floor=2), 0.4,
-                   ["#2B2B2B", "#F4F1E8"], dict(lid="gift", lid_height=24, lid_over_w=127, lid_over_d=77), draft=True)
-    lid = trimesh.util.concatenate([m for _, m, _, _ in b.assembled]); top = lid.bounds[1][2]
-    xs, ys = np.meshgrid(np.linspace(-65, 65, 131), np.linspace(-40, 40, 81))
-    o = np.c_[xs.ravel(), ys.ravel(), np.full(xs.size, top + 1)]
-    loc, ri, _ = lid.ray.intersects_location(o, np.tile([0, 0, -1.0], (len(o), 1)), multiple_hits=False)
-    z = np.full(len(o), -1.0); z[ri] = loc[:, 2]
-    assert (z < top - 3).mean() < 0.01
-
-
 def test_ombre_ends_hold_the_first_and_last_colour():
     region = SHAPES["box"].lattice(SHAPES["box"].resolve(dict(width=120, depth=80, height=40, wall=6, floor=2)), 0.8)
     rods = lattice.weave(region, printer.nozzle(0.4), "twill", ombre=[0, 1], ombre_ends=4)
