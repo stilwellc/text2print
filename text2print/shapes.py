@@ -569,7 +569,8 @@ class LidBox(Box):
 
 SHAPES["box"] = LidBox("box", "Lidded box", "Round, oval-ended (stadium) or rounded-square box — made to take a lid",
                        ("lattice", "fabric", "halftone", "mix", "spiral", "shell"), [
-    Param("width", "Width", 60, 220, 1, 170), Param("depth", "Depth", 50, 200, 1, 95), Param("height", "Height", 20, 120, 1, 50),
+    # width to 250: a long case (e.g. a 3-watch case) still prints flat on the 256 mm bed
+    Param("width", "Width", 60, 250, 1, 170), Param("depth", "Depth", 50, 200, 1, 95), Param("height", "Height", 20, 120, 1, 50),
     Param("round", "Roundness", 0, 100, 1, 100, "%"),
     Param("wall", "Wall", 6, 16, 0.5, 9, family="lattice"), Param("floor", "Floor", 2, 10, 0.5, 4, family="lattice")])
 
