@@ -706,7 +706,7 @@ function renderLid() {
       return i;
     };
     if (textureOf(state.texture).family === "lattice")
-      kids.push(...optionControl({ key: "lid_top", label: "Lid top", kind: "seg", choices: [["match", "Match the walls"], ["frame", "Frame · dark rings"], ["frame_light", "Frame · light rings"], ["frame_tone", "Frame · one tone"]], default: "match" }, after));
+      kids.push(...optionControl({ key: "lid_top", label: "Lid top", kind: "seg", choices: [["match", "Match the walls"], ["frame", "Picture frame"]], default: "match" }, after));
     kids.push(el("div", { class: "field-label" }, "Fits over an insert (outside, mm)"), el("div", { class: "height" }, num("lid_over_w", "width"), el("span", {}, "×"), num("lid_over_d", "depth")));
     kids.push(el("p", { class: "hint" }, state.options.lid_over_w && state.options.lid_over_d
       ? "Over an insert: no neck. The base is woven to its rim (height = the seam); the insert stands up out of it and the lid slides over the insert, flush with the base."
