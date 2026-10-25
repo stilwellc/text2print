@@ -246,7 +246,7 @@ def lid_textures():
 
 
 LID_KNOBS = [("knob", "Knob"), ("button", "Flat button"), ("tube", "Tube"), ("none", "None")]
-LID_SKIP = ("lid", "lid_fit", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
+LID_SKIP = ("lid", "lid_fit", "lid_over_w", "lid_over_d", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
             "engrave_lid", "zones", "zone_style", "course_rows", "purge_piece", "floor", "rim_loops",
             "purge", "handles")
 
@@ -423,17 +423,36 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
     """Gift-box lid, flush (Oct 25 2026): the closed box is one block. The base's weave stops at the seam and a smooth
     neck steps in by the lid's wall + the fit; the lid is a short woven cap of the same outline that slides down over
     the neck, its outside flush with the base and its ceiling resting on the neck's rim. Woven Lidded box only.
+    Over an insert (lid_over_w / lid_over_d = the outside of a liner standing up out of the box): no neck — the base
+    is woven to its rim, the liner is the neck, and the lid's wall is sized to slide over the liner and still close
+    flush; its bottom edge rests on the base's rim.
     -> (base parts, lid parts, assembled lid) or None when the wall is too thin to hold a lid wall and a neck."""
     import manifold3d as m3d
     clear = extras.FITS.get(options.get("lid_fit", "slip"), 0.25)
-    wall = float(v["wall"]); lw = min(GIFT_LID_WALL, wall - clear - GIFT_NECK_MIN)
-    if lw < 4.0:
-        warnings.append(f"A gift-box lid needs a wall of at least {4 + clear + GIFT_NECK_MIN:.1f} mm "
-                        f"(lid {4:g} + fit {clear} + neck {GIFT_NECK_MIN:g}) — this piece gets a slip lid.")
-        return None
-    neck = wall - clear - lw
+    W, D = float(v["width"]), float(v["depth"]); corner = S._v(v)["corner"]; wall = float(v["wall"])
+    try:
+        over = (float(options.get("lid_over_w") or 0), float(options.get("lid_over_d") or 0))
+    except (TypeError, ValueError):
+        over = (0.0, 0.0)
+    over = over if min(over) > 0 else None
+    if over:
+        lw = min(W - over[0], D - over[1]) / 2 - clear           # flush outside, `clear` a side over the liner
+        if lw < 4.0:
+            warnings.append(f"The insert is too big for a woven lid wall: {W:g} x {D:g} over {over[0]:g} x {over[1]:g} "
+                            f"leaves {lw:.2f} mm (needs 4) — this piece gets a slip lid.")
+            return None
+        if W - 2 * wall < over[0] + 0.4 or D - 2 * wall < over[1] + 0.4:
+            warnings.append(f"The insert ({over[0]:g} x {over[1]:g}) won't drop into the box: inside is "
+                            f"{W - 2 * wall:g} x {D - 2 * wall:g} — thin the wall or grow the box.")
+        neck = 0.0
+    else:
+        lw = min(GIFT_LID_WALL, wall - clear - GIFT_NECK_MIN)
+        if lw < 4.0:
+            warnings.append(f"A gift-box lid needs a wall of at least {4 + clear + GIFT_NECK_MIN:.1f} mm "
+                            f"(lid {4:g} + fit {clear} + neck {GIFT_NECK_MIN:g}) — this piece gets a slip lid.")
+            return None
+        neck = wall - clear - lw
     Hs = float(min(60.0, max(12.0, float(options.get("lid_height") or 30.0))))
-    W, D = float(v["width"]), float(v["depth"]); corner = S._v(v)["corner"]
     cp = dict(v, height=Hs, wall=lw, floor=2.5)
     cap = make(shape, texture, cp, nz.size, colours, {"weave_face": "bottom", **{k: x for k, x in options.items()
                if k not in LID_SKIP and k != "weave_face"}}, draft=draft, _raw=True)
@@ -446,6 +465,20 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
     hits = trimesh.util.concatenate([m_ for _, m_, _, _ in cparts]).ray.intersects_location(
         o, np.tile([0.0, 0.0, -1.0], (len(o), 1)), multiple_hits=False)[0]
     F = float(hits[:, 2].max()) if len(hits) else 2.5          # rests on the highest rod of the top
+    lid_parts = [("Lid", m_, s_, c_) for _, m_, s_, c_ in cparts]
+    flip = trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0])
+    if over:                                                    # the lid's bottom edge sits on the base's rim
+        assembled = []
+        for _, m_, s_, c_ in cparts:
+            a_ = m_.copy(); a_.apply_transform(flip); a_.apply_translation([0, 0, top + Hc]); assembled.append(("Lid", a_, s_, c_))
+        cx, cy = (W - 2 * lw - over[0]) / 2, (D - 2 * lw - over[1]) / 2
+        stats["lid"] = dict(style="gift", mode="over insert", clearance=round(min(cx, cy), 2), cap="match", cap_h=round(Hc, 1),
+                            seam=round(top, 1), lid_wall=round(lw, 2), closed_h=round(top + Hc, 1),
+                            ceiling=round(top + Hc - F, 1), over=[over[0], over[1]], knob="none")
+        warnings.append(f"Gift-box lid over a {over[0]:g} x {over[1]:g} insert: {lw:.2f} mm woven wall, {cx:.2f} / {cy:.2f} mm a "
+                        f"side over it, flush outside; closed {W:g} x {D:g} x {top + Hc:.1f} mm, seam at {top:.1f} mm, "
+                        f"lid ceiling {top + Hc - F:.1f} mm up — the insert must stand above the rim and stay under that.")
+        return list(parts), lid_parts, assembled
     seam = top + F - Hc                                         # the lid's bottom edge when closed
     if seam < 10:
         warnings.append("The gift-box lid is taller than the box — this piece gets a slip lid."); return None
@@ -465,8 +498,7 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
     neck_m = ring(n_out, seam - 1.0, top - lead) + ring(n_out.buffer(-lead, join_style=1), top - lead - 0.01, top)
     ti = max(range(len(base)), key=lambda i: base[i][1].bounds[1][2])
     base = [(("neck" if n_ == "graft" else n_), m_, s_, c_) for n_, m_, s_, c_ in extras.graft(base, [neck_m], [], into=ti)]
-    lid_parts = [("Lid", m_, s_, c_) for _, m_, s_, c_ in cparts]
-    flip = trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0]); assembled = []
+    assembled = []
     for _, m_, s_, c_ in cparts:                                # flipped: the ceiling (z = F) lands on the neck's rim
         a_ = m_.copy(); a_.apply_transform(flip); a_.apply_translation([0, 0, top + F]); assembled.append(("Lid", a_, s_, c_))
     stats["lid"] = dict(style="gift", clearance=clear, cap="match", cap_h=round(Hc, 1), seam=round(seam, 1), neck=round(neck, 2),

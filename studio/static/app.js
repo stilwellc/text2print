@@ -699,7 +699,16 @@ function renderLid() {
     rng.addEventListener("input", () => { out.textContent = `${rng.value} mm`; });
     rng.addEventListener("change", () => { state.options.lid_height = rng.value; after(); });
     kids.push(el("div", { class: "field-label" }, "Lid depth"), el("div", { class: "height" }, rng, out));
-    kids.push(el("p", { class: "hint" }, "Closes flush: the weave stops at the seam and the lid slides over a smooth neck. Height is the base up to its rim; the wall needs room for the lid wall, the fit and the neck (10 mm works)."));
+    // over an insert: a liner standing up out of the box is the neck; the lid is sized to slide over it, flush
+    const num = (key, label) => {
+      const i = el("input", { type: "number", min: "0", step: "0.1", value: state.options[key] || "", placeholder: label, "aria-label": `Insert ${label}`, class: "num" });
+      i.addEventListener("change", () => { const x = parseFloat(i.value); if (x > 0) state.options[key] = String(x); else delete state.options[key]; after(); });
+      return i;
+    };
+    kids.push(el("div", { class: "field-label" }, "Fits over an insert (outside, mm)"), el("div", { class: "height" }, num("lid_over_w", "width"), el("span", {}, "×"), num("lid_over_d", "depth")));
+    kids.push(el("p", { class: "hint" }, state.options.lid_over_w && state.options.lid_over_d
+      ? "Over an insert: no neck. The base is woven to its rim (height = the seam); the insert stands up out of it and the lid slides over the insert, flush with the base."
+      : "Closes flush: the weave stops at the seam and the lid slides over a smooth neck. Height is the base up to its rim; the wall needs room for the lid wall, the fit and the neck (10 mm works). Or give an insert's size and the insert becomes the neck."));
   } else if (lidOn()) {
     const L = CAT.lid, groups = {};
     for (const t of L.textures) {
@@ -784,7 +793,7 @@ function renderPrint(d) {
   if (s.ribs) rows.push(["Ribs × layers", `${fmt(s.ribs)} × ${fmt(s.layers)}`]);
   if (s.strands) rows.push(["Strands", `${fmt(s.strands)} · up to ${fmt(s.reach)} mm out`]);
   if (s.lid) rows.push(["Lid", `${s.lid.cap ? s.lid.cap + " · " : ""}${{ slip: "slip-on", gift: "gift box", thread: "screw", magnets: "magnets" }[s.lid.style] || "lid"} · ${s.lid.clearance} mm fit`
-    + (s.lid.style === "gift" ? ` · closed ${s.lid.closed_h} mm, seam ${s.lid.seam} mm` : "")
+    + (s.lid.style === "gift" ? ` · closed ${s.lid.closed_h} mm, seam ${s.lid.seam} mm${s.lid.mode ? `, over a ${s.lid.over[0]} × ${s.lid.over[1]} insert, ceiling ${s.lid.ceiling} mm` : ""}` : "")
     + (s.lid.plate === "own" ? ` · own plate${s.lid.swaps ? `, ${fmt(s.lid.swaps)} changes` : ""}` : "")]);
   rows.push(["Colours", String(s.colours)]);
   if (s.swaps) rows.push(["AMS changes", `${fmt(s.swaps)} · ≈ ${fmt(s.swap_minutes)} min`]);

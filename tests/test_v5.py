@@ -221,3 +221,18 @@ def test_gift_box_lid_needs_room_for_a_lid_wall_and_a_neck():
     b = build.make("box", "twill", dict(width=140, depth=90, height=60, round=0, wall=6, floor=2), 0.4,
                    ["#1C1C1E", "#E8E4DC"], dict(lid="gift"), draft=True)
     assert b.stats["lid"]["style"] == "slip" and any("gift-box lid needs a wall" in w for w in b.warnings)
+
+
+def test_gift_box_lid_over_an_insert_has_no_neck_and_closes_flush():
+    """Oct 25: a liner standing up out of the box is the neck. The base is woven to its rim, the lid's wall is sized to
+    slide over the liner with the fit a side and still close flush; the lid's edge sits on the base's rim."""
+    b = build.make("box", "twill", dict(width=140, depth=90, height=40, round=0, wall=6, floor=2), 0.4,
+                   ["#1C1C1E", "#E8E4DC"], dict(lid="gift", lid_height=24, lid_over_w=127, lid_over_d=77), draft=True)
+    L = b.stats["lid"]
+    assert L["mode"] == "over insert" and not any(n == "neck" for n, _, _, _ in b.parts)
+    assert L["lid_wall"] == pytest.approx(6.25) and L["clearance"] == pytest.approx(0.25)
+    base = np.vstack([m.vertices for _, m, _, _ in b.parts]); lid = np.vstack([m.vertices for _, m, _, _ in b.assembled])
+    assert np.abs(lid[:, :2]).max(0) == pytest.approx(np.abs(base[:, :2]).max(0), abs=0.05)
+    assert lid[:, 2].min() == pytest.approx(base[:, 2].max(), abs=0.01)
+    w = lid[(lid[:, 2] > L["seam"] + 2) & (lid[:, 2] < L["closed_h"] - 4)]
+    assert 2 * w[(np.abs(w[:, 1]) < 20) & (w[:, 0] > 0)][:, 0].min() == pytest.approx(127.5, abs=0.05)
