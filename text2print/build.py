@@ -246,7 +246,7 @@ def lid_textures():
 
 
 LID_KNOBS = [("knob", "Knob"), ("button", "Flat button"), ("tube", "Tube"), ("none", "None")]
-LID_SKIP = ("lid", "lid_fit", "lid_over_w", "lid_over_d", "lid_top", "weave_courses", "weave_floor", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
+LID_SKIP = ("lid", "lid_fit", "lid_over_w", "lid_over_d", "weave_courses", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
             "engrave_lid", "zones", "zone_style", "course_rows", "purge_piece", "floor", "rim_loops",
             "purge", "handles")
 
@@ -455,8 +455,6 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
     Hs = float(min(60.0, max(12.0, float(options.get("lid_height") or 30.0))))
     cp = dict(v, height=Hs, wall=lw, floor=2.5)
     copts = {"weave_face": "bottom", **{k: x for k, x in options.items() if k not in LID_SKIP and k not in ("weave_face", "weave_courses")}}
-    if options.get("lid_top") == "frame":                       # the lid's top woven as a picture frame
-        copts["weave_floor"] = "frame"
     if options.get("weave_twist") or options.get("weave_ombre"):      # the lid carries on the base's twist and fade
         nb, nl = S.lattice(v, nz.rod_h).n, S.lattice(cp, nz.rod_h).n
         copts["weave_courses"] = (nb + nl - 1, -1, nb + nl)
@@ -726,7 +724,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
                              params=_pl.param_values(T.get("params"), options),
                              twist=float(options.get("weave_twist") or 0.0), ombre=_ombre_stops(options),
                              picture=_weave_picture(region, options), face=options.get("weave_face", "top"),
-                             courses=_weave_courses(S, v, nz, region, options), floor=options.get("weave_floor"))
+                             courses=_weave_courses(S, v, nz, region, options))
         by_slot = rods.meshes()
         # same colour on two slots -> one part, one filament, no swaps between them
         merged = {}
