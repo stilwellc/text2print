@@ -197,3 +197,27 @@ def test_real_slicer_takes_the_labyrinth_lid_box(tmp_path):
     if lid.exists():
         rl = bambu.slice_project(lid, tmp_path / "sl")
         assert "error" not in rl, rl
+
+
+def test_gift_box_lid_is_flush_and_slides_over_a_smooth_neck():
+    """Oct 25: the flush gift-box lid. The base's weave stops at the seam, a smooth neck steps in by the lid wall + the
+    fit, and the woven lid closes flush with the base — the closed box is one block with one seam."""
+    b = build.make("box", "twill", dict(width=140, depth=90, height=60, round=0, wall=10, floor=2), 0.4,
+                   ["#1C1C1E", "#E8E4DC"], dict(lid="gift", lid_fit="slip", lid_height=24), draft=True)
+    L = b.stats["lid"]
+    assert L["style"] == "gift" and L["neck"] == pytest.approx(3.75) and L["lid_wall"] == pytest.approx(6.0)
+    base = np.vstack([m.vertices for n, m, _, _ in b.parts if n != "neck"])
+    lid = np.vstack([m.vertices for _, m, _, _ in b.assembled])
+    assert np.abs(lid[:, :2]).max(0) == pytest.approx(np.abs(base[:, :2]).max(0), abs=0.05)   # flush outside
+    assert base[:, 2].max() == pytest.approx(lid[:, 2].min(), abs=0.01) == pytest.approx(L["seam"], abs=0.06)   # one seam
+    neck = [m for n, m, _, _ in b.parts if n == "neck"][0]
+    w = lid[(lid[:, 2] > L["seam"] + 2) & (lid[:, 2] < L["closed_h"] - 4)]
+    inner_x = w[(np.abs(w[:, 1]) < 20) & (w[:, 0] > 0)][:, 0].min()
+    assert inner_x - neck.bounds[1][0] == pytest.approx(0.25, abs=0.02)                       # the slip fit
+    assert not any(n == "Knob" for n, _, _, _ in b.extras)
+
+
+def test_gift_box_lid_needs_room_for_a_lid_wall_and_a_neck():
+    b = build.make("box", "twill", dict(width=140, depth=90, height=60, round=0, wall=6, floor=2), 0.4,
+                   ["#1C1C1E", "#E8E4DC"], dict(lid="gift"), draft=True)
+    assert b.stats["lid"]["style"] == "slip" and any("gift-box lid needs a wall" in w for w in b.warnings)

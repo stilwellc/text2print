@@ -46,7 +46,7 @@ def catalogue():
                       controls=["picture_place: wrap|front", "picture_size 0.15-1", "picture_lift 0-1",
                                 "picture_contrast 0.3-3", "picture_invert", "text, font, text_layout"],
                       fabric_mask="fabric: mask in|out + picture options -> the stitch only inside/around the picture"),
-        lid=dict(styles=["none", "slip", "thread", "magnets"], looks=[t["key"] for t in build.lid_textures()],
+        lid=dict(styles=["none", "slip", "gift", "thread", "magnets"], looks=[t["key"] for t in build.lid_textures()],
                  knobs=[k for k, _ in build.LID_KNOBS], fits=["snug", "slip", "loose"],
                  options=["lid", "lid_texture", "lid_colours", "lid_height", "lid_knob", "lid_fit", "lid_plate",
                           "engrave_lid"]),
