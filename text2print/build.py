@@ -455,8 +455,8 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
     Hs = float(min(60.0, max(12.0, float(options.get("lid_height") or 30.0))))
     cp = dict(v, height=Hs, wall=lw, floor=2.5)
     copts = {"weave_face": "bottom", **{k: x for k, x in options.items() if k not in LID_SKIP and k not in ("weave_face", "weave_courses")}}
-    if options.get("lid_top") == "frame":                       # the lid's top woven as a picture frame
-        copts["weave_floor"] = "frame"
+    if options.get("lid_top") in ("frame", "frame_light", "frame_tone"):   # the lid's top woven as a picture frame
+        copts["weave_floor"] = options["lid_top"]
     if options.get("weave_twist") or options.get("weave_ombre"):      # the lid carries on the base's twist and fade
         nb, nl = S.lattice(v, nz.rod_h).n, S.lattice(cp, nz.rod_h).n
         copts["weave_courses"] = (nb + nl - 1, -1, nb + nl)
