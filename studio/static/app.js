@@ -46,7 +46,7 @@ function pieceSlotCount() {
   if (!isMix()) return Math.max(textureOf(state.texture).slots, ...ombreStops().map((i) => i + 1));
   return Math.max(1, ...state.bands.flatMap((b) => twoSlot(b.texture) ? [b.slot + 1, (b.slot2 ?? 1) + 1] : [b.slot + 1]));
 }
-const WEAVE_KEYS = ["weave_twist", "weave_ombre", "weave_picture", "weave_picture_on", "weave_picture_courses"];
+const WEAVE_KEYS = ["weave_twist", "weave_ombre", "weave_ombre_ends", "weave_picture", "weave_picture_on", "weave_picture_courses"];
 function ombreStops() {
   const o = state.options.weave_ombre;
   return o && textureOf(state.texture).family === "lattice" ? String(o).split(",").map((x) => parseInt(x, 10)).filter((x) => x >= 0) : [];
@@ -587,6 +587,7 @@ function weaveModifiers(after) {
       b.onclick = () => { const s = ombreStops(); s[k] = (s[k] + 1) % MAX_SLOTS; o.weave_ombre = s.join(","); after(); };
       return b;
     })));
+    kids.push(...rangeCtl("weave_ombre_ends", "Clean ends (solid at the bottom and the rim)", 0, 10, 0.5, 0, (v) => v ? `${v} mm` : "off"));
   }
   if (o.weave_picture) {
     const pic = (CAT.pictures.choices.find((c) => c.key === o.weave_picture) || {}).name || o.weave_picture;
