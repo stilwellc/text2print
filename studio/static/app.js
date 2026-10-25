@@ -685,9 +685,22 @@ function renderLid() {
   if (sec.hidden) return;
   const after = () => { renderLid(); renderColours(); changed(); };
   const kids = [...optionControl({ key: "lid", label: "Lid", kind: "seg",
-    choices: sh.round ? [["none", "None"], ["slip", "Slip-on"], ["thread", "Screw"], ["magnets", "Magnets"]] : [["none", "None"], ["slip", "Slip-on"]],
+    choices: sh.round ? [["none", "None"], ["slip", "Slip-on"], ["thread", "Screw"], ["magnets", "Magnets"]]
+      : state.shape === "box" && textureOf(state.texture).family === "lattice" ? [["none", "None"], ["slip", "Slip-on"], ["gift", "Gift box"]]
+      : [["none", "None"], ["slip", "Slip-on"]],
     default: "none" }, after)];
-  if (lidOn()) {
+  // gift box: a flush woven cap over a smooth neck — it matches the piece, has no knob; only fit and depth to pick
+  const gift = state.options.lid === "gift";
+  if (lidOn() && gift) {
+    kids.push(...optionControl({ key: "lid_fit", label: "Fit", kind: "seg", choices: [["snug", "Snug 0.15"], ["slip", "Slip 0.25"], ["loose", "Loose 0.40"]], default: "slip" }, after));
+    const h = state.options.lid_height ? parseFloat(state.options.lid_height) : 30;
+    const out = el("output", {}, `${h} mm`);
+    const rng = el("input", { type: "range", min: "12", max: "60", step: "1", value: String(h), "aria-label": "Lid depth" });
+    rng.addEventListener("input", () => { out.textContent = `${rng.value} mm`; });
+    rng.addEventListener("change", () => { state.options.lid_height = rng.value; after(); });
+    kids.push(el("div", { class: "field-label" }, "Lid depth"), el("div", { class: "height" }, rng, out));
+    kids.push(el("p", { class: "hint" }, "Closes flush: the weave stops at the seam and the lid slides over a smooth neck. Height is the base up to its rim; the wall needs room for the lid wall, the fit and the neck (10 mm works)."));
+  } else if (lidOn()) {
     const L = CAT.lid, groups = {};
     for (const t of L.textures) {
       const fits = t.family === "match" || t.family === "plain" || CAT.textures.find((x) => x.key === t.key)?.fits.includes(sh.round ? "cup" : state.shape);
@@ -770,7 +783,8 @@ function renderPrint(d) {
   if (s.bands) rows.push(["Bands × layers", `${s.bands} × ${fmt(s.layers)}`]);
   if (s.ribs) rows.push(["Ribs × layers", `${fmt(s.ribs)} × ${fmt(s.layers)}`]);
   if (s.strands) rows.push(["Strands", `${fmt(s.strands)} · up to ${fmt(s.reach)} mm out`]);
-  if (s.lid) rows.push(["Lid", `${s.lid.cap ? s.lid.cap + " · " : ""}${{ slip: "slip-on", thread: "screw", magnets: "magnets" }[s.lid.style] || "lid"} · ${s.lid.clearance} mm fit`
+  if (s.lid) rows.push(["Lid", `${s.lid.cap ? s.lid.cap + " · " : ""}${{ slip: "slip-on", gift: "gift box", thread: "screw", magnets: "magnets" }[s.lid.style] || "lid"} · ${s.lid.clearance} mm fit`
+    + (s.lid.style === "gift" ? ` · closed ${s.lid.closed_h} mm, seam ${s.lid.seam} mm` : "")
     + (s.lid.plate === "own" ? ` · own plate${s.lid.swaps ? `, ${fmt(s.lid.swaps)} changes` : ""}` : "")]);
   rows.push(["Colours", String(s.colours)]);
   if (s.swaps) rows.push(["AMS changes", `${fmt(s.swaps)} · ≈ ${fmt(s.swap_minutes)} min`]);

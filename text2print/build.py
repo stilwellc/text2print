@@ -42,7 +42,7 @@ TEXTURES = {**{k: dict(family="lattice", **{kk: vv for kk, vv in v.items() if kk
 
 ZONES = [("zones", "Colours", "seg", [("1", "1"), ("2", "2"), ("3", "3"), ("4", "4")], "1"),
          ("zone_style", "Colour layout", "seg", [("bands", "Bands"), ("stripes", "Stripes")], "bands")]
-LID = [("lid", "Lid", "seg", [("none", "None"), ("slip", "Slip-on"), ("thread", "Screw"), ("magnets", "Magnets")], "none"),
+LID = [("lid", "Lid", "seg", [("none", "None"), ("slip", "Slip-on"), ("gift", "Gift box"), ("thread", "Screw"), ("magnets", "Magnets")], "none"),
        ("lid_fit", "Lid fit", "seg", [("snug", "Snug 0.15"), ("slip", "Slip 0.25"), ("loose", "Loose 0.40")], "slip")]
 
 # options each family offers in the picker: key -> (label, kind, choices, default)
@@ -407,6 +407,73 @@ def _lid_cap(shape, S, T, texture, v, nz, colours, options, parts, ls, t_plate, 
     stats.setdefault("lid", {}).update(cap=TEXTURES[cap_tex]["name"] if cap_tex != "mix" else "Plain", cap_h=Hs,
                                        knob=knob_style)
     return lid_parts, assembled
+
+
+GIFT_NECK_MIN = 2.0                 # smooth neck wall (mm): the lid slides on it
+GIFT_LID_WALL = 6.0                 # the lid's woven wall, thinned toward 4 when the base wall is thin
+
+
+def _rrect(hw, hd, r):
+    from shapely.geometry import box as _box
+    r = max(0.01, min(r, hw - 0.01, hd - 0.01))
+    return _box(-hw + r, -hd + r, hw - r, hd - r).buffer(r, resolution=24)
+
+
+def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, stats, warnings):
+    """Gift-box lid, flush (Oct 25 2026): the closed box is one block. The base's weave stops at the seam and a smooth
+    neck steps in by the lid's wall + the fit; the lid is a short woven cap of the same outline that slides down over
+    the neck, its outside flush with the base and its ceiling resting on the neck's rim. Woven Lidded box only.
+    -> (base parts, lid parts, assembled lid) or None when the wall is too thin to hold a lid wall and a neck."""
+    import manifold3d as m3d
+    clear = extras.FITS.get(options.get("lid_fit", "slip"), 0.25)
+    wall = float(v["wall"]); lw = min(GIFT_LID_WALL, wall - clear - GIFT_NECK_MIN)
+    if lw < 4.0:
+        warnings.append(f"A gift-box lid needs a wall of at least {4 + clear + GIFT_NECK_MIN:.1f} mm "
+                        f"(lid {4:g} + fit {clear} + neck {GIFT_NECK_MIN:g}) — this piece gets a slip lid.")
+        return None
+    neck = wall - clear - lw
+    Hs = float(min(60.0, max(12.0, float(options.get("lid_height") or 30.0))))
+    W, D = float(v["width"]), float(v["depth"]); corner = S._v(v)["corner"]
+    cp = dict(v, height=Hs, wall=lw, floor=2.5)
+    cap = make(shape, texture, cp, nz.size, colours, {"weave_face": "bottom", **{k: x for k, x in options.items()
+               if k not in LID_SKIP and k != "weave_face"}}, draft=draft, _raw=True)
+    cparts = [(n_, m_, s_, c_) for n_, m_, s_, c_ in cap.parts]
+    # the lid's ceiling: the top of its (woven) top inside the walls; its real height: the rods' top course
+    hx, hy = W / 2 - lw - 2.0, D / 2 - lw - 2.0
+    Hc = max(float(m_.bounds[1][2]) for _, m_, _, _ in cparts)
+    gx, gy = np.meshgrid(np.linspace(-hx, hx, 41), np.linspace(-hy, hy, 17))
+    o = np.column_stack([gx.ravel(), gy.ravel(), np.full(gx.size, Hc + 1.0)])
+    hits = trimesh.util.concatenate([m_ for _, m_, _, _ in cparts]).ray.intersects_location(
+        o, np.tile([0.0, 0.0, -1.0], (len(o), 1)), multiple_hits=False)[0]
+    F = float(hits[:, 2].max()) if len(hits) else 2.5          # rests on the highest rod of the top
+    seam = top + F - Hc                                         # the lid's bottom edge when closed
+    if seam < 10:
+        warnings.append("The gift-box lid is taller than the box — this piece gets a slip lid."); return None
+    base = []
+    for n_, m_, s_, c_ in parts:                                # the weave stops at the seam: flat-topped rods
+        cut = m_.slice_plane([0, 0, seam], [0, 0, -1], cap=True) if m_.bounds[1][2] > seam else m_
+        if cut is not None and len(cut.faces):
+            base.append((n_, cut, s_, c_))
+    pocket = _rrect(W / 2 - wall, D / 2 - wall, max(corner - wall, 2.0))
+    n_out = _rrect(W / 2 - lw - clear, D / 2 - lw - clear, max(corner - lw, 2.0) - clear)
+    def ring(poly_o, z0, z1):
+        from shapely.geometry.polygon import orient
+        sec = lambda q: [list(c) for c in np.asarray(orient(q, 1.0).exterior.coords)[:-1]]
+        cs = m3d.CrossSection([sec(poly_o)]) - m3d.CrossSection([sec(pocket)])
+        return m3d.Manifold.extrude(cs, z1 - z0).translate([0, 0, z0])
+    lead = 0.6                                                  # a small lead-in step so the lid finds the neck
+    neck_m = ring(n_out, seam - 1.0, top - lead) + ring(n_out.buffer(-lead, join_style=1), top - lead - 0.01, top)
+    ti = max(range(len(base)), key=lambda i: base[i][1].bounds[1][2])
+    base = [(("neck" if n_ == "graft" else n_), m_, s_, c_) for n_, m_, s_, c_ in extras.graft(base, [neck_m], [], into=ti)]
+    lid_parts = [("Lid", m_, s_, c_) for _, m_, s_, c_ in cparts]
+    flip = trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0]); assembled = []
+    for _, m_, s_, c_ in cparts:                                # flipped: the ceiling (z = F) lands on the neck's rim
+        a_ = m_.copy(); a_.apply_transform(flip); a_.apply_translation([0, 0, top + F]); assembled.append(("Lid", a_, s_, c_))
+    stats["lid"] = dict(style="gift", clearance=clear, cap="match", cap_h=round(Hc, 1), seam=round(seam, 1), neck=round(neck, 2),
+                        lid_wall=round(lw, 2), closed_h=round(top + F, 1), knob="none")
+    warnings.append(f"Gift-box lid: {Hc:.1f} mm deep, slides over a {neck:.2f} mm smooth neck with {clear} mm a side; "
+                    f"closed it is {W:g} x {D:g} x {top + F:.1f} mm, flush, seam at {seam:.1f} mm.")
+    return base, lid_parts, assembled
 
 
 def _merge_range(ranges, z0, z1, opts, base_lh):
@@ -916,6 +983,16 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     style = options.get("lid", "none")
     style = "slip" if style == "lid" else style
     woven_rect = T["family"] == "lattice" and shape in ("basket", "catchall", "box")
+    if style == "gift":
+        got = None
+        if shape == "box" and T["family"] == "lattice":
+            got = _gift_box(shape, S, texture, v, nz, colours, options, parts, stats["size"][2], draft, stats, warnings)
+        else:
+            warnings.append("Gift-box lids are made for the woven Lidded box — this piece gets a slip lid.")
+        if got:
+            parts, lid_parts, assembled = got; style = "none"
+        else:
+            style = "slip"
     if (outline is not None or woven_rect) and style in ("slip", "thread", "magnets") and shape in extras.LID_SHAPES:
         if style != "slip":
             warnings.append("Threads and magnets need a round rim — this piece gets a slip lid.")
