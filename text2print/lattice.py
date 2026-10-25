@@ -600,11 +600,12 @@ def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, pict
         PATTERNS[pattern]["fn"](reg, nz, rods)
     if twist:
         _untwist(rods, reg)
-    nf = int(getattr(region, "floor_courses", 0) or 0) if floor == "frame" else 0
+    fmap = {"frame": (0, 1), "frame_light": (1, 0), "frame_tone": (1, 1)}.get(floor)   # (ring slot, cross slot)
+    nf = int(getattr(region, "floor_courses", 0) or 0) if fmap else 0
     if nf:                                                  # the floor becomes a picture frame
         _rebuild(rods, [x for x in _all(rods) if _course(rods, x[1][0][2]) >= nf])
         fr = Rods(nz); p_frame(_Floor(region, nf), nz, fr)
-        _rebuild(rods, _all(rods) + _all(fr))
+        _rebuild(rods, _all(rods) + [(k, g, fmap[sl]) for k, g, sl in _all(fr)])
     if ombre and len(ombre) >= 2:
         recolour_ombre(rods, list(ombre), region.n, courses, skip_below=nf)
     elif group > 1 and pattern in GROUPABLE:
