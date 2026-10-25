@@ -236,3 +236,19 @@ def test_gift_box_lid_over_an_insert_has_no_neck_and_closes_flush():
     assert lid[:, 2].min() == pytest.approx(base[:, 2].max(), abs=0.01)
     w = lid[(lid[:, 2] > L["seam"] + 2) & (lid[:, 2] < L["closed_h"] - 4)]
     assert 2 * w[(np.abs(w[:, 1]) < 20) & (w[:, 0] > 0)][:, 0].min() == pytest.approx(127.5, abs=0.05)
+
+
+def test_gift_lid_top_can_be_a_picture_frame_and_has_no_knob():
+    b = build.make("box", "twill", dict(width=140, depth=90, height=40, round=0, wall=6, floor=2), 0.4,
+                   ["#2B2B2B", "#F4F1E8"], dict(lid="gift", lid_height=24, lid_over_w=127, lid_over_d=77,
+                                                weave_twist=8, weave_ombre="0,1", lid_top="frame"), draft=True)
+    assert b.stats["lid"]["mode"] == "over insert" and not any(n == "Knob" for n, _, _, _ in b.extras)
+    lid = np.vstack([m.vertices for _, m, _, _ in b.extras])
+    top = lid[lid[:, 2] < 0.8]                                   # the lid's top course, printed on the bed
+    assert len(top) and np.abs(top[:, 0]).max() > 60              # rings run out to the outline
+
+
+def test_a_gift_lid_that_cannot_be_built_falls_back_to_a_slip_lid_without_a_knob():
+    b = build.make("box", "twill", dict(width=140, depth=90, height=60, round=0, wall=6, floor=2), 0.4,
+                   ["#1C1C1E", "#E8E4DC"], dict(lid="gift"), draft=True)
+    assert b.stats["lid"]["style"] == "slip" and b.stats["lid"]["knob"] == "none"
