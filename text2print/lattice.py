@@ -578,7 +578,7 @@ GROUPABLE = {"grid", "twill", "kagome", "polar", "ripple", "selvedge", "beat", "
              "basket", "brick", "trellis", "frame"}                                    # colour follows the course
 
 
-def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, picture=None, face="top", courses=None):
+def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, picture=None, face="top", courses=None, ombre_ends=0):
     """group > 1: colour changes every `group` courses instead of every course (bands, not colour by
     direction) — a half, a third or a quarter of the AMS changes.
     Modifiers Claude sets from a description (any weave):
@@ -587,7 +587,8 @@ def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, pict
       picture (dark(x, y, z) -> bool, first_course): rods split and coloured by a picture — dark parts in slot 1
     face: "top" or "bottom" — which face shows (a lid prints upside down); patterns like labyrinth read it
     courses: (offset, sign, total) — this piece's courses inside a taller whole (a base and its flipped lid):
-      course c is course offset + sign * c of total, so the twist and the ombre carry on across the seam"""
+      course c is course offset + sign * c of total, so the twist and the ombre carry on across the seam
+    ombre_ends: courses held solid at each end of the ombre"""
     rods = Rods(nz)
     region.face = face
     reg = _Twisted(region, twist, courses) if twist else region
@@ -599,7 +600,7 @@ def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, pict
     if twist:
         _untwist(rods, reg)
     if ombre and len(ombre) >= 2:
-        recolour_ombre(rods, list(ombre), region.n, courses)
+        recolour_ombre(rods, list(ombre), region.n, courses, ombre_ends)
     elif group > 1 and pattern in GROUPABLE:
         regroup(rods, group, PATTERNS[pattern]["slots"])
     if picture is not None:
@@ -670,15 +671,18 @@ def _all(rods):
            [("path", np.asarray(g, float), sl) for sl, v in rods.paths.items() for g in v]
 
 
-def recolour_ombre(rods, stops, n_courses, courses=None):
+def recolour_ombre(rods, stops, n_courses, courses=None, ends=0):
     """Course colours fade bottom -> top through the stops: within each step a course takes the upper colour
-    when its height passes an ordered-dither threshold, so the mix ramps smoothly — one change per alternation."""
+    when its height passes an ordered-dither threshold, so the mix ramps smoothly — one change per alternation.
+    ends: courses held in the first / last colour at the bottom and the top, so both edges finish clean (no stray
+    rods of the other colour fraying the rim or the base)."""
     def slot_of(c):
         if courses:                                         # this piece's course c is course off + sign * c of a whole
             off, sg, n_courses_ = courses; c = off + sg * c
         else:
             n_courses_ = n_courses
-        t = min(max(c / max(n_courses_ - 1, 1), 0.0), 1.0) * (len(stops) - 1)
+        span = max(n_courses_ - 1 - 2 * ends, 1)
+        t = min(max((c - ends) / span, 0.0), 1.0) * (len(stops) - 1)
         k = min(int(t), len(stops) - 2); tt = t - k
         thr = (c * 0.6180339887 + 0.31) % 1.0
         return stops[k + 1] if tt > thr else stops[k]
