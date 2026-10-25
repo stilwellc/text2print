@@ -170,9 +170,16 @@ class Build:
                 lcols = list(dict.fromkeys(c for _, _, _, c in self.extras)); lidx = lambda c: lcols.index(c) + 1
                 row = sum(2 * h for h in extra_halves) + 8 * (len(extra_halves) - 1)
                 lid_objects, x = [], max(2.0, min(8.0, (printer.BED - row) / 2))   # a 250 mm lid still lands on the bed
+                first_hy = None
                 for (n, g), h in zip(groups.items(), extra_halves):
-                    lid_objects.append({"name": n, "position": (x + h, printer.BED / 2),
+                    pos = (x + h, printer.BED / 2)
+                    if x + 2 * h > printer.BED - 2 and first_hy is not None:
+                        # no room left on the row (a long lid): small pieces (the knob) go front-left, under it
+                        pos = (8 + h, max(8 + h, printer.BED / 2 - first_hy - 8 - h))
+                    lid_objects.append({"name": n, "position": pos,
                                         "parts": [(f"{n} {k + 1}" if len(g) > 1 else n, m, lidx(c)) for k, (m, c) in enumerate(g)]})
+                    if first_hy is None:
+                        first_hy = max(float(np.abs(m.bounds[:, 1]).max()) for m, _ in g)
                     x += 2 * h + 8
                 over = dict(self.overrides); over.update(SOLID_OBJECT)
                 over["enable_prime_tower"] = "1" if len(lcols) > 1 and self.tower else "0"
