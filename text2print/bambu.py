@@ -24,6 +24,11 @@ DEFAULT_OVERRIDES = {
     "bottom_shell_layers": "4", "top_shell_layers": "5", "seam_position": "back",
     "elefant_foot_compensation": "0.15", "enable_prime_tower": "1", "timelapse_type": "0",
 }
+# PLA bed: 60 °C on the PEI plates, first layer too (Collin, Oct 25: the stock preset's 55 kept coming through and
+# woven first layers let go). A design's own bed setting still wins.
+BED_DEFAULTS = {k: ["60"] for k in ("textured_plate_temp", "textured_plate_temp_initial_layer", "hot_plate_temp",
+                                    "hot_plate_temp_initial_layer", "eng_plate_temp", "eng_plate_temp_initial_layer")}
+BED_DEFAULTS["curr_bed_type"] = "Textured PEI Plate"           # the P2S's plate; a CLI slice otherwise assumes Cool Plate
 NS = ('xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" '
       'xmlns:BambuStudio="http://schemas.bambulab.com/package/2021" '
       'xmlns:p="http://schemas.microsoft.com/3dmanufacturing/production/2015/06" '
@@ -166,6 +171,7 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
     apply to whatever it overlaps — e.g. fuzzy skin on one surface); {"settings": {key: value}} sets per-part options.
     per_filament: {key: [value per filament]} for filament-level settings (fan, temperature)."""
     n_fil = max(p[2] for ob in objects for p in ob["parts"])
+    overrides = {**BED_DEFAULTS, **dict(overrides or {})}
     ident = "1 0 0 0 1 0 0 0 1 0 0 0"
     next_id = 1
     object_files, root_objects, build_items, settings_objects, plate_instances, rels, cut_objs = {}, "", "", "", "", "", ""

@@ -246,7 +246,7 @@ def lid_textures():
 
 
 LID_KNOBS = [("knob", "Knob"), ("button", "Flat button"), ("tube", "Tube"), ("none", "None")]
-LID_SKIP = ("lid", "lid_fit", "lid_over_w", "lid_over_d", "weave_courses", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
+LID_SKIP = ("lid", "lid_fit", "lid_over_w", "lid_over_d", "weave_courses", "floor_skin", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
             "engrave_lid", "zones", "zone_style", "course_rows", "purge_piece", "floor", "rim_loops",
             "purge", "handles")
 
@@ -1043,6 +1043,21 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
             preview = [(f"colour {k}", trimesh.util.concatenate(ms), k, col) for k, (col, ms) in enumerate(dcol.items(), 1)]
         else:
             preview = [("colour 1", dm, 1, colours[0])]
+    # a woven box's bed face is one course of round rods: thin unconnected lines that lift or drag on the first layer.
+    # floor_skin (mm) grafts a solid plate into the bottom of the base, the outline's full footprint, so the first
+    # layers are one solid sheet (the underside only — the height does not change)
+    skin_mm = float(options.get("floor_skin") or 0)
+    if skin_mm > 0 and T["family"] == "lattice" and shape == "box":
+        import manifold3d as m3d
+        from shapely.geometry.polygon import orient
+        corner = S._v(v)["corner"]; W_, D_ = float(v["width"]), float(v["depth"])
+        z_lo = min(float(m.bounds[0][2]) for _, m, _, _ in parts)
+        ring = [list(c) for c in np.asarray(orient(_rrect(W_ / 2 - 0.05, D_ / 2 - 0.05, corner), 1.0).exterior.coords)[:-1]]
+        plate = m3d.Manifold.extrude(m3d.CrossSection([ring]), skin_mm).translate([0, 0, z_lo])
+        bi = min(range(len(parts)), key=lambda i: (float(parts[i][1].bounds[0][2]), -int((parts[i][1].vertices[:, 2] < z_lo + 0.5).sum())))
+        parts = [(("floor skin" if n_ == "graft" else n_), m_, s_, c_) for n_, m_, s_, c_ in extras.graft(parts, [plate], [], into=bi)]
+        lh_ = float(over.get("layer_height", nz.layer_h))   # woven pieces print 0 % infill, no bottom shells: fill the skin solid
+        ranges = _merge_range(ranges, 0.0, z_lo + skin_mm + lh_, {"sparse_infill_density": "100%", "bottom_shell_layers": "4"}, lh_)
     # ── lid ──
     lid_parts, assembled = [], []
     style = options.get("lid", "none")
