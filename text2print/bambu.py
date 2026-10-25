@@ -21,7 +21,7 @@ BASE_SETTINGS = pathlib.Path(__file__).with_name("data") / "p2s_0.4.json"   # P2
 #   Standard + Bambu PLA Basic x2, as exported by the Bambu Studio CLI (--export-settings)
 DEFAULT_OVERRIDES = {
     "wall_loops": "3", "sparse_infill_density": "15%", "sparse_infill_pattern": "gyroid",
-    "bottom_shell_layers": "4", "top_shell_layers": "5", "seam_position": "rear",
+    "bottom_shell_layers": "4", "top_shell_layers": "5", "seam_position": "back",
     "elefant_foot_compensation": "0.15", "enable_prime_tower": "1", "timelapse_type": "0",
 }
 NS = ('xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" '
