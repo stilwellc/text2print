@@ -468,15 +468,6 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
     hits = trimesh.util.concatenate([m_ for _, m_, _, _ in cparts]).ray.intersects_location(
         o, np.tile([0.0, 0.0, -1.0], (len(o), 1)), multiple_hits=False)[0]
     F = float(hits[:, 2].max()) if len(hits) else 2.5          # rests on the highest rod of the top
-    # a hidden skin inside the woven top: the weave still shows outside, but the top is closed (no dust on what the
-    # box holds, no looking down the wall's rods), and the gaps show the skin's colour — the top course's colour
-    import manifold3d as m3d
-    if F > 1.2:
-        from shapely.geometry.polygon import orient
-        ring = [list(c) for c in np.asarray(orient(_rrect(W / 2 - 0.4, D / 2 - 0.4, max(corner - 0.4, 1.0)), 1.0).exterior.coords)[:-1]]
-        skin = m3d.Manifold.extrude(m3d.CrossSection([ring]), F - 0.8).translate([0, 0, 0.4])
-        ti = max(range(len(cparts)), key=lambda i: int((cparts[i][1].vertices[:, 2] < 0.5).sum()))   # the top course's colour
-        cparts = [(n_, m_, s_, c_) for n_, m_, s_, c_ in extras.graft(cparts, [skin], [], into=ti)]
     lid_parts = [("Lid", m_, s_, c_) for _, m_, s_, c_ in cparts]
     flip = trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0])
     if over:                                                    # the lid's bottom edge sits on the base's rim
