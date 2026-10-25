@@ -578,7 +578,7 @@ GROUPABLE = {"grid", "twill", "kagome", "polar", "ripple", "selvedge", "beat", "
              "basket", "brick", "trellis", "frame"}                                    # colour follows the course
 
 
-def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, picture=None, face="top", courses=None):
+def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, picture=None, face="top", courses=None, floor=None):
     """group > 1: colour changes every `group` courses instead of every course (bands, not colour by
     direction) — a half, a third or a quarter of the AMS changes.
     Modifiers Claude sets from a description (any weave):
@@ -587,7 +587,9 @@ def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, pict
       picture (dark(x, y, z) -> bool, first_course): rods split and coloured by a picture — dark parts in slot 1
     face: "top" or "bottom" — which face shows (a lid prints upside down); patterns like labyrinth read it
     courses: (offset, sign, total) — this piece's courses inside a taller whole (a base and its flipped lid):
-      course c is course offset + sign * c of total, so the twist and the ombre carry on across the seam"""
+      course c is course offset + sign * c of total, so the twist and the ombre carry on across the seam
+    floor: "frame" weaves the floor courses as a picture frame (rings following the outline, untwisted, its own two
+      colours) whatever the walls do — e.g. a lid's top"""
     rods = Rods(nz)
     region.face = face
     reg = _Twisted(region, twist, courses) if twist else region
@@ -598,13 +600,33 @@ def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, pict
         PATTERNS[pattern]["fn"](reg, nz, rods)
     if twist:
         _untwist(rods, reg)
+    nf = int(getattr(region, "floor_courses", 0) or 0) if floor == "frame" else 0
+    if nf:                                                  # the floor becomes a picture frame
+        _rebuild(rods, [x for x in _all(rods) if _course(rods, x[1][0][2]) >= nf])
+        fr = Rods(nz); p_frame(_Floor(region, nf), nz, fr)
+        _rebuild(rods, _all(rods) + _all(fr))
     if ombre and len(ombre) >= 2:
-        recolour_ombre(rods, list(ombre), region.n, courses)
+        recolour_ombre(rods, list(ombre), region.n, courses, skip_below=nf)
     elif group > 1 and pattern in GROUPABLE:
         regroup(rods, group, PATTERNS[pattern]["slots"])
     if picture is not None:
         recolour_picture(rods, *picture)
     return rods
+
+
+class _Floor:
+    """Only a region's floor courses (for a picture-frame floor laid on its own)."""
+
+    def __init__(self, region, n):
+        self.r = region; self.n = n
+        self.rod_h, self.extent, self.round, self.floor_courses = region.rod_h, region.extent, region.round, n
+        self.height = region.z(n - 1) + region.rod_h / 2; self.face = getattr(region, "face", "top")
+
+    def z(self, i):
+        return self.r.z(i)
+
+    def sdf(self, z):
+        return self.r.sdf(z)
 
 
 class _Twisted:
@@ -670,7 +692,7 @@ def _all(rods):
            [("path", np.asarray(g, float), sl) for sl, v in rods.paths.items() for g in v]
 
 
-def recolour_ombre(rods, stops, n_courses, courses=None):
+def recolour_ombre(rods, stops, n_courses, courses=None, skip_below=0):
     """Course colours fade bottom -> top through the stops: within each step a course takes the upper colour
     when its height passes an ordered-dither threshold, so the mix ramps smoothly — one change per alternation."""
     def slot_of(c):
@@ -683,9 +705,10 @@ def recolour_ombre(rods, stops, n_courses, courses=None):
         thr = (c * 0.6180339887 + 0.31) % 1.0
         return stops[k + 1] if tt > thr else stops[k]
     items = []
-    for kind, g, _ in _all(rods):
+    for kind, g, sl in _all(rods):
         z = g[0][2] if kind == "line" else float(np.mean(g[:, 2]))
-        items.append((kind, g, slot_of(_course(rods, z))))
+        c = _course(rods, z)
+        items.append((kind, g, sl if c < skip_below else slot_of(c)))   # a picture-frame floor keeps its colours
     _rebuild(rods, items)
 
 
