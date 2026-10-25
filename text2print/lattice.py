@@ -578,17 +578,19 @@ GROUPABLE = {"grid", "twill", "kagome", "polar", "ripple", "selvedge", "beat", "
              "basket", "brick", "trellis", "frame"}                                    # colour follows the course
 
 
-def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, picture=None, face="top"):
+def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, picture=None, face="top", courses=None):
     """group > 1: colour changes every `group` courses instead of every course (bands, not colour by
     direction) — a half, a third or a quarter of the AMS changes.
     Modifiers Claude sets from a description (any weave):
       twist   degrees each course turns about the centre — the weave spirals up the piece
       ombre   slots bottom -> top, e.g. [0, 1] or [0, 2, 1]: course colours fade through them (ordered dither)
       picture (dark(x, y, z) -> bool, first_course): rods split and coloured by a picture — dark parts in slot 1
-    face: "top" or "bottom" — which face shows (a lid prints upside down); patterns like labyrinth read it"""
+    face: "top" or "bottom" — which face shows (a lid prints upside down); patterns like labyrinth read it
+    courses: (offset, sign, total) — this piece's courses inside a taller whole (a base and its flipped lid):
+      course c is course offset + sign * c of total, so the twist and the ombre carry on across the seam"""
     rods = Rods(nz)
     region.face = face
-    reg = _Twisted(region, twist) if twist else region
+    reg = _Twisted(region, twist, courses) if twist else region
     if PATTERNS[pattern].get("custom"):                    # a plugin weave: its sliders' values
         from .plugins import call
         call(PATTERNS[pattern]["fn"], reg, nz, rods, p=params)
@@ -597,7 +599,7 @@ def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, pict
     if twist:
         _untwist(rods, reg)
     if ombre and len(ombre) >= 2:
-        recolour_ombre(rods, list(ombre), region.n)
+        recolour_ombre(rods, list(ombre), region.n, courses)
     elif group > 1 and pattern in GROUPABLE:
         regroup(rods, group, PATTERNS[pattern]["slots"])
     if picture is not None:
@@ -609,8 +611,8 @@ class _Twisted:
     """A region seen in each course's own rotated frame: patterns lay rods as usual, then _untwist turns course i
     by i x twist degrees. Clipping happens in the rotated frame, so every rod still ends inside the outline."""
 
-    def __init__(self, region, twist_deg):
-        self.r = region; self.tw = math.radians(twist_deg)
+    def __init__(self, region, twist_deg, courses=None):
+        self.r = region; self.tw = math.radians(twist_deg); self.courses = courses
         self.n, self.rod_h, self.extent = region.n, region.rod_h, region.extent
         self.round, self.floor_courses, self.height = region.round, region.floor_courses, region.height
         self.face = getattr(region, "face", "top")
@@ -619,7 +621,11 @@ class _Twisted:
         return self.r.z(i)
 
     def angle(self, z):
-        return self.tw * round((z - self.rod_h / 2) / self.rod_h)
+        c = round((z - self.rod_h / 2) / self.rod_h)
+        if self.courses:                                    # a flipped lid: its course c is course off - c of the
+            off, sg, _ = self.courses                       # whole, and the flip mirrors the turn
+            return self.tw * sg * (off + sg * c)
+        return self.tw * c
 
     def sdf(self, z):
         f = self.r.sdf(z); a = self.angle(z); c, s_ = math.cos(a), math.sin(a)
@@ -664,11 +670,15 @@ def _all(rods):
            [("path", np.asarray(g, float), sl) for sl, v in rods.paths.items() for g in v]
 
 
-def recolour_ombre(rods, stops, n_courses):
+def recolour_ombre(rods, stops, n_courses, courses=None):
     """Course colours fade bottom -> top through the stops: within each step a course takes the upper colour
     when its height passes an ordered-dither threshold, so the mix ramps smoothly — one change per alternation."""
     def slot_of(c):
-        t = min(max(c / max(n_courses - 1, 1), 0.0), 1.0) * (len(stops) - 1)
+        if courses:                                         # this piece's course c is course off + sign * c of a whole
+            off, sg, n_courses_ = courses; c = off + sg * c
+        else:
+            n_courses_ = n_courses
+        t = min(max(c / max(n_courses_ - 1, 1), 0.0), 1.0) * (len(stops) - 1)
         k = min(int(t), len(stops) - 2); tt = t - k
         thr = (c * 0.6180339887 + 0.31) % 1.0
         return stops[k + 1] if tt > thr else stops[k]

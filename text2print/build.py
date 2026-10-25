@@ -246,7 +246,7 @@ def lid_textures():
 
 
 LID_KNOBS = [("knob", "Knob"), ("button", "Flat button"), ("tube", "Tube"), ("none", "None")]
-LID_SKIP = ("lid", "lid_fit", "lid_over_w", "lid_over_d", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
+LID_SKIP = ("lid", "lid_fit", "lid_over_w", "lid_over_d", "weave_courses", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
             "engrave_lid", "zones", "zone_style", "course_rows", "purge_piece", "floor", "rim_loops",
             "purge", "handles")
 
@@ -454,8 +454,11 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
         neck = wall - clear - lw
     Hs = float(min(60.0, max(12.0, float(options.get("lid_height") or 30.0))))
     cp = dict(v, height=Hs, wall=lw, floor=2.5)
-    cap = make(shape, texture, cp, nz.size, colours, {"weave_face": "bottom", **{k: x for k, x in options.items()
-               if k not in LID_SKIP and k != "weave_face"}}, draft=draft, _raw=True)
+    copts = {"weave_face": "bottom", **{k: x for k, x in options.items() if k not in LID_SKIP and k not in ("weave_face", "weave_courses")}}
+    if options.get("weave_twist") or options.get("weave_ombre"):      # the lid carries on the base's twist and fade
+        nb, nl = S.lattice(v, nz.rod_h).n, S.lattice(cp, nz.rod_h).n
+        copts["weave_courses"] = (nb + nl - 1, -1, nb + nl)
+    cap = make(shape, texture, cp, nz.size, colours, copts, draft=draft, _raw=True)
     cparts = [(n_, m_, s_, c_) for n_, m_, s_, c_ in cap.parts]
     # the lid's ceiling: the top of its (woven) top inside the walls; its real height: the rods' top course
     hx, hy = W / 2 - lw - 2.0, D / 2 - lw - 2.0
@@ -611,6 +614,34 @@ def _course_edges(starts, gap, top, n, rows=1):
     return edges, [0] + [(i + 1) % n for i in range(len(picked))]
 
 
+def _weave_courses(S, v, nz, region, options):
+    """A woven base under a gift-box lid: its courses are the bottom of the whole closed box, so a twist or an ombre
+    runs on into the lid (the lid gets the matching map in _gift_box). Explicit weave_courses wins (the lid's own)."""
+    if options.get("weave_courses"):
+        off, sg, tot = options["weave_courses"]; return (int(off), int(sg), int(tot))
+    if options.get("lid") != "gift" or not (options.get("weave_twist") or options.get("weave_ombre")):
+        return None
+    cp = _gift_lid_params(S, v, options)
+    if cp is None:
+        return None
+    return (0, 1, region.n + S.lattice(cp, nz.rod_h).n)
+
+
+def _gift_lid_params(S, v, options):
+    """The gift-box lid's cap params (same outline, its own wall) -> dict, or None when no lid wall fits."""
+    clear = extras.FITS.get(options.get("lid_fit", "slip"), 0.25)
+    W, D, wall = float(v["width"]), float(v["depth"]), float(v["wall"])
+    try:
+        over = (float(options.get("lid_over_w") or 0), float(options.get("lid_over_d") or 0))
+    except (TypeError, ValueError):
+        over = (0.0, 0.0)
+    lw = (min(W - over[0], D - over[1]) / 2 - clear) if min(over) > 0 else min(GIFT_LID_WALL, wall - clear - GIFT_NECK_MIN)
+    if lw < 4.0:
+        return None
+    Hs = float(min(60.0, max(12.0, float(options.get("lid_height") or 30.0))))
+    return dict(v, height=Hs, wall=lw, floor=2.5)
+
+
 def _ombre_stops(options):
     o = options.get("weave_ombre")
     if not o:
@@ -692,7 +723,8 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         rods = lattice.weave(region, nz, texture, group=int(options.get("course_group", 1) or 1),
                              params=_pl.param_values(T.get("params"), options),
                              twist=float(options.get("weave_twist") or 0.0), ombre=_ombre_stops(options),
-                             picture=_weave_picture(region, options), face=options.get("weave_face", "top"))
+                             picture=_weave_picture(region, options), face=options.get("weave_face", "top"),
+                             courses=_weave_courses(S, v, nz, region, options))
         by_slot = rods.meshes()
         # same colour on two slots -> one part, one filament, no swaps between them
         merged = {}
