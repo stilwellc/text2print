@@ -168,7 +168,8 @@ class Build:
             objects[0]["position"] = self._centre(half)
             if self.extras:                                        # too big to share a plate: their own project
                 lcols = list(dict.fromkeys(c for _, _, _, c in self.extras)); lidx = lambda c: lcols.index(c) + 1
-                lid_objects, x = [], 8
+                row = sum(2 * h for h in extra_halves) + 8 * (len(extra_halves) - 1)
+                lid_objects, x = [], max(2.0, min(8.0, (printer.BED - row) / 2))   # a 250 mm lid still lands on the bed
                 for (n, g), h in zip(groups.items(), extra_halves):
                     lid_objects.append({"name": n, "position": (x + h, printer.BED / 2),
                                         "parts": [(f"{n} {k + 1}" if len(g) > 1 else n, m, lidx(c)) for k, (m, c) in enumerate(g)]})
@@ -203,6 +204,12 @@ class Build:
             return (max(half + 6, x), c)
         safe = printer.TOWER[0] - printer.TOWER[2] / 2 - 8
         if c + half <= safe:
+            return (c, c)
+        # a long, narrow piece (a 250 x 79 case): centred, it can clear the back-right tower on y alone
+        v = np.vstack([m.vertices for _, m, _, _ in self.parts])
+        hx, hy = float(np.abs(v[:, 0]).max()), float(np.abs(v[:, 1]).max())
+        tx, ty, tw = printer.TOWER
+        if hx <= c - 2 and hy <= c - 2 and (c + hy <= ty - tw / 2 - 8 or c + hx <= tx - tw / 2 - 8):
             return (c, c)
         if half <= c - 10 and self.round_footprint():
             self.overrides = dict(self.overrides, wipe_tower_x=["218"], wipe_tower_y=["218"])
