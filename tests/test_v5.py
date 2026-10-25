@@ -254,3 +254,24 @@ def test_ombre_ends_hold_the_first_and_last_colour():
             assert sl == 0
         elif c > region.n - 5:
             assert sl == 1
+
+
+def test_floor_skin_gives_a_woven_box_a_solid_first_layer():
+    """Oct 25: a woven box's bed face was 25 loose round rods (27 % of the footprint) and failed every first layer."""
+    from shapely.geometry import Polygon
+    b = build.make("box", "twill", dict(width=140, depth=90, height=40, round=0, wall=6, floor=2), 0.4,
+                   ["#2B2B2B", "#F4F1E8"], dict(floor_skin=0.6), draft=True)
+    m = trimesh.util.concatenate([m for _, m, _, _ in b.parts])
+    s = m.section([0, 0, 1], [0, 0, 0.1])
+    assert max(Polygon(e[:, :2]).buffer(0).area for e in s.discrete) > 0.97 * 140 * 90 * 0.98
+    assert any(o.get("sparse_infill_density") == "100%" for _, _, o in b.ranges)
+
+
+def test_3mf_beds_default_to_60c_on_the_textured_plate(tmp_path):
+    import json, zipfile
+    m = trimesh.creation.box([20, 20, 5]); m.apply_translation([0, 0, 2.5])
+    f = tmp_path / "t.3mf"
+    bambu.write_3mf(f, [{"name": "t", "position": (128, 128), "parts": [("t", m, 1)]}], colours=("#E8E4DC",))
+    cfg = json.loads(zipfile.ZipFile(f).read("Metadata/project_settings.config"))
+    assert cfg["curr_bed_type"] == "Textured PEI Plate"
+    assert cfg["textured_plate_temp"] == ["60"] and cfg["textured_plate_temp_initial_layer"] == ["60"]

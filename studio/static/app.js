@@ -62,7 +62,7 @@ function readUrl() {
   if (q.get("texture") && textureOf(q.get("texture"))) state.texture = q.get("texture");
   if (q.get("nozzle")) state.nozzle = parseFloat(q.get("nozzle"));
   if (q.get("c")) state.colours = q.get("c").split(",").map((h) => "#" + h.replace("#", ""));
-  const optKeys = Object.values(CAT.options).flat().map((o) => o.key).concat(["picture", "image"]).concat(TEXT_KEYS).concat(WEAVE_KEYS).concat(["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "lid_over_w", "lid_over_d", "tower", "engrave_base", "engrave_lid", "engrave_font"]);
+  const optKeys = Object.values(CAT.options).flat().map((o) => o.key).concat(["picture", "image"]).concat(TEXT_KEYS).concat(WEAVE_KEYS).concat(["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "lid_over_w", "lid_over_d", "floor_skin", "tower", "engrave_base", "engrave_lid", "engrave_font"]);
   const toggleKeys = Object.values(CAT.options).flat().filter((o) => o.kind === "toggle").map((o) => o.key).concat(["text_invert", "picture_invert"]);
   for (const [k, v] of q) {
     if (k === "mix") { try { state.bands = JSON.parse(v); } catch (e) { /* a bad link keeps the default */ } }
@@ -85,7 +85,7 @@ function linkFor() {
   if (IMAGE_TEXTURES.includes(state.texture) || isMix() || isChart() || ["in", "out"].includes(state.options.mask))
     for (const k of TEXT_KEYS) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k] === true ? "1" : state.options[k] === false ? "0" : state.options[k]);
   if (state.options.lid && state.options.lid !== "none" && shapeOf(state.shape).lid) {
-    for (const k of ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "lid_over_w", "lid_over_d", "tower", "engrave_base", "engrave_lid", "engrave_font"]) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k]);
+    for (const k of ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "lid_over_w", "lid_over_d", "floor_skin", "tower", "engrave_base", "engrave_lid", "engrave_font"]) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k]);
   }
   if (state.options.image && IMAGE_TEXTURES.includes(state.texture)) q.set("image", state.options.image);
   for (const k of ["engrave_base", "engrave_font"]) if (state.options[k]) q.set(k, state.options[k]);
