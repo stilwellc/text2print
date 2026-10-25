@@ -182,6 +182,8 @@ class Build:
                         first_hy = max(float(np.abs(m.bounds[:, 1]).max()) for m, _ in g)
                     x += 2 * h + 8
                 over = dict(self.overrides); over.update(SOLID_OBJECT)
+                if (self.stats.get("lid") or {}).get("raft"):        # a woven top on the bed: loose round rods that
+                    over.update(raft_layers="3", raft_contact_distance="0.15")   # let go — build on a peel-off raft
                 over["enable_prime_tower"] = "1" if len(lcols) > 1 and self.tower else "0"
                 if len(lcols) > 1:                                 # park the tower front-right, clear of the lids
                     over["wipe_tower_x"] = [f"{printer.BED - printer.TOWER[2] - 20:g}"]; over["wipe_tower_y"] = ["20"]
@@ -475,7 +477,8 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
         for _, m_, s_, c_ in cparts:
             a_ = m_.copy(); a_.apply_transform(flip); a_.apply_translation([0, 0, top + Hc]); assembled.append(("Lid", a_, s_, c_))
         cx, cy = (W - 2 * lw - over[0]) / 2, (D - 2 * lw - over[1]) / 2
-        stats["lid"] = dict(style="gift", mode="over insert", clearance=round(min(cx, cy), 2), cap="match", cap_h=round(Hc, 1),
+        stats["lid"] = dict(style="gift", mode="over insert", raft=TEXTURES[texture]["family"] == "lattice",
+                            clearance=round(min(cx, cy), 2), cap="match", cap_h=round(Hc, 1),
                             seam=round(top, 1), lid_wall=round(lw, 2), closed_h=round(top + Hc, 1),
                             ceiling=round(top + Hc - F, 1), over=[over[0], over[1]], knob="none")
         warnings.append(f"Gift-box lid over a {over[0]:g} x {over[1]:g} insert: {lw:.2f} mm woven wall, {cx:.2f} / {cy:.2f} mm a "
@@ -504,7 +507,8 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
     assembled = []
     for _, m_, s_, c_ in cparts:                                # flipped: the ceiling (z = F) lands on the neck's rim
         a_ = m_.copy(); a_.apply_transform(flip); a_.apply_translation([0, 0, top + F]); assembled.append(("Lid", a_, s_, c_))
-    stats["lid"] = dict(style="gift", clearance=clear, cap="match", cap_h=round(Hc, 1), seam=round(seam, 1), neck=round(neck, 2),
+    stats["lid"] = dict(style="gift", raft=TEXTURES[texture]["family"] == "lattice", clearance=clear, cap="match",
+                        cap_h=round(Hc, 1), seam=round(seam, 1), neck=round(neck, 2),
                         lid_wall=round(lw, 2), closed_h=round(top + F, 1), knob="none")
     warnings.append(f"Gift-box lid: {Hc:.1f} mm deep, slides over a {neck:.2f} mm smooth neck with {clear} mm a side; "
                     f"closed it is {W:g} x {D:g} x {top + F:.1f} mm, flush, seam at {seam:.1f} mm.")
