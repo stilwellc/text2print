@@ -598,7 +598,7 @@ GROUPABLE = {"grid", "twill", "kagome", "polar", "ripple", "selvedge", "beat", "
              "basket", "brick", "trellis", "frame"}                                    # colour follows the course
 
 
-def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, picture=None, face="top", courses=None, ombre_ends=0, sett=None):
+def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, picture=None, face="top", courses=None, ombre_ends=0, sett=None, face_lines=None):
     """group > 1: colour changes every `group` courses instead of every course (bands, not colour by
     direction) — a half, a third or a quarter of the AMS changes.
     Modifiers Claude sets from a description (any weave):
@@ -609,6 +609,9 @@ def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, pict
     courses: (offset, sign, total) — this piece's courses inside a taller whole (a base and its flipped lid):
       course c is course offset + sign * c of total, so the twist and the ombre carry on across the seam
     ombre_ends: courses held solid at each end of the ombre
+    face_lines: {"kind": "waves", "pitch", "amp", "wave", "slot"} — continuous rods laid along curves on the face
+      course (a lid's top), like the picture frame's rings: the face course's straight rods turn the other colour
+      and the curves run over them in `slot`, so solid lines sit on a woven field
     sett: ((a, b), (c, d)) — a colour sett for grid and twill: along each direction, a rods in one colour then b in
       the other (a tartan's stripe order); twill woven with a sett is how tartans and houndstooth are made"""
     rods = Rods(nz)
@@ -623,6 +626,8 @@ def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, pict
         PATTERNS[pattern]["fn"](reg, nz, rods)
     if twist:
         _untwist(rods, reg)
+    if face_lines:
+        _face_lines(region, nz, rods, face_lines)
     if ombre and len(ombre) >= 2:
         recolour_ombre(rods, list(ombre), region.n, courses, ombre_ends)
     elif group > 1 and pattern in GROUPABLE:
@@ -630,6 +635,60 @@ def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, pict
     if picture is not None:
         recolour_picture(rods, *picture)          # (dark, first course[, last course])
     return rods
+
+
+def _face_lines(region, nz, rods, spec):
+    """Curves as rods on the face course: two families of waves half a wave apart (interlocking lenses)."""
+    ci = 0 if getattr(region, "face", "top") == "bottom" else region.n - 1
+    slot = int(spec.get("slot", 0)); ground = 1 - slot if slot in (0, 1) else 1
+    pitch = float(spec.get("pitch", 15.0)); amp = float(spec.get("amp", 5.0)); k = 2 * math.pi / float(spec.get("wave", 90.0))
+    rw = nz.rod_w; fc = max(1, int(getattr(region, "floor_courses", 0) or 0))
+
+    def near(x, y):                                         # touching a wave rod of either family: perpendicular
+        out = np.zeros(np.shape(x), bool)                   # distance ~ vertical distance / sqrt(1 + slope^2)
+        for ph, off in ((0.0, 0.0), (math.pi, pitch / 2)):
+            dv = np.abs(((y - amp * np.sin(k * x + ph) - off) / pitch + 0.5) % 1.0 - 0.5) * pitch
+            sl = amp * k * np.cos(k * x + ph)
+            out |= dv / np.sqrt(1 + sl * sl) < 0.5 * rw + 0.5 * rw + 0.1      # the two beads' half-widths + a hair
+        return out
+
+    items = []
+    for kind, g, sl in _all(rods):                          # the face course's straight rods: the ground colour, cut
+        z = g[0][2] if kind == "line" else float(np.mean(np.asarray(g)[:, 2]))   # back where a wave rod crosses
+        cc = _course(rods, z)
+        if cc != ci:                                         # the rest of the top (the floor courses) goes to the ground
+            top_floor = (cc < fc) if ci == 0 else (cc >= region.n - fc)    # colour too: nothing else peeks through
+            items.append((kind, g, ground if top_floor else sl)); continue
+        P = np.array([g[0], g[1]], float) if kind == "line" else np.asarray(g, float)
+        if kind != "line":
+            items.append((kind, g, ground)); continue
+        L = float(np.hypot(*(P[1, :2] - P[0, :2])))
+        ts = np.linspace(0, 1, max(2, int(L / 0.25)))
+        pts = P[0] + (P[1] - P[0]) * ts[:, None]
+        free = ~near(pts[:, 0], pts[:, 1])
+        k0 = 0
+        while k0 < len(ts):
+            if not free[k0]:
+                k0 += 1; continue
+            k1 = k0
+            while k1 + 1 < len(ts) and free[k1 + 1]:
+                k1 += 1
+            a_, b_ = pts[k0].copy(), pts[k1].copy()
+            if np.hypot(*(b_[:2] - a_[:2])) >= rw:
+                items.append(("line", (tuple(a_), tuple(b_)), ground))
+            k0 = k1 + 1
+    _rebuild(rods, items)
+    c = Course(region, nz, ci)
+    E = region.extent + pitch
+    for phase in (0.0, math.pi):
+        off = 0.0 if phase == 0.0 else pitch / 2
+        y0 = -math.ceil(E / pitch) * pitch + off
+        while y0 <= E:
+            pf = lambda t, y0=y0, phase=phase: (t, y0 + amp * np.sin(k * np.asarray(t) + phase))
+            for t0, t1 in c.curve(pf, -E, E, step=0.6):
+                ts = np.linspace(t0, t1, max(2, int((t1 - t0) / 0.6)))
+                rods.path(np.column_stack([ts, y0 + amp * np.sin(k * ts + phase), np.full(len(ts), c.z)]), slot)
+            y0 += pitch
 
 
 class _Twisted:

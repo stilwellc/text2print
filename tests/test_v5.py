@@ -298,3 +298,18 @@ def test_floor_inlay_border_and_word_sit_flush_in_the_first_layers():
     ink = [m for n, m, _, c in b.parts if n == "floor inlay"]
     assert ink and ink[0].bounds[0][2] == pytest.approx(0.0, abs=1e-6) and ink[0].bounds[1][2] <= 0.41
     assert [c for n, _, _, c in b.parts if n == "floor inlay"][0] == "#F4F1E8"
+
+
+def test_gift_lid_wave_lines_are_continuous_rods_and_nothing_floats():
+    from shapely.ops import unary_union
+    b = build.make("box", "twill", dict(width=140, depth=90, height=30, round=0, wall=6, floor=2), 0.4, ["#2B2B2B", "#F4F1E8"],
+                   dict(lid="gift", lid_height=24, lid_over_w=127, lid_over_d=77, lid_lines="waves"), draft=True)
+    cap = [m for _, m, _, _ in b.extras]
+    zs = list(np.arange(0.1, max(m.bounds[1][2] for m in cap) - 0.1, 0.2))
+    per = [m.section_multiplane([0, 0, 0], [0, 0, 1], zs) for m in cap]
+    layers = [unary_union([p.buffer(0) for k in range(len(per)) if per[k][i] is not None
+                           for p in per[k][i].polygons_full if p.area > 0.02]) for i in range(len(zs))]
+    for i in range(1, len(layers)):
+        for p in getattr(layers[i], "geoms", [layers[i]]):
+            if p.area > 0.05:
+                assert p.intersection(layers[i - 1]).area > 0, f"floating at z={zs[i]:.1f}"

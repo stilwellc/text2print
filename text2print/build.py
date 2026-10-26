@@ -248,7 +248,7 @@ def lid_textures():
 
 
 LID_KNOBS = [("knob", "Knob"), ("button", "Flat button"), ("tube", "Tube"), ("none", "None")]
-LID_SKIP = ("lid", "lid_fit", "lid_over_w", "lid_over_d", "weave_courses", "floor_skin", "floor_border", "floor_border_w", "floor_text", "floor_text_h", "floor_font", "lid_picture", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
+LID_SKIP = ("lid", "lid_fit", "lid_over_w", "lid_over_d", "weave_courses", "lid_lines", "lid_lines_pitch", "lid_lines_amp", "lid_lines_wave", "lid_lines_slot", "weave_face_lines", "floor_skin", "floor_border", "floor_border_w", "floor_text", "floor_text_h", "floor_font", "lid_picture", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
             "engrave_lid", "zones", "zone_style", "course_rows", "purge_piece", "floor", "rim_loops",
             "purge", "handles")
 
@@ -457,6 +457,10 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
     Hs = float(min(60.0, max(12.0, float(options.get("lid_height") or 30.0))))
     cp = dict(v, height=Hs, wall=lw, floor=2.5)
     copts = {"weave_face": "bottom", **{k: x for k, x in options.items() if k not in LID_SKIP and k not in ("weave_face", "weave_courses")}}
+    if options.get("lid_lines"):                                 # solid curved rods laid on the lid's top
+        copts["weave_face_lines"] = {"kind": options["lid_lines"], "pitch": float(options.get("lid_lines_pitch") or 15),
+                                     "amp": float(options.get("lid_lines_amp") or 5), "wave": float(options.get("lid_lines_wave") or 90),
+                                     "slot": int(options.get("lid_lines_slot") or 0)}
     if options.get("lid_picture"):                               # a picture woven into the lid's top courses
         copts.update(weave_picture=options["lid_picture"], weave_picture_on="top",
                      weave_picture_courses=max(1, S.lattice(cp, nz.rod_h).floor_courses))
@@ -749,7 +753,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
                              picture=_weave_picture(region, options), face=options.get("weave_face", "top"),
                              courses=_weave_courses(S, v, nz, region, options),
                              ombre_ends=int(round(float(options.get("weave_ombre_ends") or 0) / nz.rod_h)),
-                             sett=_weave_sett(options))
+                             sett=_weave_sett(options), face_lines=options.get("weave_face_lines"))
         by_slot = rods.meshes()
         # same colour on two slots -> one part, one filament, no swaps between them
         merged = {}
