@@ -334,3 +334,10 @@ def test_gift_lid_inner_skin_closes_the_top_from_the_inside():
     xs, ys = np.meshgrid(np.linspace(-55, 55, 56), np.linspace(-30, 30, 31))
     o = np.c_[xs.ravel(), ys.ravel(), np.full(xs.size, -1.0)]
     assert len(lid.ray.intersects_location(o, np.tile([0, 0, 1.0], (len(o), 1)), multiple_hits=False)[0]) == len(o)
+
+
+def test_gift_lid_inner_skin_is_the_light_ground_colour():
+    b = build.make("box", "twill", dict(width=140, depth=90, height=30, round=0, wall=6, floor=2), 0.4, ["#2B2B2B", "#F4F1E8"],
+                   dict(lid="gift", lid_height=24, lid_over_w=127, lid_over_d=77, lid_inner_skin=0.6), draft=True)
+    sheet = [c for n, m, _, c in b.extras if n == "Lid" and m.extents[2] < 1.2]
+    assert sheet == ["#F4F1E8"]

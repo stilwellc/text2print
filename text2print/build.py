@@ -490,7 +490,11 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
         from shapely.geometry.polygon import orient
         ring = [list(c_) for c_ in np.asarray(orient(_rrect(W / 2 - lw + 0.05, D / 2 - lw + 0.05, max(corner - lw, 1.0)), 1.0).exterior.coords)[:-1]]
         sheet = _m3.Manifold.extrude(_m3.CrossSection([ring]), skin + 0.2).translate([0, 0, F - 0.2])
-        gi = max(range(len(cparts)), key=lambda i: int((cparts[i][1].vertices[:, 2] < 0.5).sum()))   # the top's ground colour
+        ground = colours[1 - int(options.get("lid_lines_slot") or 0)] if options.get("lid_lines") else None
+        if ground is None or not any(p_[3] == ground for p_ in cparts):        # no lines: the lighter colour
+            ground = max({p_[3] for p_ in cparts}, key=lambda h: sum(int(h[k:k + 2], 16) for k in (1, 3, 5)))
+        gi = next(i for i, p_ in enumerate(cparts) if p_[3] == ground)          # the weave's ground colour shows
+                                                                                # through the gaps, so the top stays light
         cparts = [(n_, m_, s_, c_) for n_, m_, s_, c_ in extras.graft(cparts, [sheet], [], into=gi)]
         F += skin
     lid_parts = [("Lid", m_, s_, c_) for _, m_, s_, c_ in cparts]
