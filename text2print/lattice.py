@@ -247,8 +247,28 @@ def p_grid(region, nz, rods, twill=0, cross_pitch=1.0, tartan=None):
         c = Course(region, nz, i); axis = i % 2; same = i // 2
         tw = twill and same % 2 == 1 and i != region.n - 1
         ph = (same // 2) % twill if twill else 0
-        keep = (lambda j: (j + ph) % twill != 0) if tw else None
         pitch = nz.pitch * (cross_pitch if axis == 1 else 1.0)
+        keep = None
+        if tw:
+            # never skip a rod that is the only one in its wall band: the cross rods of the next course rest on it
+            # and would print in mid-air (a 6 mm wall holds one lengthwise rod on some sides, Oct 25 2026)
+            lens = {}
+            for j, t0, t1, _ in c.lines(axis * math.pi / 2, pitch=pitch):
+                lens[j] = max(lens.get(j, 0.0), t1 - t0)
+            lmax = max(lens.values()) if lens else 0.0
+            band = sorted(j for j, ln in lens.items() if ln > 0.6 * lmax)
+            groups, cur = [], []
+            for j in band:
+                if cur and j != cur[-1] + 1:
+                    groups.append(cur); cur = []
+                cur.append(j)
+            if cur:
+                groups.append(cur)
+            protect = {g[0] for g in groups if len(g) == 1}
+            fc = int(getattr(region, "floor_courses", 0) or 0)
+            if lens and fc and fc - 2 <= i < fc:          # the last floor courses: the first wall course stands on
+                protect |= {min(lens), max(lens), min(lens) + 1, max(lens) - 1} & set(band)   # their outermost rods
+            keep = lambda j, ph=ph, protect=protect: j in protect or (j + ph) % twill != 0
         for j, t0, t1, pf in c.lines(axis * math.pi / 2, pitch=pitch, keep=keep):
             slot = axis
             if tartan:
@@ -578,7 +598,7 @@ GROUPABLE = {"grid", "twill", "kagome", "polar", "ripple", "selvedge", "beat", "
              "basket", "brick", "trellis", "frame"}                                    # colour follows the course
 
 
-def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, picture=None, face="top", courses=None, ombre_ends=0):
+def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, picture=None, face="top", courses=None, ombre_ends=0, sett=None):
     """group > 1: colour changes every `group` courses instead of every course (bands, not colour by
     direction) — a half, a third or a quarter of the AMS changes.
     Modifiers Claude sets from a description (any weave):
@@ -588,11 +608,15 @@ def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, pict
     face: "top" or "bottom" — which face shows (a lid prints upside down); patterns like labyrinth read it
     courses: (offset, sign, total) — this piece's courses inside a taller whole (a base and its flipped lid):
       course c is course offset + sign * c of total, so the twist and the ombre carry on across the seam
-    ombre_ends: courses held solid at each end of the ombre"""
+    ombre_ends: courses held solid at each end of the ombre
+    sett: ((a, b), (c, d)) — a colour sett for grid and twill: along each direction, a rods in one colour then b in
+      the other (a tartan's stripe order); twill woven with a sett is how tartans and houndstooth are made"""
     rods = Rods(nz)
     region.face = face
     reg = _Twisted(region, twist, courses) if twist else region
-    if PATTERNS[pattern].get("custom"):                    # a plugin weave: its sliders' values
+    if sett and pattern in ("grid", "twill"):
+        p_grid(reg, nz, rods, twill=4 if pattern == "twill" else 0, tartan=sett)
+    elif PATTERNS[pattern].get("custom"):                    # a plugin weave: its sliders' values
         from .plugins import call
         call(PATTERNS[pattern]["fn"], reg, nz, rods, p=params)
     else:
@@ -604,7 +628,7 @@ def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, pict
     elif group > 1 and pattern in GROUPABLE:
         regroup(rods, group, PATTERNS[pattern]["slots"])
     if picture is not None:
-        recolour_picture(rods, *picture)
+        recolour_picture(rods, *picture)          # (dark, first course[, last course])
     return rods
 
 
@@ -693,14 +717,15 @@ def recolour_ombre(rods, stops, n_courses, courses=None, ends=0):
     _rebuild(rods, items)
 
 
-def recolour_picture(rods, dark, first_course, step=0.4):
+def recolour_picture(rods, dark, first_course, last_course=None, step=0.4):
     """Rods from first_course up are split where the picture changes; dark parts go to slot 1, light to slot 0.
     Pieces end half a bead short of a colour change so neighbouring colours touch instead of overlapping;
     specks shorter than a bead width take their neighbours' colour."""
     rw = rods.nz.rod_w; items = []
     for kind, g, sl in _all(rods):
         P = np.array([g[0], g[1]], float) if kind == "line" else g
-        if _course(rods, float(P[0][2])) < first_course:
+        cc = _course(rods, float(P[0][2]))
+        if cc < first_course or (last_course is not None and cc > last_course):
             items.append((kind, g, sl)); continue
         seg = np.hypot(*np.diff(P[:, :2], axis=0).T); cum = np.concatenate([[0], np.cumsum(seg)]); L = cum[-1]
         if L < 1e-6:
