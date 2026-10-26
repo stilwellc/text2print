@@ -248,7 +248,7 @@ def lid_textures():
 
 
 LID_KNOBS = [("knob", "Knob"), ("button", "Flat button"), ("tube", "Tube"), ("none", "None")]
-LID_SKIP = ("lid", "lid_fit", "lid_inner_skin", "lid_over_w", "lid_over_d", "weave_courses", "lid_lines", "lid_lines_pitch", "lid_lines_amp", "lid_lines_wave", "lid_lines_slot", "weave_face_lines", "floor_skin", "floor_border", "floor_border_w", "floor_text", "floor_text_h", "floor_font", "lid_picture", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
+LID_SKIP = ("lid", "lid_fit", "lid_inner_skin", "lid_inner_lines", "lid_over_w", "lid_over_d", "weave_courses", "lid_lines", "lid_lines_pitch", "lid_lines_amp", "lid_lines_wave", "lid_lines_slot", "weave_face_lines", "floor_skin", "floor_border", "floor_border_w", "floor_text", "floor_text_h", "floor_font", "lid_picture", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
             "engrave_lid", "zones", "zone_style", "course_rows", "purge_piece", "floor", "rim_loops",
             "purge", "handles")
 
@@ -497,6 +497,25 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
                                                                                 # through the gaps, so the top stays light
         cparts = [(n_, m_, s_, c_) for n_, m_, s_, c_ in extras.graft(cparts, [sheet], [], into=gi)]
         F += skin
+        if options.get("lid_inner_lines") and copts.get("weave_face_lines", {}).get("paths"):
+            # the same line set as rods on the lining, facing in: read the right way round when the lid is turned over
+            from shapely.geometry import LineString
+            inner = _rrect(W / 2 - lw - 0.9, D / 2 - lw - 0.9, max(corner - lw - 0.9, 1.0))
+            rr = lattice.Rods(nz); zc = F + nz.rod_h / 2 - 0.05
+            for q in copts["weave_face_lines"]["paths"]:
+                g = LineString(q).intersection(inner)
+                for seg in getattr(g, "geoms", [g]):
+                    if seg.is_empty or seg.length < 2 * nz.rod_w:
+                        continue
+                    c_ = np.asarray(seg.coords)
+                    rr.path(np.column_stack([c_[:, 0], c_[:, 1], np.full(len(c_), zc)]), 0)
+            mesh = rr.meshes().get(0)
+            if mesh is not None:
+                line_c = colours[int(options.get("lid_lines_slot") or 0)]
+                li = next((i for i, p_ in enumerate(cparts) if p_[3] == line_c), None)
+                if li is not None:
+                    cparts = [(n_, m_, s_, c_) for n_, m_, s_, c_ in extras.graft(cparts, [extras._m3d(mesh)], [], into=li)]
+                    F += nz.rod_h - 0.05
     lid_parts = [("Lid", m_, s_, c_) for _, m_, s_, c_ in cparts]
     flip = trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0])
     if over:                                                    # the lid's bottom edge sits on the base's rim

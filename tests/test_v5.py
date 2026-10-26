@@ -341,3 +341,17 @@ def test_gift_lid_inner_skin_is_the_light_ground_colour():
                    dict(lid="gift", lid_height=24, lid_over_w=127, lid_over_d=77, lid_inner_skin=0.6), draft=True)
     sheet = [c for n, m, _, c in b.extras if n == "Lid" and m.extents[2] < 1.2]
     assert sheet == ["#F4F1E8"]
+
+
+def test_gift_lid_inner_lines_sit_on_the_lining(tmp_path, monkeypatch):
+    import json
+    from text2print import store
+    monkeypatch.setattr(store, "HOME", tmp_path); (tmp_path / "lid_lines").mkdir()
+    t = np.linspace(0, 2 * np.pi, 200)
+    (tmp_path / "lid_lines" / "ring.json").write_text(json.dumps({"lines": [np.column_stack([20 * np.cos(t), 15 * np.sin(t)]).tolist()]}))
+    plain = build.make("box", "twill", dict(width=140, depth=90, height=30, round=0, wall=6, floor=2), 0.4, ["#2B2B2B", "#F4F1E8"],
+                       dict(lid="gift", lid_height=24, lid_over_w=127, lid_over_d=77, lid_lines="ring", lid_inner_skin=0.6), draft=True)
+    both = build.make("box", "twill", dict(width=140, depth=90, height=30, round=0, wall=6, floor=2), 0.4, ["#2B2B2B", "#F4F1E8"],
+                      dict(lid="gift", lid_height=24, lid_over_w=127, lid_over_d=77, lid_lines="ring", lid_inner_skin=0.6, lid_inner_lines=1), draft=True)
+    assert both.stats["lid"]["ceiling"] < plain.stats["lid"]["ceiling"]
+    assert len(both.extras) == len(plain.extras) + 1
