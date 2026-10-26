@@ -248,7 +248,7 @@ def lid_textures():
 
 
 LID_KNOBS = [("knob", "Knob"), ("button", "Flat button"), ("tube", "Tube"), ("none", "None")]
-LID_SKIP = ("lid", "lid_fit", "lid_over_w", "lid_over_d", "weave_courses", "lid_lines", "lid_lines_pitch", "lid_lines_amp", "lid_lines_wave", "lid_lines_slot", "weave_face_lines", "floor_skin", "floor_border", "floor_border_w", "floor_text", "floor_text_h", "floor_font", "lid_picture", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
+LID_SKIP = ("lid", "lid_fit", "lid_inner_skin", "lid_over_w", "lid_over_d", "weave_courses", "lid_lines", "lid_lines_pitch", "lid_lines_amp", "lid_lines_wave", "lid_lines_slot", "weave_face_lines", "floor_skin", "floor_border", "floor_border_w", "floor_text", "floor_text_h", "floor_font", "lid_picture", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
             "engrave_lid", "zones", "zone_style", "course_rows", "purge_piece", "floor", "rim_loops",
             "purge", "handles")
 
@@ -484,6 +484,15 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
     hits = trimesh.util.concatenate([m_ for _, m_, _, _ in cparts]).ray.intersects_location(
         o, np.tile([0.0, 0.0, -1.0], (len(o), 1)), multiple_hits=False)[0]
     F = float(hits[:, 2].max()) if len(hits) else 2.5          # rests on the highest rod of the top
+    skin = float(options.get("lid_inner_skin") or 0)
+    if skin > 0:                                                # a solid sheet on the inside of the lid's top: the woven
+        import manifold3d as _m3                                # top still shows outside, the inside reads closed
+        from shapely.geometry.polygon import orient
+        ring = [list(c_) for c_ in np.asarray(orient(_rrect(W / 2 - lw + 0.05, D / 2 - lw + 0.05, max(corner - lw, 1.0)), 1.0).exterior.coords)[:-1]]
+        sheet = _m3.Manifold.extrude(_m3.CrossSection([ring]), skin + 0.2).translate([0, 0, F - 0.2])
+        gi = max(range(len(cparts)), key=lambda i: int((cparts[i][1].vertices[:, 2] < 0.5).sum()))   # the top's ground colour
+        cparts = [(n_, m_, s_, c_) for n_, m_, s_, c_ in extras.graft(cparts, [sheet], [], into=gi)]
+        F += skin
     lid_parts = [("Lid", m_, s_, c_) for _, m_, s_, c_ in cparts]
     flip = trimesh.transformations.rotation_matrix(math.pi, [1, 0, 0])
     if over:                                                    # the lid's bottom edge sits on the base's rim

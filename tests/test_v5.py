@@ -325,3 +325,12 @@ def test_gift_lid_saved_line_set_lays_continuous_rods(tmp_path, monkeypatch):
                    dict(lid="gift", lid_height=24, lid_over_w=127, lid_over_d=77, lid_lines="ring"), draft=True)
     top = [m for _, m, _, c in b.extras if c == "#2B2B2B"]
     assert top and any(m.bounds[0][2] < 0.5 for m in top)          # the dark ring sits on the lid's top face
+
+
+def test_gift_lid_inner_skin_closes_the_top_from_the_inside():
+    b = build.make("box", "twill", dict(width=140, depth=90, height=30, round=0, wall=6, floor=2), 0.4, ["#2B2B2B", "#F4F1E8"],
+                   dict(lid="gift", lid_height=24, lid_over_w=127, lid_over_d=77, lid_inner_skin=0.6), draft=True)
+    lid = trimesh.util.concatenate([m for _, m, _, _ in b.extras])
+    xs, ys = np.meshgrid(np.linspace(-55, 55, 56), np.linspace(-30, 30, 31))
+    o = np.c_[xs.ravel(), ys.ravel(), np.full(xs.size, -1.0)]
+    assert len(lid.ray.intersects_location(o, np.tile([0, 0, 1.0], (len(o), 1)), multiple_hits=False)[0]) == len(o)
