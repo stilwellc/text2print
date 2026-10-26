@@ -313,3 +313,15 @@ def test_gift_lid_wave_lines_are_continuous_rods_and_nothing_floats():
         for p in getattr(layers[i], "geoms", [layers[i]]):
             if p.area > 0.05:
                 assert p.intersection(layers[i - 1]).area > 0, f"floating at z={zs[i]:.1f}"
+
+
+def test_gift_lid_saved_line_set_lays_continuous_rods(tmp_path, monkeypatch):
+    import json
+    from text2print import store
+    monkeypatch.setattr(store, "HOME", tmp_path); (tmp_path / "lid_lines").mkdir()
+    t = np.linspace(0, 2 * np.pi, 200)
+    (tmp_path / "lid_lines" / "ring.json").write_text(json.dumps({"lines": [np.column_stack([20 * np.cos(t), 15 * np.sin(t)]).tolist()]}))
+    b = build.make("box", "twill", dict(width=140, depth=90, height=30, round=0, wall=6, floor=2), 0.4, ["#2B2B2B", "#F4F1E8"],
+                   dict(lid="gift", lid_height=24, lid_over_w=127, lid_over_d=77, lid_lines="ring"), draft=True)
+    top = [m for _, m, _, c in b.extras if c == "#2B2B2B"]
+    assert top and any(m.bounds[0][2] < 0.5 for m in top)          # the dark ring sits on the lid's top face

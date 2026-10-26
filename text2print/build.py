@@ -458,6 +458,13 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
     cp = dict(v, height=Hs, wall=lw, floor=2.5)
     copts = {"weave_face": "bottom", **{k: x for k, x in options.items() if k not in LID_SKIP and k not in ("weave_face", "weave_courses")}}
     if options.get("lid_lines"):                                 # solid curved rods laid on the lid's top
+        import json as _json
+        from . import store
+        _f = store.HOME / "lid_lines" / f"{options['lid_lines']}.json"
+        if options["lid_lines"] != "waves" and _f.exists():          # a saved line set: ~/.text2print/lid_lines/<name>.json
+            copts["weave_face_lines"] = {"kind": "paths", "paths": _json.loads(_f.read_text())["lines"],
+                                         "slot": int(options.get("lid_lines_slot") or 0)}
+    if options.get("lid_lines") == "waves":
         copts["weave_face_lines"] = {"kind": options["lid_lines"], "pitch": float(options.get("lid_lines_pitch") or 15),
                                      "amp": float(options.get("lid_lines_amp") or 5), "wave": float(options.get("lid_lines_wave") or 90),
                                      "slot": int(options.get("lid_lines_slot") or 0)}

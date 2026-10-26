@@ -643,14 +643,31 @@ def _face_lines(region, nz, rods, spec):
     slot = int(spec.get("slot", 0)); ground = 1 - slot if slot in (0, 1) else 1
     pitch = float(spec.get("pitch", 15.0)); amp = float(spec.get("amp", 5.0)); k = 2 * math.pi / float(spec.get("wave", 90.0))
     rw = nz.rod_w; fc = max(1, int(getattr(region, "floor_courses", 0) or 0))
+    paths = spec.get("paths")                                # a drawn line set (mm, as seen on the closed lid)
+    if paths is not None:
+        from shapely.geometry import LineString
+        from shapely import vectorized
+        flip = -1.0 if getattr(region, "face", "top") == "bottom" else 1.0   # the lid flips about x to close
+        paths = [np.column_stack([np.asarray(q, float)[:, 0], flip * np.asarray(q, float)[:, 1]]) for q in paths]
+        zone = None
+        for q in paths:
+            g = LineString(q).buffer(rw + 0.1)
+            zone = g if zone is None else zone.union(g)
 
-    def near(x, y):                                         # touching a wave rod of either family: perpendicular
+        def near(x, y):
+            return vectorized.contains(zone, np.asarray(x, float), np.asarray(y, float))
+    else:
+        near = None
+
+    def _near_waves(x, y):                                   # touching a wave rod of either family: perpendicular
         out = np.zeros(np.shape(x), bool)                   # distance ~ vertical distance / sqrt(1 + slope^2)
         for ph, off in ((0.0, 0.0), (math.pi, pitch / 2)):
             dv = np.abs(((y - amp * np.sin(k * x + ph) - off) / pitch + 0.5) % 1.0 - 0.5) * pitch
             sl = amp * k * np.cos(k * x + ph)
             out |= dv / np.sqrt(1 + sl * sl) < 0.5 * rw + 0.5 * rw + 0.1      # the two beads' half-widths + a hair
         return out
+    if near is None:
+        near = _near_waves
 
     items = []
     for kind, g, sl in _all(rods):                          # the face course's straight rods: the ground colour, cut
@@ -679,6 +696,18 @@ def _face_lines(region, nz, rods, spec):
             k0 = k1 + 1
     _rebuild(rods, items)
     c = Course(region, nz, ci)
+    if paths is not None:                                    # each drawn line: one continuous rod, clipped to the outline
+        for q in paths:
+            seg = np.asarray(q, float)
+            L = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(seg, axis=0).T))])
+            if L[-1] < 2 * rw:
+                continue
+            pf = lambda t, seg=seg, L=L: (np.interp(t, L, seg[:, 0]), np.interp(t, L, seg[:, 1]))
+            for t0, t1 in c.curve(pf, 0.0, float(L[-1]), step=0.5):
+                ts = np.linspace(t0, t1, max(2, int((t1 - t0) / 0.5)))
+                x_, y_ = pf(ts)
+                rods.path(np.column_stack([x_, y_, np.full(len(ts), c.z)]), slot)
+        return
     E = region.extent + pitch
     for phase in (0.0, math.pi):
         off = 0.0 if phase == 0.0 else pitch / 2
