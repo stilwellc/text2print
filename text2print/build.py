@@ -184,6 +184,9 @@ class Build:
                 over = dict(self.overrides); over.update(SOLID_OBJECT)
                 if (self.stats.get("lid") or {}).get("raft"):        # a woven top on the bed: loose round rods that
                     over.update(raft_layers="3", raft_contact_distance="0.15")   # let go — build on a peel-off raft
+                    # the raft in the lid's lightest colour: any trace it leaves on the top is invisible on the cream
+                    light = max(range(len(lcols)), key=lambda i: sum(int(lcols[i][k:k + 2], 16) for k in (1, 3, 5)))
+                    over.update(support_filament=str(light + 1), support_interface_filament=str(light + 1))
                 over["enable_prime_tower"] = "1" if len(lcols) > 1 and self.tower else "0"
                 if len(lcols) > 1:                                 # park the tower front-right, clear of the lids
                     over["wipe_tower_x"] = [f"{printer.BED - printer.TOWER[2] - 20:g}"]; over["wipe_tower_y"] = ["20"]
