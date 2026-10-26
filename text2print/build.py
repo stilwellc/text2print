@@ -497,12 +497,22 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
                                                                                 # through the gaps, so the top stays light
         cparts = [(n_, m_, s_, c_) for n_, m_, s_, c_ in extras.graft(cparts, [sheet], [], into=gi)]
         F += skin
-        if options.get("lid_inner_lines") and copts.get("weave_face_lines", {}).get("paths"):
-            # the same line set as rods on the lining, facing in: read the right way round when the lid is turned over
+        inner_paths = None
+        il = options.get("lid_inner_lines")
+        if il:                                                  # a named set of its own, else the outside's again
+            import json as _json
+            from . import store
+            _f = store.HOME / "lid_lines" / f"{il}.json"
+            if str(il) not in ("1", "True", "true") and _f.exists():
+                inner_paths = _json.loads(_f.read_text())["lines"]
+            elif copts.get("weave_face_lines", {}).get("paths"):
+                inner_paths = copts["weave_face_lines"]["paths"]
+        if inner_paths:
+            # rods on the lining, facing in: they read the right way round when the lid is turned over
             from shapely.geometry import LineString
             inner = _rrect(W / 2 - lw - 0.9, D / 2 - lw - 0.9, max(corner - lw - 0.9, 1.0))
             rr = lattice.Rods(nz); zc = F + nz.rod_h / 2 - 0.05
-            for q in copts["weave_face_lines"]["paths"]:
+            for q in inner_paths:
                 g = LineString(q).intersection(inner)
                 for seg in getattr(g, "geoms", [g]):
                     if seg.is_empty or seg.length < 2 * nz.rod_w:
