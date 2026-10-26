@@ -29,6 +29,7 @@ CACHE = HOME / "cache"
 _SYS = pathlib.Path("/System/Library/Fonts"); _SUP = _SYS / "Supplemental"
 FONTS = {                                     # key: (label, file, face index in a .ttc)
     "helvetica": ("Helvetica Bold", _SYS / "Helvetica.ttc", 1),
+    "sf": ("San Francisco", _SYS / "SFNS.ttf", 0),
     "futura": ("Futura Bold", _SUP / "Futura.ttc", 2),
     "avenir": ("Avenir Next Heavy", _SYS / "Avenir Next.ttc", 8),
     "didot": ("Didot Bold", _SUP / "Didot.ttc", 2),
