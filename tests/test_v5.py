@@ -290,3 +290,11 @@ def test_twill_never_leaves_cross_rods_floating():
         for p in getattr(layers[i], "geoms", [layers[i]]):
             if p.area > 0.05:
                 assert p.intersection(layers[i - 1]).area > 0, f"floating island at z={zs[i]:.1f}"
+
+
+def test_floor_inlay_border_and_word_sit_flush_in_the_first_layers():
+    b = build.make("box", "twill", dict(width=140, depth=90, height=30, round=0, wall=6, floor=2), 0.4,
+                   ["#2B2B2B", "#F4F1E8"], dict(floor_skin=1.0, floor_border=6, floor_text="cns"), draft=True)
+    ink = [m for n, m, _, c in b.parts if n == "floor inlay"]
+    assert ink and ink[0].bounds[0][2] == pytest.approx(0.0, abs=1e-6) and ink[0].bounds[1][2] <= 0.41
+    assert [c for n, _, _, c in b.parts if n == "floor inlay"][0] == "#F4F1E8"

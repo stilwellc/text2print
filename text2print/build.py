@@ -248,7 +248,7 @@ def lid_textures():
 
 
 LID_KNOBS = [("knob", "Knob"), ("button", "Flat button"), ("tube", "Tube"), ("none", "None")]
-LID_SKIP = ("lid", "lid_fit", "lid_over_w", "lid_over_d", "weave_courses", "floor_skin", "lid_picture", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
+LID_SKIP = ("lid", "lid_fit", "lid_over_w", "lid_over_d", "weave_courses", "floor_skin", "floor_border", "floor_border_w", "floor_text", "floor_text_h", "floor_font", "lid_picture", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
             "engrave_lid", "zones", "zone_style", "course_rows", "purge_piece", "floor", "rim_loops",
             "purge", "handles")
 
@@ -1082,6 +1082,36 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         parts = [(("floor skin" if n_ == "graft" else n_), m_, s_, c_) for n_, m_, s_, c_ in extras.graft(parts, [plate], [], into=bi)]
         lh_ = float(over.get("layer_height", nz.layer_h))   # woven pieces print 0 % infill, no bottom shells: fill the skin solid
         ranges = _merge_range(ranges, 0.0, z_lo + skin_mm + lh_, {"sparse_infill_density": "100%", "bottom_shell_layers": "4"}, lh_)
+        # the underside as a face: a line inset from the edge in the other colour, broken on one long side for a word,
+        # inlaid flush into the first layers. Laid out as seen once the box is rolled over its long edge toward you
+        # (the near long side then is the model's +y side, and the letters are mirrored across the long axis)
+        inset = float(options.get("floor_border") or 0); words = (options.get("floor_text") or "").strip()
+        if inset > 0 or words:
+            from shapely import affinity
+            from shapely.geometry import box as _box
+            lw_b = float(options.get("floor_border_w") or 1.2); depth = min(skin_mm - 0.2, 0.4)
+            th = float(options.get("floor_text_h") or 7.0)
+            geom = None
+            if inset > 0:
+                geom = _rrect(W_ / 2 - inset, D_ / 2 - inset, max(corner - inset, 2.0)).difference(
+                    _rrect(W_ / 2 - inset - lw_b, D_ / 2 - inset - lw_b, max(corner - inset - lw_b, 1.0)))
+            if words:
+                g = extras.text_polygons(words, options.get("floor_font", "sf"), th)
+                if g is not None:
+                    yline = -(D_ / 2 - inset - lw_b / 2) if inset > 0 else 0.0
+                    g = affinity.translate(g, 0, yline)
+                    if geom is not None:
+                        gx0, _, gx1, _ = g.bounds; pad = max(3.0, 0.5 * th)
+                        geom = geom.difference(_box(gx0 - pad, yline - th, gx1 + pad, yline + th))
+                    geom = g if geom is None else geom.union(g)
+            if geom is not None:
+                geom = affinity.scale(geom, 1, -1, origin=(0, 0))      # read from below after the roll
+                polys = [q for q in getattr(geom, "geoms", [geom]) if q.area > 0.05]
+                ink = extras.prism(polys, z_lo, z_lo + depth)
+                other = [i for i, p_ in enumerate(parts) if p_[3] != parts[bi][3]]
+                if other:
+                    parts = [(("floor inlay" if n_ == "graft" else n_), m_, s_, c_)
+                             for n_, m_, s_, c_ in extras.graft(parts, [ink], [], into=other[0])]
     # ── lid ──
     lid_parts, assembled = [], []
     style = options.get("lid", "none")
