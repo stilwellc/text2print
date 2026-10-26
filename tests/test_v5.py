@@ -375,3 +375,16 @@ def test_gift_lid_twill_continues_the_base_across_the_seam():
     for k in range(6):
         z = seam + 0.4 + 0.8 * k
         assert sig(case.assembled, z) == sig(whole.parts, z), f"course {k} above the seam"
+
+
+def test_gift_lid_lining_takes_solid_fills(tmp_path, monkeypatch):
+    import json
+    from text2print import store
+    monkeypatch.setattr(store, "HOME", tmp_path); (tmp_path / "lid_lines").mkdir()
+    (tmp_path / "lid_lines" / "dot.json").write_text(json.dumps({"lines": [[[-20, 0], [20, 0]]],
+                                                                  "fills": [[[[-5, -5], [5, -5], [5, 5], [-5, 5]]]]}))
+    b = build.make("box", "twill", dict(width=140, depth=90, height=30, round=0, wall=6, floor=2), 0.4, ["#2B2B2B", "#F4F1E8"],
+                   dict(lid="gift", lid_height=24, lid_over_w=127, lid_over_d=77, lid_inner_skin=0.6, lid_inner_lines="dot"), draft=True)
+    dark = trimesh.util.concatenate([m for _, m, _, c in b.extras if c == "#2B2B2B"])
+    top = dark.bounds[1][2]
+    assert dark.ray.intersects_any([[0, 0, top + 1]], [[0, 0, -1.0]])[0]         # the filled square is there

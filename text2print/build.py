@@ -497,14 +497,15 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
                                                                                 # through the gaps, so the top stays light
         cparts = [(n_, m_, s_, c_) for n_, m_, s_, c_ in extras.graft(cparts, [sheet], [], into=gi)]
         F += skin
-        inner_paths = None
+        inner_paths, inner_fills = None, []
         il = options.get("lid_inner_lines")
         if il:                                                  # a named set of its own, else the outside's again
             import json as _json
             from . import store
             _f = store.HOME / "lid_lines" / f"{il}.json"
             if str(il) not in ("1", "True", "true") and _f.exists():
-                inner_paths = _json.loads(_f.read_text())["lines"]
+                _set = _json.loads(_f.read_text())
+                inner_paths = _set["lines"]; inner_fills = _set.get("fills") or []
             elif copts.get("weave_face_lines", {}).get("paths"):
                 inner_paths = copts["weave_face_lines"]["paths"]
         if inner_paths:
@@ -520,6 +521,15 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
                     c_ = np.asarray(seg.coords)
                     rr.path(np.column_stack([c_[:, 0], c_[:, 1], np.full(len(c_), zc)]), 0)
             mesh = rr.meshes().get(0)
+            if inner_fills:                                     # solid shapes (a filled ear, a nose): flat, one rod tall
+                from shapely.geometry import Polygon as _Poly
+                shapes = []
+                for f_ in inner_fills:
+                    g_ = _Poly(f_[0], f_[1:] if len(f_) > 1 else None).buffer(0).intersection(inner)
+                    shapes += [q for q in getattr(g_, "geoms", [g_]) if q.area > 0.2]
+                if shapes:
+                    pr = extras._tm(extras.prism(shapes, F - 0.05, F + nz.rod_h - 0.05))
+                    mesh = pr if mesh is None else extras._tm(extras._m3d(mesh) + extras._m3d(pr))
             if mesh is not None:
                 line_c = colours[int(options.get("lid_lines_slot") or 0)]
                 li = next((i for i, p_ in enumerate(cparts) if p_[3] == line_c), None)
