@@ -515,7 +515,7 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
             for q in inner_paths:
                 g = LineString(q).intersection(inner)
                 for seg in getattr(g, "geoms", [g]):
-                    if seg.is_empty or seg.length < 2 * nz.rod_w:
+                    if seg.is_empty or seg.length < 0.5 * nz.rod_w:     # small marks (an eye, a paw line) stay
                         continue
                     c_ = np.asarray(seg.coords)
                     rr.path(np.column_stack([c_[:, 0], c_[:, 1], np.full(len(c_), zc)]), 0)
