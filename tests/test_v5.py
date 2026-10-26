@@ -355,3 +355,23 @@ def test_gift_lid_inner_lines_sit_on_the_lining(tmp_path, monkeypatch):
                       dict(lid="gift", lid_height=24, lid_over_w=127, lid_over_d=77, lid_lines="ring", lid_inner_skin=0.6, lid_inner_lines=1), draft=True)
     assert both.stats["lid"]["ceiling"] < plain.stats["lid"]["ceiling"]
     assert len(both.extras) == len(plain.extras) + 1
+
+
+def test_gift_lid_twill_continues_the_base_across_the_seam():
+    """Oct 26: the lid restarted the twill, so the closed box read as two textures; its courses now match an uncut box."""
+    P = dict(width=140, depth=90, round=0, wall=6, floor=2)
+    case = build.make("box", "twill", dict(P, height=30), 0.4, ["#2B2B2B", "#F4F1E8"],
+                      dict(lid="gift", lid_height=24, lid_over_w=127, lid_over_d=77), draft=True)
+    top = case.stats["lid"]["closed_h"]
+    whole = build.make("box", "twill", dict(P, height=top), 0.4, ["#2B2B2B", "#F4F1E8"], {}, draft=True)
+    def sig(parts, z):
+        out = set()
+        for _, m, _, c in parts:
+            s = m.section([0, 0, 1], [0, 0, z])
+            if s is not None:
+                out |= {(round(e[:, 0].mean() / 0.9), c) for e in s.discrete if e[:, 1].mean() < -42.5 and abs(e[:, 0].mean()) < 55}
+        return out
+    seam = case.stats["lid"]["seam"]
+    for k in range(6):
+        z = seam + 0.4 + 0.8 * k
+        assert sig(case.assembled, z) == sig(whole.parts, z), f"course {k} above the seam"

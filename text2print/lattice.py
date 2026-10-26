@@ -243,10 +243,15 @@ def _pt(pf, t, z):
 
 # ── patterns ──────────────────────────────────────────────────────────────────
 def p_grid(region, nz, rods, twill=0, cross_pitch=1.0, tartan=None):
+    # region.gmap = (offset, sign): this piece's course i is course offset + sign * i of a taller whole (a flipped
+    # gift lid on its base), so the weave, its colours and the twill's diagonal run on unbroken across the seam
+    gm = getattr(region, "gmap", None)
     for i in range(region.n):
-        c = Course(region, nz, i); axis = i % 2; same = i // 2
+        gi = gm[0] + gm[1] * i if gm else i
+        c = Course(region, nz, i); axis = gi % 2; same = gi // 2
         tw = twill and same % 2 == 1 and i != region.n - 1
         ph = (same // 2) % twill if twill else 0
+        fj = -1 if (gm and gm[1] < 0 and axis == 0) else 1   # the lid flips about x: rods spaced in y swap sides
         pitch = nz.pitch * (cross_pitch if axis == 1 else 1.0)
         keep = None
         if tw:
@@ -268,7 +273,7 @@ def p_grid(region, nz, rods, twill=0, cross_pitch=1.0, tartan=None):
             fc = int(getattr(region, "floor_courses", 0) or 0)
             if lens and fc and fc - 2 <= i < fc:          # the last floor courses: the first wall course stands on
                 protect |= {min(lens), max(lens), min(lens) + 1, max(lens) - 1} & set(band)   # their outermost rods
-            keep = lambda j, ph=ph, protect=protect: j in protect or (j + ph) % twill != 0
+            keep = lambda j, ph=ph, protect=protect, fj=fj: j in protect or (fj * j + ph) % twill != 0
         for j, t0, t1, pf in c.lines(axis * math.pi / 2, pitch=pitch, keep=keep):
             slot = axis
             if tartan:
@@ -616,6 +621,8 @@ def weave(region, nz, pattern, group=1, params=None, twist=0.0, ombre=None, pict
       the other (a tartan's stripe order); twill woven with a sett is how tartans and houndstooth are made"""
     rods = Rods(nz)
     region.face = face
+    if courses and pattern in ("grid", "twill"):
+        region.gmap = (courses[0], courses[1])
     reg = _Twisted(region, twist, courses) if twist else region
     if sett and pattern in ("grid", "twill"):
         p_grid(reg, nz, rods, twill=4 if pattern == "twill" else 0, tartan=sett)
@@ -728,6 +735,7 @@ class _Twisted:
         self.r = region; self.tw = math.radians(twist_deg); self.courses = courses
         self.n, self.rod_h, self.extent = region.n, region.rod_h, region.extent
         self.round, self.floor_courses, self.height = region.round, region.floor_courses, region.height
+        self.gmap = getattr(region, "gmap", None)
         self.face = getattr(region, "face", "top")
 
     def z(self, i):

@@ -471,7 +471,7 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
     if options.get("lid_picture"):                               # a picture woven into the lid's top courses
         copts.update(weave_picture=options["lid_picture"], weave_picture_on="top",
                      weave_picture_courses=max(1, S.lattice(cp, nz.rod_h).floor_courses))
-    if options.get("weave_twist") or options.get("weave_ombre"):      # the lid carries on the base's twist and fade
+    if TEXTURES[texture]["family"] == "lattice":                # the lid carries on the base's weave, twist and fade
         nb, nl = S.lattice(v, nz.rod_h).n, S.lattice(cp, nz.rod_h).n
         copts["weave_courses"] = (nb + nl - 1, -1, nb + nl)
     cap = make(shape, texture, cp, nz.size, colours, copts, draft=draft, _raw=True)
