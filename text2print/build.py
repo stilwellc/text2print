@@ -248,7 +248,7 @@ def lid_textures():
 
 
 LID_KNOBS = [("knob", "Knob"), ("button", "Flat button"), ("tube", "Tube"), ("none", "None")]
-LID_SKIP = ("lid", "lid_fit", "lid_over_w", "lid_over_d", "weave_courses", "floor_skin", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
+LID_SKIP = ("lid", "lid_fit", "lid_over_w", "lid_over_d", "weave_courses", "floor_skin", "lid_picture", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
             "engrave_lid", "zones", "zone_style", "course_rows", "purge_piece", "floor", "rim_loops",
             "purge", "handles")
 
@@ -457,6 +457,9 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
     Hs = float(min(60.0, max(12.0, float(options.get("lid_height") or 30.0))))
     cp = dict(v, height=Hs, wall=lw, floor=2.5)
     copts = {"weave_face": "bottom", **{k: x for k, x in options.items() if k not in LID_SKIP and k not in ("weave_face", "weave_courses")}}
+    if options.get("lid_picture"):                               # a picture woven into the lid's top courses
+        copts.update(weave_picture=options["lid_picture"], weave_picture_on="top",
+                     weave_picture_courses=max(1, S.lattice(cp, nz.rod_h).floor_courses))
     if options.get("weave_twist") or options.get("weave_ombre"):      # the lid carries on the base's twist and fade
         nb, nl = S.lattice(v, nz.rod_h).n, S.lattice(cp, nz.rod_h).n
         copts["weave_courses"] = (nb + nl - 1, -1, nb + nl)
@@ -654,6 +657,19 @@ def _ombre_stops(options):
     return stops if len(stops) >= 2 else None
 
 
+def _weave_sett(options):
+    """weave_sett "4,4" (both directions) or "6,2|3,1" -> ((a, b), (c, d)) for grid / twill, or None."""
+    s = options.get("weave_sett")
+    if not s:
+        return None
+    try:
+        parts = [tuple(int(x) for x in q.split(",")) for q in str(s).split("|")]
+        parts = (parts + parts)[:2]
+        return tuple(p if len(p) == 2 and min(p) >= 1 else None for p in parts) if all(len(p) == 2 and min(p) >= 1 for p in parts) else None
+    except ValueError:
+        return None
+
+
 def _weave_picture(region, options):
     """Image in the weave: (dark(x, y, z), first course) from the picture library, or None. Low pieces carry it
     across the top courses (seen from above); tall ones around the wall (seen from the side)."""
@@ -671,6 +687,8 @@ def _weave_picture(region, options):
         x0, x1 = X[ins].min(), X[ins].max(); y0, y1 = Y[ins].min(), Y[ins].max()
         f = pictures.darkness(pic, (x1 - x0) / max(y1 - y0, 1e-6))
         courses = int(options.get("weave_picture_courses") or 3)
+        if getattr(region, "face", "top") == "bottom":         # a lid: its top is the bed face, and it is flipped
+            return (lambda x, y, z: f((x - x0) / (x1 - x0), (y1 - y) / (y1 - y0)) > 0.5, 0, courses - 1)   # over to close
         return (lambda x, y, z: f((x - x0) / (x1 - x0), (y - y0) / (y1 - y0)) > 0.5,
                 max(region.floor_courses if region.floor_courses < region.n - courses else 0, region.n - courses))
     H = region.height
@@ -723,13 +741,15 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
 
     if T["family"] == "lattice":
         region = S.lattice(v, nz.rod_h)
+        region.face = options.get("weave_face", "top")          # a lid's picture reads off its bed face
         from . import plugins as _pl
         rods = lattice.weave(region, nz, texture, group=int(options.get("course_group", 1) or 1),
                              params=_pl.param_values(T.get("params"), options),
                              twist=float(options.get("weave_twist") or 0.0), ombre=_ombre_stops(options),
                              picture=_weave_picture(region, options), face=options.get("weave_face", "top"),
                              courses=_weave_courses(S, v, nz, region, options),
-                             ombre_ends=int(round(float(options.get("weave_ombre_ends") or 0) / nz.rod_h)))
+                             ombre_ends=int(round(float(options.get("weave_ombre_ends") or 0) / nz.rod_h)),
+                             sett=_weave_sett(options))
         by_slot = rods.meshes()
         # same colour on two slots -> one part, one filament, no swaps between them
         merged = {}

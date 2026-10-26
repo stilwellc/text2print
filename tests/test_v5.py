@@ -275,3 +275,18 @@ def test_3mf_beds_default_to_60c_on_the_textured_plate(tmp_path):
     cfg = json.loads(zipfile.ZipFile(f).read("Metadata/project_settings.config"))
     assert cfg["curr_bed_type"] == "Textured PEI Plate"
     assert cfg["textured_plate_temp"] == ["60"] and cfg["textured_plate_temp_initial_layer"] == ["60"]
+
+
+def test_twill_never_leaves_cross_rods_floating():
+    """Oct 25: on a 6 mm wall the twill skip landed on the wall band's only lengthwise rod every 16 courses, and the
+    next course's cross rods had nothing under them (440 floating islands on the watch-case base)."""
+    from shapely.ops import unary_union
+    b = build.make("box", "twill", dict(width=140, depth=92, height=30, round=0, wall=6, floor=2), 0.4,
+                   ["#2B2B2B", "#F4F1E8"], dict(floor_skin=1.0), draft=True)
+    zs = list(np.arange(0.1, 29.9, 0.2)); per = [m.section_multiplane([0, 0, 0], [0, 0, 1], zs) for _, m, _, _ in b.parts]
+    layers = [unary_union([p.buffer(0) for k in range(len(per)) if per[k][i] is not None
+                           for p in per[k][i].polygons_full if p.area > 0.02]) for i in range(len(zs))]
+    for i in range(1, len(layers)):
+        for p in getattr(layers[i], "geoms", [layers[i]]):
+            if p.area > 0.05:
+                assert p.intersection(layers[i - 1]).area > 0, f"floating island at z={zs[i]:.1f}"
