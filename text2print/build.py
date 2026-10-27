@@ -433,7 +433,7 @@ def _gift_box(shape, S, texture, v, nz, colours, options, parts, top, draft, sta
     flush; its bottom edge rests on the base's rim.
     -> (base parts, lid parts, assembled lid) or None when the wall is too thin to hold a lid wall and a neck."""
     import manifold3d as m3d
-    clear = extras.FITS.get(options.get("lid_fit", "slip"), 0.25)
+    clear = _fit_mm(options.get("lid_fit", "slip"))
     W, D = float(v["width"]), float(v["depth"]); corner = S._v(v)["corner"]; wall = float(v["wall"])
     try:
         over = (float(options.get("lid_over_w") or 0), float(options.get("lid_over_d") or 0))
@@ -700,9 +700,17 @@ def _weave_courses(S, v, nz, region, options):
     return (0, 1, region.n + S.lattice(cp, nz.rod_h).n)
 
 
+def _fit_mm(fit):
+    """lid_fit: a named fit (snug 0.15 / slip 0.25 / loose 0.40) or a number in mm a side (e.g. 0.06: a friction fit)."""
+    try:
+        return float(fit)
+    except (TypeError, ValueError):
+        return extras.FITS.get(fit, 0.25)
+
+
 def _gift_lid_params(S, v, options):
     """The gift-box lid's cap params (same outline, its own wall) -> dict, or None when no lid wall fits."""
-    clear = extras.FITS.get(options.get("lid_fit", "slip"), 0.25)
+    clear = _fit_mm(options.get("lid_fit", "slip"))
     W, D, wall = float(v["width"]), float(v["depth"]), float(v["wall"])
     try:
         over = (float(options.get("lid_over_w") or 0), float(options.get("lid_over_d") or 0))
