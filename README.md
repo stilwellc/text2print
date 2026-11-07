@@ -290,10 +290,11 @@ These are print-verified, and the tests enforce the geometric ones.
   5 °C hotter; slow or cold strands freeze where they are laid.
 - Fine 2-colour detail in PETG (a flat logo inlaid in a cap, verified Nov 2026 after three failed prints): rough,
   furry tops are a SPEED problem — top surface 25, outer wall 35, small perimeters 15, solid 60, minimum 30 s per
-  layer — never ironing, never 0 walls (free line ends curl). Layer 0.12, top line width 0.3 (0.2 ropes); the
-  horizontal-line look is the line width, not the layer height. A flat inlay top on an EVEN layer prints horizontal
-  lines (Bambu alternates 0/90 each layer); a domed top prints rings. Round body: `seam_position` random, logo part
-  back. The preset is `bambu.SHOWROOM_PETG_DETAIL` + `bambu.LOGO_PART`; `bambu.check_detail` proves it in the gcode.
+  layer — never ironing, never 0 walls (free line ends curl). 0.08 layers and 0.2 top lines printed best; a pass to
+  0.12 / 0.3 / random seam / 250 °C / pressure advance printed visibly worse and was reverted (changed together, none
+  proven alone). The horizontal-line look is the line width, not the layer height. A flat inlay top on an EVEN layer
+  prints horizontal lines (Bambu alternates 0/90 each layer); a domed top prints rings. Seam `back`, oriented away;
+  logo part `back`. The preset is `bambu.SHOWROOM_PETG_DETAIL` + `bambu.LOGO_PART`; `bambu.check_detail` proves it in the gcode.
 - Measure, don't guess: recentre a raw CAD STL by its bounds midpoint before any radius; read 3D section vertices
   (`.to_2D()` reframes); build revolved parts from axis-Z cylinder frustums (`Manifold.revolve` mis-orients).
 - Alternating colour bands: white = body ∩ (odd-band z-mask), black = body − mask — clean complements stay
