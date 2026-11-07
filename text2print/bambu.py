@@ -16,7 +16,7 @@ import zipfile
 from xml.sax.saxutils import escape as _esc
 import numpy as np
 
-APP = "BambuStudio-02.08.02.61"
+APP = "BambuStudio-02.09.01.70"
 BASE_SETTINGS = pathlib.Path(__file__).with_name("data") / "p2s_0.4.json"   # P2S 0.4 nozzle + 0.20mm
 #   Standard + Bambu PLA Basic x2, as exported by the Bambu Studio CLI (--export-settings)
 DEFAULT_OVERRIDES = {
@@ -398,3 +398,174 @@ if __name__ == "__main__":                                    # python -m text2p
         for f in sys.argv[2:]:
             ch = repair_3mf(f)
             print(("fixed " + ", ".join(ch)) if ch else "ok", "-", f)
+
+
+# ---------------------------------------------------------------------------------------------------------------
+# Show-level 2-colour fine detail in PETG (verified Nov 6 2026 on the Drehregler inlets: three failed prints, then a
+# full settings pass that printed). The rough, furry logo top was never a geometry problem — it was SPEED: tiny
+# 2-colour layers finish in seconds and never cool. The cure is slow feeds plus a long minimum layer time.
+#
+# The headless CLI IGNORES these (set them and the gcode does not change): gap_fill_target, filter_out_gap_fill,
+# infill_wall_overlap, detect_thin_wall, flush_multiplier, and a hand-written flush_volumes_matrix — Bambu recomputes
+# the purge matrix from the colour pair (light->dark needs little, dark->light a lot), which is correct; leave it.
+# Per-part {"settings": {...}} that DO work: wall_loops, seam_position.  ironing_type "topmost" irons only the
+# object's highest surface (a logo floor under a dome crown needs "top"), and ironing a small logo made it worse.
+SHOWROOM_PETG_DETAIL = {
+    "layer_height": 0.12,                 # 0.08 PETG on a 0.4 nozzle under-extrudes and ropes; 0.12 flows consistently
+    "initial_layer_print_height": 0.2,
+    "top_surface_line_width": 0.3,        # the horizontal-line look comes from THIS, not layer height; 0.2 ropes in PETG
+    "top_surface_pattern": "monotonicline",
+    "top_shell_layers": 6, "bottom_shell_layers": 5, "sparse_infill_density": "100%", "wall_loops": 4,
+    "ironing_type": "no ironing",
+    "seam_position": "random",            # a round body: aligned seams stack into a vertical line (logo part: "back")
+    "top_surface_speed": 25, "outer_wall_speed": 35, "inner_wall_speed": 60, "internal_solid_infill_speed": 60,
+    "gap_infill_speed": 25, "bridge_speed": 30, "small_perimeter_speed": 15, "small_perimeter_threshold": 12,
+    "slow_down_layer_time": 30, "slow_down_min_speed": 8,   # the tiny logo layers must crawl and cool
+    "nozzle_temperature": 250, "nozzle_temperature_initial_layer": 255,
+    "retraction_length": 1.0, "retract_before_wipe": "70%", "wipe": 1, "z_hop": 0.4, "retract_when_changing_layer": 1,
+    "enable_prime_tower": 1, "flush_into_support": 0, "flush_into_infill": 0, "flush_into_objects": 0,
+    "enable_pressure_advance": 1, "pressure_advance": 0.02,
+    "brim_type": "outer_only", "brim_width": 5, "brim_object_gap": 0.1,
+    "enable_support": 1, "support_type": "tree(auto)", "support_style": "default", "support_critical_regions_only": 1,
+    "tree_support_branch_diameter": 4, "support_top_z_distance": 0.32, "support_interface_top_layers": 1,
+    "elefant_foot_compensation": 0.1,
+}
+LOGO_PART = {"settings": {"wall_loops": "1", "seam_position": "back"}}   # ONE outline + lines; 0 walls printed furry
+
+
+def apply_overrides(cfg, intents):
+    """Set scalar intents onto a project config, keeping each key's existing list shape (per-extruder and
+    per-filament keys are lists of differing lengths; a wrong length is the "no geometry" bug)."""
+    for k, v in intents.items():
+        cur = cfg.get(k)
+        cfg[k] = [str(v)] * len(cur) if isinstance(cur, list) and cur else str(v)
+    return cfg
+
+
+# ---- G-code checks: trust the toolpath, not the settings panel ------------------------------------------------
+_TOOL_RE, _Z_RE, _XY_RE, _F_RE = "^(T\\d)\\b", "G1 Z([\\d.]+)", "G[01] X([-\\d.]+) Y([-\\d.]+)", "\\bF([\\d.]+)"
+
+
+def load_gcode(path):
+    """Lines of a .gcode, or of Metadata/plate_1.gcode inside a sliced .3mf."""
+    p = pathlib.Path(path)
+    if p.suffix.lower() == ".3mf":
+        return zipfile.ZipFile(p).read("Metadata/plate_1.gcode").decode(errors="ignore").splitlines()
+    return p.read_text(errors="ignore").splitlines()
+
+
+def gcode_setting(lines, key):
+    import re
+    m = re.search(rf"^; {re.escape(key)} = (.+)$", "\n".join(lines), re.M)
+    return m.group(1) if m else None
+
+
+def _walk(lines):
+    """Yield (tool, z, feature, x, y, extruding, feed_mm_s, prev_xy) for every XY move. The filament printed before
+    the first explicit T command is reported as tool 'T?' — label it, never sort on it."""
+    import re
+    tool, z, feat, F, prev = "T?", None, None, None, None
+    for l in lines:
+        mt = re.match(_TOOL_RE, l)
+        if mt: tool = mt.group(1)
+        mz = re.match(_Z_RE, l)
+        if mz: z = float(mz.group(1))
+        mf = re.search(_F_RE, l)
+        if mf: F = float(mf.group(1)) / 60
+        if l.startswith("; FEATURE:"):
+            feat = l.split(":", 1)[1].strip(); continue
+        m = re.match(_XY_RE, l)
+        if not m: continue
+        x, y = float(m.group(1)), float(m.group(2))
+        ext = "E" in l and not re.search(r"E-", l)
+        yield tool, z, feat, x, y, ext, F, prev
+        prev = (x, y)
+
+
+def top_surface_angles(lines, z, tool="T1", where=lambda x, y: True, tol=0.005):
+    """-> (horizontal, vertical, n) segments of the Top surface at layer z for one tool. Bambu alternates top fill
+    0/90 every layer (even index = 0 deg), so a flat inlay top must sit on an even layer to print horizontal lines."""
+    h = v = n = 0
+    for tool_, z_, feat, x, y, ext, F, prev in _walk(lines):
+        if tool_ != tool or z_ is None or abs(z_ - z) > tol or feat != "Top surface" or not ext or prev is None: continue
+        if not where(x, y) or abs(x - prev[0]) + abs(y - prev[1]) < 0.4: continue
+        a = abs(math.degrees(math.atan2(y - prev[1], x - prev[0]))) % 180; n += 1
+        h += a < 15 or a > 165; v += 75 < a < 105
+    return h, v, n
+
+
+def feature_speeds(lines, tool=None, zmin=-1e9, zmax=1e9, where=lambda x, y: True):
+    """-> {feature: (min, max) mm/s} of the REAL feedrates used (F persists across lines; read it as state)."""
+    out = {}
+    for tool_, z, feat, x, y, ext, F, prev in _walk(lines):
+        if not ext or z is None or not (zmin <= z <= zmax) or F is None or feat is None: continue
+        if tool and tool_ != tool or not where(x, y): continue
+        lo, hi = out.get(feat, (F, F)); out[feat] = (min(lo, F), max(hi, F))
+    return out
+
+
+def seam_scatter(lines, centre, tool=None, zmin=-1e9, zmax=1e9, sectors=12, where=lambda x, y: True):
+    """Outer-wall seam starts around an object centre -> (n, sectors_used, biggest_sector_fraction).
+    'random' seams spread over every sector (biggest ~0.1-0.2); 'aligned/back' cluster into one (= a visible line).
+    Pass `where` to keep to ONE object — another object's starts measured about this centre all land in one sector."""
+    import re
+    cx, cy = centre; angles = []; armed = False; feat = None
+    for tool_, z, f, x, y, ext, F, prev in _walk(lines):
+        if f != feat: feat, armed = f, (f == "Outer wall")
+        if armed and ext and prev is not None and z is not None and zmin <= z <= zmax and (tool is None or tool_ == tool) and where(x, y):
+            dx, dy = prev[0] - cx, prev[1] - cy
+            if math.hypot(dx, dy) > 3: angles.append(math.degrees(math.atan2(dy, dx)) % 360)
+            armed = False
+    if not angles: return 0, 0, 0.0
+    hist = np.histogram(angles, bins=sectors, range=(0, 360))[0]
+    return len(angles), int(np.count_nonzero(hist)), float(hist.max() / len(angles))
+
+
+def tool_changes(lines):
+    """-> [(z, tool)] — every AMS swap; with alternating colour bands this is also the purge/time cost."""
+    import re
+    z, out = None, []
+    for l in lines:
+        mz = re.match(_Z_RE, l)
+        if mz: z = float(mz.group(1))
+        mt = re.match(_TOOL_RE, l)
+        if mt: out.append((z, mt.group(1)))
+    return out
+
+
+def support_grams(lines, density=1.27, d=1.75):
+    """Support filament from E deltas (absolute or relative E). NOT path length x filament area — that formula
+    counts the toolpath as if it were filament and overestimates ~9x."""
+    import re
+    feat, e_prev, sup, tot, absolute = None, None, 0.0, 0.0, True
+    for l in lines:
+        if l.startswith("M83"): absolute = False
+        if l.startswith("M82"): absolute = True
+        if l.startswith("; FEATURE:"): feat = l.split(":", 1)[1].strip(); continue
+        if l.startswith("G92"):
+            m = re.search(r"E([-\d.]+)", l); e_prev = float(m.group(1)) if m else e_prev; continue
+        m = re.match(r"G1 .*E([-\d.]+)", l)
+        if not m: continue
+        e = float(m.group(1))
+        dlt = (e - e_prev) if (absolute and e_prev is not None) else (e if not absolute else 0.0)
+        if absolute: e_prev = e
+        if dlt > 0:
+            tot += dlt
+            if feat and "upport" in feat: sup += dlt
+    area = math.pi * (d / 2) ** 2
+    return round(sup * area / 1000 * density, 2), round(tot * area / 1000 * density, 2)
+
+
+def check_detail(path, logo_z, centre, logo_tool="T1", where=lambda x, y: True):
+    """One-call report for a 2-colour detail part: is the logo top horizontal, how fast did it really print,
+    is the body seam scattered, what swapped, how much support. Read the numbers; don't trust a render."""
+    g = load_gcode(path)
+    h, v, n = top_surface_angles(g, logo_z, logo_tool, where)
+    ns, used, big = seam_scatter(g, centre, where=where)   # one object: a second object skews the angles
+    sup, tot = support_grams(g)
+    return {"logo_horizontal": f"{h}/{n}" + (" OK" if v == 0 and h else " FAIL"),
+            "logo_speeds_mm_s": feature_speeds(g, logo_tool, where=where),
+            "body_seam": f"{ns} starts, {used} sectors, biggest {big:.0%}" + (" (scattered)" if big < 0.35 else " (LINE)"),
+            "tool_changes": len(tool_changes(g)), "support_g": sup, "total_g": tot,
+            "ironing": any("ron" in l.lower() for l in g if l.startswith("; FEATURE:")),
+            "time": gcode_setting(g, "model printing time") or next((l for l in g if "model printing time" in l), "")}

@@ -267,6 +267,12 @@ at its stock 10 mm/s the print takes twice as long for nothing); fabric prints a
 - With three or more colours the prime tower grows deep: it parks front-right with 20 mm margins, or the G-code
   leaves the printable area.
 - Purge per change comes from the colour pair (light after dark costs most), not a flat number.
+- The headless CLI ignores `gap_fill_target`, `filter_out_gap_fill`, `infill_wall_overlap`, `detect_thin_wall`,
+  `flush_multiplier` and a hand-written `flush_volumes_matrix` (it recomputes purge from the colour pair). Per-part
+  `wall_loops` and `seam_position` are honoured. `--outputdir` worked on 2.08 and 2.09 (plate_1.gcode lands there).
+- `ironing_type` "topmost" irons only the object's highest surface; an inlaid logo below a dome crown needs "top".
+- Support is flagged from the vertical: an outward flare or a 45° chamfer at the base draws support; a straight
+  first few mm draws none. Support grams come from E deltas, not toolpath length × filament area (≈9× too high).
 
 ## Laws
 
@@ -280,6 +286,16 @@ These are print-verified, and the tests enforce the geometric ones.
 - Droop strands are one extrusion wide, at most 4 layers tall, never touch each other in the mesh, and start high
   enough that the droop can't reach the bed. They print with overhang slow-down off, fan at 20 % and the nozzle
   5 °C hotter; slow or cold strands freeze where they are laid.
+- Fine 2-colour detail in PETG (a flat logo inlaid in a cap, verified Nov 2026 after three failed prints): rough,
+  furry tops are a SPEED problem — top surface 25, outer wall 35, small perimeters 15, solid 60, minimum 30 s per
+  layer — never ironing, never 0 walls (free line ends curl). Layer 0.12, top line width 0.3 (0.2 ropes); the
+  horizontal-line look is the line width, not the layer height. A flat inlay top on an EVEN layer prints horizontal
+  lines (Bambu alternates 0/90 each layer); a domed top prints rings. Round body: `seam_position` random, logo part
+  back. The preset is `bambu.SHOWROOM_PETG_DETAIL` + `bambu.LOGO_PART`; `bambu.check_detail` proves it in the gcode.
+- Measure, don't guess: recentre a raw CAD STL by its bounds midpoint before any radius; read 3D section vertices
+  (`.to_2D()` reframes); build revolved parts from axis-Z cylinder frustums (`Manifold.revolve` mis-orients).
+- Alternating colour bands: white = body ∩ (odd-band z-mask), black = body − mask — clean complements stay
+  watertight. Each band is an AMS swap: purge and time scale with the count.
 
 ## Repo
 

@@ -110,6 +110,11 @@ above (none if top band), range wall_loops=rod_lines over the band, woven speeds
 - Reliefs (garland, drips, melt) ramp every underside at <= 45 deg; test enforces it.
 - Only the 0.4 nozzle is print-verified. 0.2/0.6/0.8 are computed from it — say so.
 
+- 2-colour fine detail (a logo inlaid in a cap): rough tops are speed, not geometry — use `bambu.SHOWROOM_PETG_DETAIL`
+  (slow feeds, 30 s minimum layer, layer 0.12, top line 0.3, no ironing, 1 outline wall on the logo via `bambu.LOGO_PART`,
+  random seam on the body) and prove it with `bambu.check_detail`. The full write-up is in README "Laws" and the
+  parametric-3d-printing skill.
+
 ## Extending
 
 New woven texture: a function `p_name(region, nz, rods)` in `lattice.py` that walks `region.n` courses, uses
