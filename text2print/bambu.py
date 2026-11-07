@@ -443,7 +443,9 @@ def apply_overrides(cfg, intents):
 
 
 # ---- G-code checks: trust the toolpath, not the settings panel ------------------------------------------------
-_TOOL_RE, _Z_RE, _XY_RE, _F_RE = "^(T\\d)\\b", "G1 Z([\\d.]+)", "G[01] X([-\\d.]+) Y([-\\d.]+)", "\\bF([\\d.]+)"
+_TOOL_RE, _Z_RE, _XY_RE, _F_RE = "^(T\\d)\\b", "G1 Z([\\d.]+)", "G[0-3] X([-\\d.]+) Y([-\\d.]+)", "\\bF([\\d.]+)"
+# Bambu emits G2/G3 ARCS (arc fitting): on a round part they are most of the toolpath (handle: 327k arcs vs 146k G1).
+# A G0/G1-only parser silently drops them — totals come out 3x low and seam/position tracking goes stale.
 
 
 def load_gcode(path):
@@ -534,9 +536,14 @@ def tool_changes(lines):
 
 
 def support_grams(lines, density=1.27, d=1.75):
-    """Support filament from E deltas (absolute or relative E). NOT path length x filament area — that formula
-    counts the toolpath as if it were filament and overestimates ~9x."""
+    """Support filament from NET E deltas (absolute or relative E; retract/de-retract cancel), counting G2/G3 arcs.
+    -> (support_g, total_g); total should land within a few % of the gcode's declared filament weight.
+    NOT path length x filament area — that counts the toolpath as if it were filament and overestimates ~9x.
+    Density/diameter are read from the gcode header when declared (PETG 1.26, PLA 1.24)."""
     import re
+    hdr_d = gcode_setting(lines, "filament_density"); hdr_w = gcode_setting(lines, "filament_diameter")
+    if hdr_d: density = float(hdr_d.split(",")[0])     # Bambu declares 1.26 for PETG, 1.24 for PLA
+    if hdr_w: d = float(hdr_w.split(",")[0])
     feat, e_prev, sup, tot, absolute = None, None, 0.0, 0.0, True
     for l in lines:
         if l.startswith("M83"): absolute = False
@@ -544,14 +551,15 @@ def support_grams(lines, density=1.27, d=1.75):
         if l.startswith("; FEATURE:"): feat = l.split(":", 1)[1].strip(); continue
         if l.startswith("G92"):
             m = re.search(r"E([-\d.]+)", l); e_prev = float(m.group(1)) if m else e_prev; continue
-        m = re.match(r"G1 .*E([-\d.]+)", l)
+        m = re.match(r"G[1-3] .*E([-\d.]+)", l)      # G1 lines AND G2/G3 arcs
         if not m: continue
         e = float(m.group(1))
         dlt = (e - e_prev) if (absolute and e_prev is not None) else (e if not absolute else 0.0)
         if absolute: e_prev = e
-        if dlt > 0:
-            tot += dlt
-            if feat and "upport" in feat: sup += dlt
+        # NET E, negatives included: a retract (E-1.0) and its de-retract (E+1.0) cancel. Counting only positive E
+        # books every de-retraction as extrusion, and a fine-detail part retracts thousands of times (+46% on the caps).
+        tot += dlt
+        if feat and "upport" in feat: sup += dlt
     area = math.pi * (d / 2) ** 2
     return round(sup * area / 1000 * density, 2), round(tot * area / 1000 * density, 2)
 
