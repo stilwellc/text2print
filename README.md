@@ -272,7 +272,9 @@ at its stock 10 mm/s the print takes twice as long for nothing); fabric prints a
   `wall_loops` and `seam_position` are honoured. `--outputdir` worked on 2.08 and 2.09 (plate_1.gcode lands there).
 - `ironing_type` "topmost" irons only the object's highest surface; an inlaid logo below a dome crown needs "top".
 - Support is flagged from the vertical: an outward flare or a 45° chamfer at the base draws support; a straight
-  first few mm draws none. Support grams come from E deltas, not toolpath length × filament area (≈9× too high).
+  first few mm draws none. Support grams come from NET E deltas (retract/de-retract cancel) over G1 AND G2/G3 arcs —
+  Bambu arc-fits, so a round part is mostly arcs; a G1-only, positive-E-only sum is 3× low then 46 % high. Not
+  toolpath length × filament area (≈9× too high). `bambu.support_grams` lands within 0.1 g of the declared weight.
 
 ## Laws
 
