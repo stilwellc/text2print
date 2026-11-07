@@ -408,29 +408,26 @@ if __name__ == "__main__":                                    # python -m text2p
 # The headless CLI IGNORES these (set them and the gcode does not change): gap_fill_target, filter_out_gap_fill,
 # infill_wall_overlap, detect_thin_wall, flush_multiplier, and a hand-written flush_volumes_matrix — Bambu recomputes
 # the purge matrix from the colour pair (light->dark needs little, dark->light a lot), which is correct; leave it.
-# WHAT HELPED: slow feeds, a 30 s minimum layer time, no ironing, ONE outline wall on the logo. WHAT HURT: a later
-# "reliability" pass (0.12 layers, 0.3 top lines, random seam, 250 C, PA on) printed visibly worse and was reverted;
-# those were changed together, so none is proven alone — just don't touch the show surfaces for reliability.
 # Per-part {"settings": {...}} that DO work: wall_loops, seam_position.  ironing_type "topmost" irons only the
 # object's highest surface (a logo floor under a dome crown needs "top"), and ironing a small logo made it worse.
 SHOWROOM_PETG_DETAIL = {
-    "layer_height": 0.08,                 # 0.08 printed best. A "reliability" pass to 0.12 printed VISIBLY WORSE (Nov 6, reverted)
+    "layer_height": 0.12,                 # 0.08 PETG on a 0.4 nozzle under-extrudes and ropes; 0.12 flows consistently
     "initial_layer_print_height": 0.2,
-    "top_surface_line_width": 0.2,        # the horizontal-line look comes from THIS, not layer height; 0.3 looked coarser, reverted
+    "top_surface_line_width": 0.3,        # the horizontal-line look comes from THIS, not layer height; 0.2 ropes in PETG
     "top_surface_pattern": "monotonicline",
-    "top_shell_layers": 12, "bottom_shell_layers": 6, "sparse_infill_density": "100%", "wall_loops": 4,
+    "top_shell_layers": 6, "bottom_shell_layers": 5, "sparse_infill_density": "100%", "wall_loops": 4,
     "ironing_type": "no ironing",
-    "seam_position": "back",              # ONE line you can orient away; random seam was in the pass that printed worse
+    "seam_position": "random",            # a round body: aligned seams stack into a vertical line (logo part: "back")
     "top_surface_speed": 25, "outer_wall_speed": 35, "inner_wall_speed": 60, "internal_solid_infill_speed": 60,
     "gap_infill_speed": 25, "bridge_speed": 30, "small_perimeter_speed": 15, "small_perimeter_threshold": 12,
     "slow_down_layer_time": 30, "slow_down_min_speed": 8,   # the tiny logo layers must crawl and cool
-    "nozzle_temperature": 255, "nozzle_temperature_initial_layer": 255,
-    "retraction_length": 0.8, "retract_before_wipe": "0%", "wipe": 1, "z_hop": 0.4, "retract_when_changing_layer": 1,
-    "enable_prime_tower": 1, "flush_into_support": 1, "flush_into_infill": 0, "flush_into_objects": 0,
-    "enable_pressure_advance": 0, "pressure_advance": 0.02,
+    "nozzle_temperature": 250, "nozzle_temperature_initial_layer": 255,
+    "retraction_length": 1.0, "retract_before_wipe": "70%", "wipe": 1, "z_hop": 0.4, "retract_when_changing_layer": 1,
+    "enable_prime_tower": 1, "flush_into_support": 0, "flush_into_infill": 0, "flush_into_objects": 0,
+    "enable_pressure_advance": 1, "pressure_advance": 0.02,
     "brim_type": "outer_only", "brim_width": 5, "brim_object_gap": 0.1,
     "enable_support": 1, "support_type": "tree(auto)", "support_style": "default", "support_critical_regions_only": 1,
-    "tree_support_branch_diameter": 3, "support_top_z_distance": 0.32, "support_interface_top_layers": 1,
+    "tree_support_branch_diameter": 4, "support_top_z_distance": 0.32, "support_interface_top_layers": 1,
     "elefant_foot_compensation": 0.1,
 }
 LOGO_PART = {"settings": {"wall_loops": "1", "seam_position": "back"}}   # ONE outline + lines; 0 walls printed furry
