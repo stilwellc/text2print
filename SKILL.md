@@ -114,6 +114,14 @@ above (none if top band), range wall_loops=rod_lines over the band, woven speeds
   (slow feeds, 30 s minimum layer, layer 0.12, top line 0.3, no ironing, 1 outline wall on the logo via `bambu.LOGO_PART`,
   random seam on the body) and prove it with `bambu.check_detail`. The full write-up is in README "Laws" and the
   parametric-3d-printing skill.
+- Large flat PETG show face printed as a top surface (Nov 9, cup rail arms printed flat): a 0.2 mm top line at
+  200 mm/s printed "leathery" twice. Use `bambu.PETG_FLAT_TOP_FACE` (0.42 line, 60 mm/s, 1000 accel, 6 top layers,
+  topmost ironing 15 %); still rough = wet PETG, dry 65 C 4-6 h.
+- Seams: part opts `{"seam_paint": per-face array}` (1 enforcer / -1 blocker) writes Bambu's `paint_seam`; verified
+  in gcode. Paint hidden faces (bottom edges, a line's end under a joint reveal, a hole's 6 o'clock). Face layers
+  only see the faces that exist at that height — a 45 deg reveal, not the flat end face, so paint both.
+- Two identical flat parts used mirrored (left/right): turn ONE over on the plate so both show faces print on the bed.
+- Upside-down parts with sideways tabs: `bambu.SUPPORT_CANTILEVERS_ONLY` supports only near-horizontal undersides.
 
 ## Extending
 

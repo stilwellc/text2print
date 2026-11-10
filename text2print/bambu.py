@@ -36,11 +36,16 @@ NS = ('xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02" '
 GROUND = "#2b2f33"
 
 
-def _mesh_xml(obj_id, mesh):
+def _mesh_xml(obj_id, mesh, seam_paint=None):
+    """seam_paint: optional per-face array, 1 = seam ENFORCER, -1 = seam BLOCKER (Bambu's whole-triangle paint_seam "4"/"8")."""
     v = np.asarray(mesh.vertices, float); f = np.asarray(mesh.faces, int)
     # one C-level format over the flat arrays (2.4x faster than a per-vertex map, byte-identical)
     vs = (('     <vertex x="%.4f" y="%.4f" z="%.4f"/>\n' * len(v)) % tuple(v.ravel().tolist()))[:-1]
-    ts = (('     <triangle v1="%d" v2="%d" v3="%d"/>\n' * len(f)) % tuple(f.ravel().tolist()))[:-1]
+    if seam_paint is None:
+        ts = (('     <triangle v1="%d" v2="%d" v3="%d"/>\n' * len(f)) % tuple(f.ravel().tolist()))[:-1]
+    else:
+        tag = {1: ' paint_seam="4"', -1: ' paint_seam="8"'}
+        ts = "\n".join(f'     <triangle v1="{a}" v2="{b}" v3="{c}"{tag.get(int(k), "")}/>' for (a, b, c), k in zip(f.tolist(), seam_paint))
     return (f'  <object id="{obj_id}" p:UUID="{uuid.uuid4()}" type="model">\n   <mesh>\n'
             f'    <vertices>\n{vs}\n    </vertices>\n    <triangles>\n{ts}\n    </triangles>\n'
             f'   </mesh>\n  </object>\n')
@@ -167,7 +172,8 @@ def repair_3mf(path):
 def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), overrides=DEFAULT_OVERRIDES, base=None,
               per_filament=None):
     """objects: [{name, position, parts: [(name, mesh, slot) | (name, mesh, slot, opts)], ranges?: [(z0, z1, {opt: value})]}].
-    opts (optional): {"modifier": True} makes the part a modifier volume (it prints nothing; its "settings"
+    opts (optional): {"seam_paint": per-face array (1 enforcer / -1 blocker)} paints seams like Bambu Studio's seam tool;
+    {"modifier": True} makes the part a modifier volume (it prints nothing; its "settings"
     apply to whatever it overlaps — e.g. fuzzy skin on one surface); {"settings": {key: value}} sets per-part options.
     per_filament: {key: [value per filament]} for filament-level settings (fan, temperature)."""
     n_fil = max(p[2] for ob in objects for p in ob["parts"])
@@ -181,7 +187,7 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
         sub_path = f"/3D/Objects/object_{len(object_files) + 1}.model"     # numbered in sequence, as Bambu Studio writes them
         object_files[sub_path] = (f'<?xml version="1.0" encoding="UTF-8"?>\n<model unit="millimeter" xml:lang="en-US" {NS}>\n'
                                   f' <metadata name="BambuStudio:3mfVersion">1</metadata>\n <resources>\n'
-                                  + "".join(_mesh_xml(pid, p[1]) for pid, p in zip(part_ids, ob["parts"]))
+                                  + "".join(_mesh_xml(pid, p[1], (p[3] if len(p) > 3 else {}).get("seam_paint")) for pid, p in zip(part_ids, ob["parts"]))
                                   + ' </resources>\n <build/>\n</model>\n')
         rels += (f' <Relationship Target="{sub_path}" Id="rel-{obj_id}" '
                  'Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>\n')
@@ -431,6 +437,21 @@ SHOWROOM_PETG_DETAIL = {
     "elefant_foot_compensation": 0.1,
 }
 LOGO_PART = {"settings": {"wall_loops": "1", "seam_position": "back"}}   # ONE outline + lines; 0 walls printed furry
+
+# A LARGE FLAT PETG SHOW FACE printed as the top surface (verified Nov 9 2026, Appartamento cup rail arms printed flat):
+# twice it came out "leathery" with the profile's top_surface_line_width 0.2 at 200 mm/s / 2000 accel and no ironing.
+# Thin fast PETG top lines can't level. Full-width lines, slow, one more top layer and a light topmost ironing pass
+# (+~15 % print time). If a face still prints rough, suspect wet PETG before settings: dry at 65 C for 4-6 h.
+# List-valued keys (speed/accel are per-extruder lists) keep their shape through apply_overrides.
+PETG_FLAT_TOP_FACE = {
+    "top_surface_line_width": 0.42, "top_surface_speed": 60, "top_surface_acceleration": 1000, "top_shell_layers": 6,
+    "ironing_type": "topmost", "ironing_flow": "15%", "ironing_speed": 30, "ironing_spacing": 0.15,
+}
+# Support ONLY true cantilevers (e.g. tabs/tongues sticking out sideways when a part prints upside down): tree supports
+# from the plate with a 30 deg threshold skip every 45 deg face and catch only near-horizontal undersides
+# (rail back: 0.11 g, only under the two tongues). Check where support lands before trusting it.
+SUPPORT_CANTILEVERS_ONLY = {"enable_support": 1, "support_type": "tree(auto)", "support_on_build_plate_only": 1,
+                            "support_threshold_angle": 30}
 
 
 def apply_overrides(cfg, intents):
