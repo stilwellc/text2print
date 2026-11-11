@@ -40,6 +40,34 @@ _SPEC = {
 }
 
 
+def panel_windows(n, width_deg, offset_deg=90.0):
+    """POILU-style panels (Nov 2026, after bold_designers' POILU 3.0): strands only inside n vertical windows of
+    width_deg each, evenly spaced, the first centred at offset_deg (90 = the silhouette edge seen from the front,
+    so the front face between panels stays bare)."""
+    n = int(n or 0)
+    if n <= 0 or width_deg <= 0:
+        return None
+    return [(math.radians(offset_deg + 360.0 * i / n), math.radians(min(width_deg, 360.0 / n)) / 2) for i in range(n)]
+
+
+def in_panels(theta, panels, margin=0.0):
+    """True when theta (+- margin radians) lies inside one of the panel windows (or there are no panels)."""
+    if not panels:
+        return True
+    for c, hw in panels:
+        if abs((theta - c + math.pi) % (2 * math.pi) - math.pi) <= hw - margin:
+            return True
+    return False
+
+
+def even_options(o):
+    """Options dict -> the even-rows spec (or None). {"rows": "even", "loop_w", "loop_l", "tier", "ruffle", "ruffles"}."""
+    if (o or {}).get("rows") != "even":
+        return None
+    keys = ("loop_w", "loop_l", "tier", "ruffle", "ruffles", "tall", "line")
+    return {k: float(o[k]) for k in keys if o.get(k) not in (None, "")}
+
+
 def _h(*key):
     d = hashlib.sha1(":".join(map(str, key)).encode()).digest()
     return int.from_bytes(d[:4], "big") / 2 ** 32
@@ -89,8 +117,47 @@ def _strip(P, width, z0, height):
     return m
 
 
-def _rows(style, r_of_z, height, nz, density, length, seed=11, z_range=None, aligned=False):
-    """Strand placements (theta, chord, bulge, z0, tall, lean, width) honouring the laws above."""
+def _even_rows(r_of_z, height, nz, even, seed=11, z_range=None, panels=None):
+    """EVEN rows (after POILU 3.0): every row a regular ring of identical teardrop loops, rows a fixed tier apart,
+    each row offset half a loop from the one below (brick), no random gaps, sizes or lean. even = {
+      loop_w: anchor spacing (chord) mm, loop_l: reach (bulge) mm, tier: row spacing mm,
+      ruffle: row wave amplitude mm (0 = flat rows), ruffles: waves around, tall: strand layers (2)}.
+    Ruffled rows rise and fall around the piece, so tiers pile into ruffles (no cut-safe colour courses then)."""
+    lh, lw = nz.layer_h, nz.line_w
+    tall = int(min(4, even.get("tall", 2))); strand_h = tall * lh
+    width = float(even.get("line", 1.15 * lw))                    # a fatter single line (with a strand modifier) hangs rounder
+    chord = float(even.get("loop_w", 5.0)); reach = float(even.get("loop_l", 10.0))
+    tier = max(float(even.get("tier", 3.2)), (tall + 1) * lh)
+    tier = round(tier / lh) * lh                                   # rows on the layer grid
+    amp = float(even.get("ruffle", 0.0)); waves = int(even.get("ruffles", 5))
+    rim = 0.0
+    if z_range is None:
+        z_range = (0.0, height); rim = 1.0
+    min_reach = max(2.5, 0.35 * reach)
+    z_lo = max(z_range[0], CLEAR + min_reach) + amp
+    z_hi = z_range[1] - strand_h - rim - amp
+    out, row, z = [], 0, z_lo
+    while z <= z_hi:
+        r = r_of_z(z); slot = chord + width * 3.3                 # _never_touch keeps 1.5 widths of air each side
+        n = max(3, int(2 * math.pi * r / slot))
+        for k in range(n):
+            th = 2 * math.pi * (k + 0.5 * (row % 2)) / n
+            zk = z + (amp * math.sin(waves * th + 0.9 * row) if amp else 0.0)
+            zk = z_lo - amp + round((zk - (z_lo - amp)) / lh) * lh if amp else zk
+            b = min(reach, zk - CLEAR)
+            if b < min_reach or not in_panels(th, panels, chord / 2 / r):
+                continue
+            out.append((th, min(chord, slot - width * 2.0), b, zk, strand_h, 0.0, width))
+        row += 1; z += tier
+    return out
+
+
+def _rows(style, r_of_z, height, nz, density, length, seed=11, z_range=None, aligned=False, panels=None, even=None):
+    """Strand placements (theta, chord, bulge, z0, tall, lean, width) honouring the laws above.
+    panels: optional windows from panel_windows() — strands only inside them (whole strand, chord included).
+    even: optional dict -> regular POILU-style rows instead of the style's jittered ones (see _even_rows)."""
+    if even:
+        return _even_rows(r_of_z, height, nz, even, seed, z_range, panels)
     sp = _SPEC[style]; lh, lw = nz.layer_h, nz.line_w
     tall = min(4, sp["tall"]); strand_h = tall * lh; width = sp["width"] * lw
     gap = max(sp["row"], tall + 1) * lh                      # rows a full strand + a layer apart: never intersect
@@ -123,7 +190,7 @@ def _rows(style, r_of_z, height, nz, density, length, seed=11, z_range=None, ali
                     chord = sp["chord"][0] + (sp["chord"][1] - sp["chord"][0]) * _h(seed, "ch", tier, c, k)
                     th_k = th + d * 0.4 * chord / r_of_z(z) * (k % 4 - 1.5)
                     bulge = fit((sp["bulge"][0] + (sp["bulge"][1] - sp["bulge"][0]) * _h(seed, "b", tier, c, k)) * length, z)
-                    if bulge >= min_bulge:
+                    if bulge >= min_bulge and in_panels(th_k, panels, chord / 2 / r_of_z(z)):
                         out.append((th_k, chord, bulge, z, strand_h, 0.0, width))
                     z += gap
             tier += 1; z_t += tier_h
@@ -144,6 +211,8 @@ def _rows(style, r_of_z, height, nz, density, length, seed=11, z_range=None, ali
             bulge = fit((sp["bulge"][0] + (sp["bulge"][1] - sp["bulge"][0]) * _h(seed, "b", row, k)) * length, z)
             lean = (_h(seed, "l", row, k) - 0.5) * (0.8 if style == "unraveled" else 0.25)
             th = 2 * math.pi * (k + phase) / n
+            if not in_panels(th, panels, (chord / 2) / r * (1 + abs(lean))):
+                continue
             out.append((th, chord, bulge, z, strand_h, lean, width))
         row += 1; z += gap
     return out
@@ -208,15 +277,70 @@ def courses(spots, lh):
     return [k * lh for k in starts if not any(a < k <= b for a, b in occ)]
 
 
-def drape(wall, spots, prof, q, ribbons, style, seed=11, pieces=False):
-    """Preview only: each strand swung down about the line joining its anchors, as gravity will do it.
-    Not printable (strands pass through each other) — the print files always carry the flat strands."""
-    lo, hi = HANG[style]; out = [wall]
+def colourwork_loops(prof, lh, lw, even, info, panels=None, mode="chart", seed=11):
+    """Droop loops on a COLOURWORK wall (POILU 3.0: loops over colour-knit). The colourwork's colours already take
+    turns layer by layer, so a one-layer loop is whatever colour its layer is — free per-LOOP colour. mode:
+      "chart": each loop goes on the nearest layer where ITS stitch bulges, so the loops continue the knit's picture
+      "layer": each loop keeps its row's layer (rows mix the band's colours)
+      int slot: every loop on the nearest layer of that colour.
+    -> ({slot: [ribbons]}, spots, reach). Loops never add AMS changes."""
+    import types
+    seq, n_floor, cols, slot_seq = info["seq"], info["floor_layers"], info["cols"], info["slot_seq"]
+    nz = types.SimpleNamespace(layer_h=lh, line_w=lw)
+    ev = dict(even, tall=1, line=float(even.get("line", lw)))
+    z_lo, z_hi = (n_floor + 2) * lh, info["wall_top"] - 2 * lh
+    spots = _even_rows(prof, info["wall_top"], nz, ev, seed, (z_lo, z_hi), panels)
+    placed = []
+    for th, ch, bu, z, hh, lean, w in spots:
+        L0 = int(round(z / lh)); col = int(th / (2 * math.pi) * cols) % cols; L = L0
+        for d in (0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5):
+            Lc = L0 + d; k = Lc - n_floor
+            if not (0 <= k < len(seq)) or Lc >= len(slot_seq):
+                continue
+            if mode == "layer":
+                L = Lc; break
+            if isinstance(mode, int) or str(mode).isdigit():
+                if slot_seq[Lc] == int(mode):
+                    L = Lc; break
+                continue
+            kind, slot, data = seq[k]
+            if kind == "plain" or data is None or bool(np.asarray(data[0])[col]):
+                L = Lc; break
+        z0 = (L + 0.25) * lh                                       # inside layer L only: the slicer samples mid-layer
+        placed.append((th, ch, min(bu, z0 - CLEAR), z0, 0.5 * lh, 0.0, w, L))
+    placed = [p_ for p_ in placed if p_[2] >= 2.5]
+    kept = _never_touch([p_[:7] for p_ in placed], prof, lambda z: z)
+    keep_set = {(round(t[0], 6), round(t[3], 6)) for t in kept}
+    by_slot, out_spots = {}, []
+    for th, ch, bu, z0, hh, lean, w, L in placed:
+        if (round(th, 6), round(z0, 6)) not in keep_set:
+            continue
+        rib = _ribbon(th, ch, bu, z0, hh, w, prof, 0.55 * lw, 0.55, 0.0)
+        by_slot.setdefault(slot_seq[L], []).append(rib); out_spots.append(((th, ch, bu, z0, hh, 0.0, w), slot_seq[L], rib))
+    return by_slot, out_spots, max([s_[0][2] for s_ in out_spots] or [0.0])
+
+
+def even_hang(even):
+    """Even rows: a short single-line loop stays stiff and stands off the wall like a scale; a long one hangs."""
+    if not even:
+        return None
+    base = min(85.0, max(40.0, 35.0 + 2.2 * float(even.get("loop_l", 10.0))))
+    return (base - 5.0, base + 5.0)
+
+
+def drape(wall, spots, prof, q, ribbons, style, seed=11, pieces=False, hang=None):
+    """Preview only: each strand swung down about the line joining its anchors, as gravity will do it — but never
+    into the wall: where the wall widens below the anchor the strand comes to rest on it. Not printable (strands
+    pass through each other) — the print files always carry the flat strands."""
+    lo, hi = hang or HANG[style]; out = [wall]
     for k, ((th, ch, bu, z, hh, lean, w), rib) in enumerate(zip(spots, ribbons)):
         r_w = prof(q(z) + hh / 2)
         axis = np.array([-math.sin(th), math.cos(th), 0.0])
         pivot = np.array([r_w * math.cos(th), r_w * math.sin(th), q(z) + hh / 2])
         ang = math.radians(lo + (hi - lo) * _h(seed, "hang", k))
+        z_a = q(z) + hh / 2; s_ = prof(max(z_a - 2.0, 0.0)) - prof(z_a)          # wall widening per 2 mm down
+        if s_ > 0:
+            ang = min(ang, math.atan2(2.0, s_) - math.radians(4))              # rest on the wall, a hair off it
         R = trimesh.transformations.rotation_matrix(ang, axis, pivot)
         probe = trimesh.transform_points([pivot + [math.cos(th) * 5, math.sin(th) * 5, 0]], R)[0]
         if probe[2] > pivot[2]:
@@ -278,12 +402,14 @@ def fur(shape, v, nz, density="medium", length="medium", draft=False, preview=Fa
                       solid=False)
 
 
-def build(shape, v, nz, style="fringe", density="medium", length="medium", preview=False, draft=False, aligned=False):
+def build(shape, v, nz, style="fringe", density="medium", length="medium", preview=False, draft=False, aligned=False,
+          panels=None, even=None):
     import manifold3d as m3d
     if style == "fur":
         return fur(shape, v, nz, density, length, draft, preview)
     wall, prof, height, rmax, shell = body(shape, v, nz)
-    spots = _rows(style, prof, height, nz, DENSITY.get(density, 1.0), LENGTH.get(length, 1.0), aligned=aligned)
+    spots = _rows(style, prof, height, nz, DENSITY.get(density, 1.0), LENGTH.get(length, 1.0), aligned=aligned,
+                  panels=panels, even=even)
     embed = shell * 0.55
     lh = nz.layer_h
     q = lambda z: (math.floor(z / lh) + 0.25) * lh           # quarter-layer shift: no strand face is coplanar with
@@ -303,7 +429,7 @@ def build(shape, v, nz, style="fringe", density="medium", length="medium", previ
             raise ValueError(f"droop build produced {len(solid)} solid bodies — a strand is detached")
         mesh = manifold_to_trimesh(solid[0])
     reach = max((bu for _, _, bu, _, _, _, _ in spots), default=0.0)
-    drape_pieces = drape(wall, spots, prof, q, ribbons, style, pieces=True) if preview else None
+    drape_pieces = drape(wall, spots, prof, q, ribbons, style, pieces=True, hang=even_hang(even)) if preview else None
     draped = (trimesh.util.concatenate([drape_pieces[0]] + [r_ for _, r_ in drape_pieces[1]])
               if preview else None)                             # hung once, per strand; the whole is their sum
     info = dict(strands=len(spots), reach=round(reach, 1), draped=draped, drape_pieces=drape_pieces,

@@ -122,6 +122,13 @@ above (none if top band), range wall_loops=rod_lines over the band, woven speeds
   only see the faces that exist at that height — a 45 deg reveal, not the flat end face, so paint both.
 - Two identical flat parts used mirrored (left/right): turn ONE over on the plate so both show faces print on the bed.
 - Upside-down parts with sideways tabs: `bambu.SUPPORT_CANTILEVERS_ONLY` supports only near-horizontal undersides.
+- POILU-style droop (Nov 10, after bold_designers' POILU 3.0): droop `rows: "even"` (loop_w, loop_l, tier, ruffle,
+  ruffles) gives regular teardrop tiers; `panels`/`panel_width` keep loops in vertical windows; a mix droop band can
+  carry `wall: "domes"` (knit) outside its panels; zone_style `fade` (+`fade_blend`) mixes row colours by error
+  diffusion. Colourwork + loops: the colourwork option `loops` puts each ONE-LAYER loop on the nearest layer where
+  its stitch bulges, so loops take the knit's colour for free (no extra AMS changes; the colourwork's own ~1 change
+  per layer is the cost). Per-loop control in a 3MF: a modifier volume IS honoured for line width and speed; the
+  overhang fan can't lower the fan per loop and temperature is per filament/layer — keep the droop fan low.
 
 ## Extending
 

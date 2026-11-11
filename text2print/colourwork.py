@@ -279,4 +279,4 @@ def build(shape, v, nz, style="jacquard", chart=None, size="regular", band=1, ri
     swaps = sum(1 for a_, b_ in zip(slots_seq, slots_seq[1:]) if a_ != b_)
     meshes = {s: trimesh.util.concatenate(ms) for s, ms in parts.items() if ms}
     return meshes, dict(layers=len(slots_seq), cols=cols, stitch_mm=round(col_mm, 2), layer_h=lh, line_w=lw,
-                        floor_layers=n_floor, swaps=swaps, slot_seq=slots_seq)
+                        floor_layers=n_floor, swaps=swaps, slot_seq=slots_seq, seq=seq, wall_top=(n_floor + len(seq)) * lh)

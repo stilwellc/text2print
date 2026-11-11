@@ -54,7 +54,7 @@ OPTIONS = {
     "droop": [("density", "Density", "seg", [("sparse", "Sparse"), ("medium", "Medium"), ("dense", "Dense")], "medium"),
               ("length", "Loop length", "seg", [("short", "Short"), ("medium", "Medium"), ("long", "Long")], "medium"),
               ZONES[0],
-              ("zone_style", "Colour layout", "seg", [("courses", "Courses"), ("bands", "Bands"), ("stripes", "Stripes")], "courses"),
+              ("zone_style", "Colour layout", "seg", [("courses", "Courses"), ("fade", "Fade"), ("bands", "Bands"), ("stripes", "Stripes")], "courses"),
               ("course_rows", "Rows per colour", "seg", [("1", "1"), ("2", "2"), ("3", "3"), ("4", "4")], "1")],
     "lattice": [("colour_by", "Colour by", "seg", [("direction", "Rod direction"), ("height", "Height")], "direction"),
                 ("course_group", "Courses per colour", "seg", [("1", "1"), ("2", "2"), ("3", "3"), ("4", "4")], "1")] + ZONES,
@@ -687,6 +687,20 @@ def _course_edges(starts, gap, top, n, rows=1):
     return edges, [0] + [(i + 1) % n for i in range(len(picked))]
 
 
+def _fade_zones(edges, top, n, blend=0.3):
+    """Droop "Fade" colour layout (after POILU 3.0's orange-to-blue loops). Each colour owns a soft gaussian band up the
+    height (width `blend`, a fraction of the height; 0.4 = every height mixes two or three colours), and strand rows are
+    dealt colours by multi-colour error diffusion, so the change reads as woven-in mixing, not layers. More blend =
+    more mixing = more AMS swaps. Zone 0 = bottom."""
+    acc, out = [0.0] * n, []
+    for a, b in zip(edges, edges[1:]):
+        u = (a + b) / 2 / max(top, 1e-6)
+        w = [math.exp(-((u - c / max(n - 1, 1)) / max(blend, 1e-3)) ** 2) for c in range(n)]
+        sw = sum(w); acc = [x + y / sw for x, y in zip(acc, w)]
+        k = max(range(n), key=lambda i: acc[i]); acc[k] -= 1.0; out.append(k)
+    return out
+
+
 def _weave_courses(S, v, nz, region, options):
     """A woven base under a gift-box lid: its courses are the bottom of the whole closed box, so a twist or an ombre
     runs on into the lid (the lid gets the matching map in _gift_box). Explicit weave_courses wins (the lid's own)."""
@@ -936,6 +950,31 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         over = printer.overrides(nz.size, "halftone", slots=len(parts), floor_layers=info["floor_layers"],
                                  layer_h=info["layer_h"], line_w=info["line_w"])
         extra = dict(stitches=info["cols"], stitch_mm=info["stitch_mm"], layers=info["layers"], line=info["line_w"])
+        if options.get("loops"):            # POILU: droop loops on the colour-knit; each loop takes its layer's colour
+            lo_ = dict(options["loops"]); ev_ = droop.even_options(dict(lo_, rows="even")) or {}
+            pan_ = droop.panel_windows(lo_.get("panels", 0), float(lo_.get("panel_width", 80)), float(lo_.get("panel_offset", 90)))
+            mode_ = lo_.get("colour", "chart")
+            prof_ = S.profile(v)[0]
+            by_slot, lspots, lreach = droop.colourwork_loops(prof_, info["layer_h"], info["line_w"], ev_, info, pan_, mode_)
+            hang_ = droop.even_hang(ev_); cw_hung = {}
+            for (spot, slot_, rib) in lspots:
+                hung_ = droop.drape(trimesh.Trimesh(), [spot], prof_, lambda z: z, [rib], "fringe", hang=hang_)
+                cw_hung.setdefault(colours[slot_], []).append(hung_)
+            merged2, cw_prev = {}, {}
+            for slot, mesh in sorted(meshes.items()):
+                merged2.setdefault(colours[slot], []).append(mesh); cw_prev.setdefault(colours[slot], []).append(mesh)
+            for slot, ribs in by_slot.items():
+                merged2.setdefault(colours[slot], []).extend(ribs)
+            for col, hs in cw_hung.items():
+                cw_prev.setdefault(col, []).extend(hs)
+            parts = [(f"colour {k}", trimesh.util.concatenate(ms), k, col) for k, (col, ms) in enumerate(merged2.items(), 1)]
+            cw_preview = [(f"colour {k}", trimesh.util.concatenate(cw_prev[col]), k, col) for k, (col, _) in enumerate(merged2.items(), 1)]
+            for kk in ("enable_overhang_speed",):                   # loops only fall if laid at full speed
+                over[kk] = ["0"] * len(printer.base_config(nz.size).get(kk, ["1"]))
+            per_filament = printer.filament_settings(nz.size, ["droop"] * len(parts))
+            extra.update(strands=len(lspots), reach=round(lreach, 1))
+            warnings.append(f"{len(lspots)} loops ride the colourwork: each takes its layer's colour, so they add no AMS "
+                            "changes. The project runs the fan low and the nozzle 5 °C hotter so they droop.")
         if swaps > 250:
             warnings.append(f"{swaps} colour changes: long print. 'Layers per colour: 2', plain or stripe bands, or a "
                             "smaller piece cut them.")
@@ -961,7 +1000,10 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     elif T["family"] == "droop":
         mesh, info = droop.build(S, v, nz, style=texture, density=options.get("density", "medium"),
                                  length=options.get("length", "medium"), preview=True, draft=draft,
-                                 aligned=int(options.get("zones", 1) or 1) > 1 and options.get("zone_style", "courses") == "courses")
+                                 aligned=int(options.get("zones", 1) or 1) > 1 and options.get("zone_style", "courses") in ("courses", "fade"),
+                                 panels=droop.panel_windows(options.get("panels", 0), float(options.get("panel_width", 80)),
+                                                            float(options.get("panel_offset", 90))),
+                                 even=droop.even_options(options))
         parts = [("colour 1", mesh, 1, colours[0])]; swaps = 0
         over = printer.overrides(nz.size, "droop", slots=1, floor_layers=info["floor_layers"], solid=info["solid"])
         per_filament = printer.filament_settings(nz.size, ["fur" if texture == "fur" else "droop"])
@@ -1026,8 +1068,10 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         grid = nz.rod_h if T["family"] == "lattice" else (fabric.fabric_preset(nz.size, diameter=100)["fabric"]["layer_h"]
                                                            if T["family"] == "fabric" else nz.layer_h)
         style_z = options.get("zone_style", "courses" if T["family"] == "droop" else "bands")
-        if T["family"] == "droop" and style_z == "courses" and texture != "fur" and info.get("courses"):
+        if T["family"] == "droop" and style_z in ("courses", "fade") and texture != "fur" and info.get("courses"):
             edges, zone_of = _course_edges(info["courses"], info["course_gap"], top, zones, int(options.get("course_rows", 1) or 1))
+            if style_z == "fade":
+                zone_of = _fade_zones(edges, top, zones, float(options.get("fade_blend", 0.3) or 0.3))
         else:
             edges, zone_of = extras.zone_edges(top, zones, grid, "stripes" if style_z == "courses" else style_z)
         if T["family"] == "lattice":
@@ -1115,6 +1159,10 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     preview = None
     if T["family"] == "mix" and info["strands"]:            # the drape switch only matters when strands exist
         preview = mix_preview
+        for _, m, _, _ in preview:
+            m.apply_translation([0, 0, -zmin])
+    if T["family"] == "colourwork" and locals().get("cw_preview"):
+        preview = locals()["cw_preview"]
         for _, m, _, _ in preview:
             m.apply_translation([0, 0, -zmin])
     if T["family"] == "droop" and info.get("draped") is not None:
