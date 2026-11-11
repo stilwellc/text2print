@@ -190,10 +190,37 @@ def build(shape, v, nz, bands, draft=False):
             n = max(180, int(circ / 1.2))
         return max(120, n // (3 if draft else 1))
 
+    def band_wall(b):
+        """A droop band may carry a fabric wall ({"wall": "domes"|"zigzag"|"wave"}) outside its strand panels
+        (POILU-style): -> (texture that shapes the wall, panel windows or None)."""
+        t, o = b["texture"], (b.get("options") or {})
+        if t in droop.STYLES and o.get("wall") in fp:
+            return o["wall"], droop.panel_windows(o.get("panels", 0), float(o.get("panel_width", 80)),
+                                                  float(o.get("panel_offset", 90)))
+        return t, None
+
+    def panel_mask(th, panels):
+        """0 inside a strand panel (a smooth wall the strands anchor into), ramping to 1 over ~3.4 deg outside."""
+        if not panels:
+            return 1.0
+        m = np.ones_like(th)
+        for c, hw in panels:
+            d = np.abs((th - c + np.pi) % (2 * np.pi) - np.pi)
+            m = np.minimum(m, np.clip((d - hw) / 0.06, 0.0, 1.0))
+        return m
+
     def wall_contour(bi, k, z0, z1):
+        r = _wall_contour(bi, k, z0, z1)
+        _, pan = band_wall(bands[bi])
+        if r is None or not pan:
+            return r
+        R = prof((z0 + z1) / 2); th = np.linspace(0, 2 * np.pi, len(r), endpoint=False)
+        return R + (r - R) * panel_mask(th, pan)
+
+    def _wall_contour(bi, k, z0, z1):
         """Outer contour of band bi's texture at its k-th layer (k may run past the band: blends use it),
         as an array over that texture's own theta grid, or None for a smooth wall."""
-        b = bands[bi]; t = b["texture"]; n = n_theta(t); zm = (z0 + z1) / 2; R = prof(zm)
+        b = bands[bi]; t, _ = band_wall(b); n = n_theta(t); zm = (z0 + z1) / 2; R = prof(zm)
         th = np.linspace(0, 2 * np.pi, n, endpoint=False); za, zb = zs[bi], zs[bi + 1]
         if t in ("plain", "fuzzy") or t in droop.STYLES:
             return None
@@ -217,7 +244,8 @@ def build(shape, v, nz, bands, draft=False):
     layers = []          # dicts: z0, z1, slot, r (array) or None (smooth), band, lh
     ranges, droop_bands = [], []
     for bi, b in enumerate(bands):
-        t = b["texture"]; lh = lhs[bi]; za, zb = zs[bi], zs[bi + 1]; n = n_theta(t)
+        t = b["texture"]; lh = lhs[bi]; za, zb = zs[bi], zs[bi + 1]
+        tw, pan = band_wall(b); n = n_theta(tw)
         th = np.linspace(0, 2 * np.pi, n, endpoint=False)
         if t == "fuzzy":                                           # slicer-made texture through a layer range
             ranges.append((za, zb, {"layer_height": f"{lh:.2f}", "fuzzy_skin": "external",
@@ -240,22 +268,22 @@ def build(shape, v, nz, bands, draft=False):
                 entry["woven"] = True
                 if 0 <= course < nc and course % 2 == 1:
                     entry["slot"] = b["slot2"]
-            elif floor_layer or t in ("plain", "fuzzy") or t in droop.STYLES:
+            elif floor_layer or t in ("plain", "fuzzy") or (t in droop.STYLES and tw not in fp):
                 pass                                                   # smooth wall
-            elif t in fp:
-                f = fp[t]; cyc = f["zigzag_layers"] + f["straight_layers"]; p = k
+            elif tw in fp:
+                f = fp[tw]; cyc = f["zigzag_layers"] + f["straight_layers"]; p = k
                 if p % cyc < f["zigzag_layers"]:
                     band = p // cyc; u = f["zigzags_around"] * th / (2 * np.pi) + 0.5 * (band % 2)
                     d = f["zigzag_depth"] * max(0.35, R / rmax)
                     stand = 0.02 * (1 + band % 2) + 0.001 * (p % cyc)
-                    if t == "domes":
+                    if tw == "domes":
                         env = math.sin(math.pi * ((p % cyc) + 0.5) / f["zigzag_layers"])
                         disp = d * env * np.sin(np.pi * np.mod(u, 1.0)) ** 2
-                    elif t == "wave":
+                    elif tw == "wave":
                         disp = 0.5 * d * np.sin(2 * np.pi * u)
                     else:
                         disp = d * tri01(u)
-                    entry["r"] = R + stand + disp
+                    entry["r"] = R + (stand + disp) * panel_mask(th, pan)
                 else:
                     entry["r"] = np.full(n, R)
             elif t in RELIEFS:
@@ -328,13 +356,16 @@ def build(shape, v, nz, bands, draft=False):
         st = b["texture"]; o = b["options"]
         q = lambda z, za=za: za + (math.floor((z - za) / base_lh) + 0.25) * base_lh
         spots = droop._rows(st, prof, total_h, nz, droop.DENSITY.get(o.get("density", "medium"), 1.0),
-                            droop.LENGTH.get(o.get("length", "medium"), 1.0), z_range=(za, zb))
+                            droop.LENGTH.get(o.get("length", "medium"), 1.0), z_range=(za, zb),
+                            panels=droop.panel_windows(o.get("panels", 0), float(o.get("panel_width", 80)),
+                                                       float(o.get("panel_offset", 90))), even=droop.even_options(o))
         spots = droop._never_touch(spots, prof, q)
         reach = max([reach] + [bu for _, _, bu, _, _, _, _ in spots])
         ribbons = [droop._ribbon(t_, ch, bu, q(z), hh, w, prof, shell * 0.55, droop._SPEC[st]["power"], le)
                    for t_, ch, bu, z, hh, le, w in spots]
         flat.setdefault(b["slot"], []).extend(ribbons)
-        hung.setdefault(b["slot"], []).append(droop.drape(trimesh.Trimesh(), spots, prof, q, ribbons, st))
+        hung.setdefault(b["slot"], []).append(droop.drape(trimesh.Trimesh(), spots, prof, q, ribbons, st,
+                                                          hang=droop.even_hang(droop.even_options(o))))
 
     parts, preview = {}, {}
     for slot, ms in solids.items():
