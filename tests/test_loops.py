@@ -277,3 +277,27 @@ def test_pour_cap_screws_into_an_open_hole_without_clashing(nozzle):
     assert seat[0] < 0.5                                                                           # seated flush
     assert (lid ^ cap.rotate([0, 0, seat[1] - 90]).translate([cx, 0, -POUR["cap_t"] - 1.5])).volume() < 0.5   # and on the way out
     assert not build.make("jarlid", "domes", {"inside": 86, "skirt": 19}).extras                  # no opening: no cap
+
+
+def test_jar_lid_fluted_grip_is_one_clean_solid():
+    """grip=1: the lid is one solid with finger flutes that stop under a plain band, at the asked wall; the second
+    colour is a line and a dot in the first five layers only; the pour boss stays clear of the jar's glass rim."""
+    import numpy as np
+    from text2print.fittings import GRIP, MASON, POUR, _pour
+    b = build.make("jarlid", "domes", {"inside": 86, "skirt": 19, "wall": 6.35, "pour": 30, "grip": 1}, colours=["#F4F1E8", "#151515"])
+    assert [n for n, *_ in b.parts] == ["fitting", "mark"] and [n for n, *_ in b.extras] == ["Pour cap", "Pour cap dot"]
+    lid = b.parts[0][1]
+    assert all(m.is_watertight and len(m.split(only_watertight=False)) == 1 for _, m, _, _ in b.parts + b.extras)
+    assert all(m.bounds[1][2] <= 1.0 + 1e-6 and c == "#151515" for n, m, _, c in b.parts + b.extras if n in ("mark", "Pour cap dot"))
+    R = 86 / 2 + MASON["clear"] + 6.35
+
+    def r_at(z, deg):
+        pts = np.vstack(list(lid.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1]).discrete))
+        a = np.degrees(np.arctan2(pts[:, 1], pts[:, 0])); r = np.hypot(pts[:, 0], pts[:, 1])
+        return r[np.abs(a - deg) < 1].max()
+    n = max(8, int(round(2 * np.pi * R / GRIP["pitch"]))); flute = 180.0 / n; land = 360.0 / n
+    assert abs(r_at(12, land) - R) < 0.05                                   # the lands keep the full wall
+    assert abs(r_at(12, flute) - (R - GRIP["depth"])) < 0.1                 # the flutes are cut to depth
+    assert abs(r_at(GRIP["band"] - 0.5, flute) - R) < 0.05                  # and stop under the plain band
+    r, cx, _ = _pour(b.params)
+    assert abs(2 * r - 30) < 1e-6 and 86 / 2 + MASON["clear"] - (cx + r + POUR["boss"]) >= POUR["jar"] - 1e-6

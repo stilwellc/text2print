@@ -1242,6 +1242,15 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     # ── fittings (after zones, so the fitting takes the bottom zone's colour): collars, pockets, plinths, foot rings, crush ribs ──
     if shape in ("pendant", "puck", "lantern", "cachepot", "candle", "jarlid") and T["family"] != "lattice":
         parts = fittings.apply(parts, shape, v, S.profile(v)[0], 1.0)
+        if shape == "jarlid" and v.get("grip", 0) >= 0.5:    # the lid's own fluted grip: one clean solid, no texture skin
+            parts = [pt for pt in parts if pt[0] == "fitting"]; swaps = 0; transitions = []
+            over.update({"wall_loops": "3", "seam_position": "back"})
+            ink_d = 5 * float(over.get("layer_height", nz.layer_h))     # the second colour: the top face's first 5 layers
+            marks = fittings.grip_marks(v, ink_d)
+            if marks is not None:
+                ink_c = colours[1] if n_given >= 2 else "#1A1A1A"
+                n_, m_, s_, c_ = parts[0]; body = fittings._m(m_)
+                parts = [(n_, fittings._t(body - marks[0]), s_, c_), ("mark", fittings._t(body ^ marks[0]), 2, ink_c)]
         if len({c for _, _, _, c in parts}) > 1:          # the fitting shares layers with the wall: recount
             transitions = _geom_transitions(parts, over, ranges); swaps = len(transitions)
         fit_m = next((m for n_, m, _, _ in parts if n_ == "fitting"), None)
@@ -1457,7 +1466,13 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     if shape == "jarlid" and not draft:
         cap = fittings.pour_cap(v)
         if cap is not None:                                 # the small screw cap for the pour opening, beside the lid
-            lid_parts = list(lid_parts) + [("Pour cap", cap, 1, parts[0][3])]
+            marks = fittings.grip_marks(v, 5 * float(over.get("layer_height", nz.layer_h))) if v.get("grip", 0) >= 0.5 else None
+            if marks is not None:                           # the dot in the middle of the cap, in the mark's colour
+                cm = fittings._m(cap); ink_c = next(c for n_, _, _, c in parts if n_ == "mark")
+                lid_parts = list(lid_parts) + [("Pour cap", fittings._t(cm - marks[1]), 1, parts[0][3]),
+                                               ("Pour cap dot", fittings._t(cm ^ marks[1]), 2, ink_c)]
+            else:
+                lid_parts = list(lid_parts) + [("Pour cap", cap, 1, parts[0][3])]
             warnings.append("Pour opening: the small cap screws in with half a turn. It is a dust cap, not a seal.")
     if lid_parts:
         stats["colours"] = len({c for _, _, _, c in parts + lid_parts})   # the lid's own filaments count too
