@@ -446,7 +446,8 @@ def _jarlid(v):
 
 _jl = Profiled("jarlid", "Mason jar lid", "Screws onto a glass mason jar: 86 mm inside for wide mouth, 70 for regular",
                ("fabric", "halftone", "colourwork", "shell"),
-               [Param("inside", "Inside diameter", 50, 120, 0.1, 86), Param("skirt", "Skirt height", 12, 40, 0.5, 19)], round=True)
+               [Param("inside", "Inside diameter", 50, 120, 0.1, 86), Param("skirt", "Skirt height", 12, 40, 0.5, 19),
+                Param("pour", "Pour opening", 0, 40, 1, 0)], round=True)
 _jl.kind = "jarlid"; KIND_PROFILES["jarlid"] = _jarlid; SHAPES["jarlid"] = _jl
 
 

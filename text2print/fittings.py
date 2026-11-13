@@ -46,17 +46,17 @@ def _ring(r0, r1, z0, z1, n=160):
     return _cyl(r1, z0, z1, n) - _cyl(r0, z0 - 0.5, z1 + 0.5, n)
 
 
-def _thread_in(r_wall, depth, lead, turns, z0, n_per_turn=120, embed=0.4):
-    """One right-hand ridge on the INSIDE of a bore of radius r_wall: a 45-degree triangle `depth` tall whose
-    centre climbs `lead` per turn from z0. (cos a, sin a, z rising with a) is a right-hand helix whichever way up
-    the part is printed."""
-    import manifold3d as m3d
+def _thread(r_wall, depth, lead, turns, z0, outward=-1, phase=0.0, n_per_turn=120, embed=0.4):
+    """One right-hand ridge on a cylinder of radius r_wall, pointing in (-1, a bore) or out (+1, a plug): a 45-degree
+    triangle `depth` tall whose centre climbs exactly `lead` per turn from z0. (cos a, sin a, z rising with a) is a
+    right-hand helix whichever way up the part is printed."""
     n = max(12, int(n_per_turn * turns)); w = depth; V, F = [], []
     for i in range(n + 1):
-        a = 2 * math.pi * turns * i / n; zc = z0 + lead * turns * i / n
+        a = phase + 2 * math.pi * turns * i / n; zc = z0 + lead * turns * i / n
         k = min(1.0, i / 8, (n - i) / 8)                         # the ridge ramps in and out over a few steps
         ca, sa = math.cos(a), math.sin(a)
-        for rr, zz in ((r_wall + embed, zc - w - embed), (r_wall - depth * max(k, 0.15), zc), (r_wall + embed, zc + w + embed)):
+        for rr, zz in ((r_wall - outward * embed, zc - w - embed), (r_wall + outward * depth * max(k, 0.15), zc),
+                       (r_wall - outward * embed, zc + w + embed)):
             V.append([rr * ca, rr * sa, zz])
     for i in range(n):
         p_, q_ = 3 * i, 3 * (i + 1)
@@ -69,6 +69,60 @@ def _thread_in(r_wall, depth, lead, turns, z0, n_per_turn=120, embed=0.4):
     if mesh.volume < 0:
         mesh.invert()
     return _m(mesh)
+
+
+def _thread_in(r_wall, depth, lead, turns, z0):
+    return _thread(r_wall, depth, lead, turns, z0, -1)
+
+
+def _pour_thread(r, z_from, z_to, outward):
+    """The pour cap's thread: two starts, 3 mm pitch (6 mm lead), so half a turn closes it. The bore's ridges are
+    1.2 deep; the plug's are 1.0 on a core 0.25 mm clear of them. -> (manifold, plug core radius)."""
+    T = POUR; depth = T["depth"] if outward < 0 else T["depth"] - 0.2
+    base = r if outward < 0 else r - T["depth"] - T["clear"]
+    w = depth; turns = max(0.3, (z_to - z_from - 2 * w) / T["lead"])
+    out = None
+    for st in range(T["starts"]):
+        ridge = _thread(base, depth, T["lead"], turns, z_from + w, outward, phase=2 * math.pi * st / T["starts"])
+        out = ridge if out is None else out + ridge
+    return out, base
+
+
+# A pour opening in a jar lid: a threaded hole near the edge with its own small screw cap (the house thread: two
+# starts, half a turn). The hole's boss grows INTO the jar, so the lid still prints top-face down with a flat top.
+POUR = dict(boss=4.0, depth_in=9.0, edge=5.0, cap_t=4.0, cap_lip=5.0, plain=1.6, lead=6.0, starts=2, depth=1.2, clear=0.25)      # plain: bore above the top plate
+                                                                                      # before the thread starts
+
+
+def _pour(v):
+    """-> (hole radius, centre x, boss top z) for this lid, or None. The hole is as wide as asked, or as wide as fits
+    between the lid's centre and its jar thread."""
+    M = MASON; want = float(v.get("pour", 0) or 0)
+    if want < 8:
+        return None
+    r_free = v["inside"] / 2 + M["clear"] - M["depth"] - 1.0             # inside the jar-thread ridge
+    r = min(want / 2, (r_free - POUR["boss"]) / 2 - 1.0)
+    return r, r_free - POUR["boss"] - r, M["top"] + min(POUR["depth_in"], v["skirt"] - 3.0)
+
+
+def pour_cap(v):
+    """The screw cap for the pour opening, in print orientation (grip disc on the bed, threaded plug up)."""
+    import manifold3d as m3d
+    from . import extras
+    spec = _pour(v)
+    if spec is None:
+        return None
+    r, _, z_top = spec
+    z_t = MASON["top"] + POUR["plain"]
+    ridges, r_p = _pour_thread(r, POUR["cap_t"] + z_t, POUR["cap_t"] + z_top - 0.2, +1)      # the same span as the bore's
+    disc = _cyl(r + POUR["cap_lip"], 0.0, POUR["cap_t"])
+    for k in range(12):                                                  # finger flutes round the edge
+        a = 2 * math.pi * k / 12; rr = r + POUR["cap_lip"] + 1.2
+        disc = disc - _cyl(2.2, -1.0, POUR["cap_t"] + 1.0, 32).translate([rr * math.cos(a), rr * math.sin(a), 0])
+    h = z_top - 0.4                                                      # the plug stops short of the boss's end
+    plug = _cyl(r_p, POUR["cap_t"] - 0.01, POUR["cap_t"] + h) - _cyl(r_p - 1.6, POUR["cap_t"] + 1.2, POUR["cap_t"] + h + 1.0)
+    plug = plug + ridges
+    return _t(disc + plug)
 
 
 def plan(shape_key, v, prof, shell):
@@ -91,7 +145,17 @@ def plan(shape_key, v, prof, shell):
         adds.append(_ring(rr, rr + 4.0, 0.5, 9.0))                                  # foot ring lifts the pot
     elif shape_key == "jarlid":
         M = MASON; r_in = v["inside"] / 2 + M["clear"]; h = v["skirt"] + M["top"]; r_out = prof(h / 2) - shell * 0.5
-        adds.append(_cyl(r_out, 0.0, M["top"]))                                    # the top plate (printed on the bed)
+        plate = _cyl(r_out, 0.0, M["top"])                                         # the top plate (printed on the bed)
+        spec = _pour(v)
+        if spec is not None:                                                       # a threaded pour hole with a boss
+            from . import extras
+            r, cx, z_top = spec
+            plate = plate - _cyl(r, -1.0, M["top"] + 1.0).translate([cx, 0, 0])
+            z_t = M["top"] + POUR["plain"]
+            boss = _ring(r, r + POUR["boss"], M["top"] - 0.01, z_top) + _pour_thread(r, z_t, z_top - 0.2, -1)[0]
+            adds.append(boss.translate([cx, 0, 0]))
+            cuts.append(_cyl(r, -1.0, z_t - 0.05).translate([cx, 0, 0]))           # through the wall family's own floor
+        adds.append(plate)
         adds.append(_ring(r_in, r_out, M["top"] - 0.01, h))                        # the liner the thread grows from
         adds.append(_thread_in(r_in, M["depth"], M["pitch"], min(M["turns"], max(0.5, (v["skirt"] - M["start"] - 2 * M["depth"] - 1.0) / M["pitch"])),
                                M["top"] + M["start"] + M["depth"]))
