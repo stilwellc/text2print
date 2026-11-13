@@ -90,7 +90,7 @@ def _pour_thread(r, z_from, z_to, outward):
 
 # A pour opening in a jar lid: a threaded hole near the edge with its own small screw cap (the house thread: two
 # starts, half a turn). The hole's boss grows INTO the jar, so the lid still prints top-face down with a flat top.
-POUR = dict(boss=4.0, depth_in=9.0, edge=5.0, cap_t=4.0, cap_lip=5.0, plain=1.6, lead=6.0, starts=2, depth=1.2, clear=0.25)      # plain: bore above the top plate
+POUR = dict(boss=4.0, depth_in=9.0, edge=5.0, jar=8.0, cap_t=4.0, cap_lip=5.0, plain=1.6, lead=6.0, starts=2, depth=1.2, clear=0.25)      # plain: bore above the top plate
                                                                                       # before the thread starts
 
 
@@ -100,8 +100,9 @@ def _pour(v):
     M = MASON; want = float(v.get("pour", 0) or 0)
     if want < 8:
         return None
-    r_free = v["inside"] / 2 + M["clear"] - M["depth"] - 1.0             # inside the jar-thread ridge
-    r = min(want / 2, (r_free - POUR["boss"]) / 2 - 1.0)
+    r_free = v["inside"] / 2 + M["clear"] - POUR["jar"]                  # clear of the jar's own glass rim, which
+                                                                         # comes up inside the thread to meet the lid
+    r = min(want / 2, r_free - POUR["boss"] - 1.0)
     return r, r_free - POUR["boss"] - r, M["top"] + min(POUR["depth_in"], v["skirt"] - 3.0)
 
 
@@ -115,14 +116,62 @@ def pour_cap(v):
     r, _, z_top = spec
     z_t = MASON["top"] + POUR["plain"]
     ridges, r_p = _pour_thread(r, POUR["cap_t"] + z_t, POUR["cap_t"] + z_top - 0.2, +1)      # the same span as the bore's
-    disc = _cyl(r + POUR["cap_lip"], 0.0, POUR["cap_t"])
-    for k in range(12):                                                  # finger flutes round the edge
-        a = 2 * math.pi * k / 12; rr = r + POUR["cap_lip"] + 1.2
-        disc = disc - _cyl(2.2, -1.0, POUR["cap_t"] + 1.0, 32).translate([rr * math.cos(a), rr * math.sin(a), 0])
+    rc_ = r + POUR["cap_lip"]; disc = _cyl(rc_, 0.0, POUR["cap_t"])
+    n = _grip_count(v["inside"] / 2 + MASON["clear"] + max(MASON["liner"], v.get("wall", MASON["liner"])))
+    cut_r = 0.45 * 2 * math.pi * rc_ / n; dep = 0.7                      # the lid's flute count, scaled to the cap
+    for k in range(n):
+        a = 2 * math.pi * (k + 0.5) / n; rr = rc_ + cut_r - dep
+        disc = disc - _cyl(cut_r, -1.0, POUR["cap_t"] + 1.0, 48).translate([rr * math.cos(a), rr * math.sin(a), 0])
+    c = 0.8
+    disc = disc - (_ring(rc_ - c - 1.0, rc_ + 2.0, -1.0, c) - m3d.Manifold.cylinder(c + 2.0, rc_ - c - 1.0, rc_ + 1.0, 120).translate([0, 0, -1.0]))
     h = z_top - 0.4                                                      # the plug stops short of the boss's end
     plug = _cyl(r_p, POUR["cap_t"] - 0.01, POUR["cap_t"] + h) - _cyl(r_p - 1.6, POUR["cap_t"] + 1.2, POUR["cap_t"] + h + 1.0)
     plug = plug + ridges
     return _t(disc + plug)
+
+
+# The lid's own grip (grip=1): the lid becomes one clean solid, no texture skin. Finger-wide concave flutes run up
+# the side and die out under a plain band at the top, like a lens ring; both edges are chamfered; a short groove in
+# the band marks where the pour opening is, so you can find it by feel.
+GRIP = dict(pitch=17.0, cutter=9.0, depth=1.8, band=3.0, chamfer=1.2, chamfer_open=0.8, mark_w=2.0, mark_d=0.8, dot=6.0)
+
+
+def _grip_count(R):
+    return max(8, int(round(2 * math.pi * R / GRIP["pitch"])))
+
+
+def grip_marks(v, depth):
+    """The second colour, in the first layers of the top face only: a line from the pour cap to the rim (it meets
+    the groove on the side) and a dot in the middle of the cap. -> (lid mark, cap mark) manifolds, or None."""
+    import manifold3d as m3d
+    spec = _pour(v)
+    if spec is None:
+        return None
+    r, cx, _ = spec; G = GRIP; w = G["mark_w"]
+    R = v["inside"] / 2 + MASON["clear"] + max(MASON["liner"], v.get("wall", MASON["liner"]))
+    x0 = cx + r + POUR["cap_lip"] + 2.0 + w / 2
+    line = (m3d.Manifold.cube([R + 2.0 - x0, w, depth + 1.0]).translate([x0, -w / 2, -1.0])
+            + m3d.Manifold.cylinder(depth + 1.0, w / 2, w / 2, 48).translate([x0, 0, -1.0]))
+    dot = m3d.Manifold.cylinder(depth + 1.0, G["dot"] / 2, G["dot"] / 2, 96).translate([0, 0, -1.0])
+    return line, dot
+
+
+def _grip_cuts(R, h, has_pour):
+    import manifold3d as m3d
+    G = GRIP; cuts = []
+    n = _grip_count(R); rc = G["cutter"]; d = R + rc - G["depth"]
+    run = math.sqrt(rc * rc - (rc - G["depth"]) ** 2); z0 = G["band"] + run           # the run-out ends where the band starts
+    capsule = (m3d.Manifold.cylinder(h - z0 + 2.0, rc, rc, 96).translate([0, 0, z0])
+               + m3d.Manifold.sphere(rc, 96).translate([0, 0, z0]))
+    for k in range(n):
+        a = 2 * math.pi * (k + 0.5) / n                                               # a land, not a flute, at angle 0
+        cuts.append(capsule.translate([d * math.cos(a), d * math.sin(a), 0]))
+    c = G["chamfer"]; c2 = G["chamfer_open"]; e = 0.05                                # each edge: a ring less a cone
+    cuts.append(_ring(R - c - 1.0, R + 2.0, -1.0, c) - m3d.Manifold.cylinder(c + 2.0, R - c - 1.0, R + 1.0, 180).translate([0, 0, -1.0]))
+    cuts.append(_ring(R - c2 - 1.0, R + 2.0, h - c2, h + 1.0) - m3d.Manifold.cylinder(c2 + 2.0, R + 1.0, R - c2 - 1.0, 180).translate([0, 0, h - c2 - 1.0]))
+    if has_pour:                                                                      # the index groove, pour side
+        cuts.append(m3d.Manifold.cube([2 * G["mark_d"], G["mark_w"], G["band"] + 1.0], True).translate([R, 0, (G["band"] - 1.0) / 2]))
+    return cuts
 
 
 def plan(shape_key, v, prof, shell):
@@ -145,6 +194,9 @@ def plan(shape_key, v, prof, shell):
         adds.append(_ring(rr, rr + 4.0, 0.5, 9.0))                                  # foot ring lifts the pot
     elif shape_key == "jarlid":
         M = MASON; r_in = v["inside"] / 2 + M["clear"]; h = v["skirt"] + M["top"]; r_out = prof(h / 2) - shell * 0.5
+        grip = v.get("grip", 0) >= 0.5
+        if grip:                                                                   # the whole lid, to its true outside
+            r_out = r_in + max(M["liner"], v.get("wall", M["liner"]))
         plate = _cyl(r_out, 0.0, M["top"])                                         # the top plate (printed on the bed)
         spec = _pour(v)
         if spec is not None:                                                       # a threaded pour hole with a boss
@@ -157,6 +209,8 @@ def plan(shape_key, v, prof, shell):
             cuts.append(_cyl(r, -1.0, z_t - 0.05).translate([cx, 0, 0]))           # through the wall family's own floor
         adds.append(plate)
         adds.append(_ring(r_in, r_out, M["top"] - 0.01, h))                        # the liner the thread grows from
+        if grip:
+            cuts += _grip_cuts(r_out, h, spec is not None)
         adds.append(_thread_in(r_in, M["depth"], M["pitch"], min(M["turns"], max(0.5, (v["skirt"] - M["start"] - 2 * M["depth"] - 1.0) / M["pitch"])),
                                M["top"] + M["start"] + M["depth"]))
     elif shape_key == "candle":
