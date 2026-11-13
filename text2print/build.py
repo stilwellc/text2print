@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import numpy as np
 import trimesh
 
-from . import bambu, colourwork, compose, droop, extras, fabric, fittings, flat, halftone, lattice, printer, shell, spiral, verify
+from . import bambu, colourwork, compose, droop, extras, fabric, fittings, flat, halftone, lattice, loops, printer, shell, spiral, verify
 from .meshops import volume as _vol, watertight as _wt
 from .shapes import SHAPES
 
@@ -53,6 +53,8 @@ OPTIONS = {
                ("picture", "Picture", "seg", [("text", "Text")], "text")] + ZONES,
     "droop": [("density", "Density", "seg", [("sparse", "Sparse"), ("medium", "Medium"), ("dense", "Dense")], "medium"),
               ("length", "Loop length", "seg", [("short", "Short"), ("medium", "Medium"), ("long", "Long")], "medium"),
+              ("rows", "Rows", "seg", [("loose", "Loose"), ("even", "Even")], "loose"),
+              ("panels", "Panels", "seg", [("0", "All round"), ("2", "2"), ("3", "3")], "0"),
               ZONES[0],
               ("zone_style", "Colour layout", "seg", [("courses", "Courses"), ("fade", "Fade"), ("bands", "Bands"), ("stripes", "Stripes")], "courses"),
               ("course_rows", "Rows per colour", "seg", [("1", "1"), ("2", "2"), ("3", "3"), ("4", "4")], "1")],
@@ -68,6 +70,9 @@ OPTIONS = {
                ("turn", "Twist", "seg", [("0", "None"), ("60", "60°"), ("120", "120°"), ("240", "240°")], "120")],
     "mix": [("purge", "Purge", "seg", [("standard", "Standard"), ("lean", "Lean — less waste, slight tint")], "standard")],
     "colourwork": [("chart_preset", "Chart", "seg", [(k, p_["name"]) for k, p_ in colourwork.PRESETS.items()], colourwork.DEFAULT_PRESET),
+                   ("loops", "Loops", "seg", [("none", "None")] + [(k, v_["name"]) for k, v_ in loops.LOOKS.items()], "none"),
+                   ("loop_colour", "Loop colours", "seg", [("auto", "Auto"), ("rows", "By row"), ("salt", "Salt"), ("chart", "Follow the chart")], "auto"),
+                   ("loop_size", "Loop size", "seg", [("small", "Small"), ("regular", "Regular"), ("large", "Large")], "regular"),
                    ("picture", "Picture", "seg", [(k, v["name"]) for k, v in halftone.PICTURES.items()], "flames"),
                    ("stitch_size", "Stitch", "seg", [("fine", "Fine"), ("regular", "Regular"), ("bold", "Bold")], "regular"),
                    ("rim", "Rim", "seg", [("none", "Plain"), ("braid", "Braid"), ("rope", "Rope")], "none"),
@@ -81,6 +86,10 @@ OPTIONS = {
                  ("purge_piece", "Purge into", "seg", [("tower", "Prime tower"), ("coaster", "A coaster too")], "tower"),
                  ("purge", "Purge", "seg", [("standard", "Standard"), ("lean", "Lean — less waste, slight tint")], "standard")],
 }
+
+MATERIAL = ("material", "Filament", "seg", [("pla", "PLA"), ("petg", "PETG")], "pla")
+for _fam in OPTIONS:
+    OPTIONS[_fam] = OPTIONS[_fam] + [MATERIAL]
 
 SOLID_OBJECT = {"wall_loops": "3", "sparse_infill_density": "20%", "top_shell_layers": "4", "bottom_shell_layers": "4",
                 "spiral_mode": "0", "fuzzy_skin": "none"}
@@ -113,6 +122,8 @@ class Build:
     assembled: list = field(default_factory=list)       # the same, placed on the piece for the viewer
     lid_plate: str = "same"                              # "same": lid beside the piece; "own": its own project
     tower: bool = True                                   # prime tower for multi-colour prints
+    prime_block: dict = None                             # {"colours": [...], "layers": n}: no tower; a small block, part
+                                                         # of the piece's object, primes just those first layers
 
     @property
     def colours(self):
@@ -166,6 +177,8 @@ class Build:
                 x += 2 * h + 8
         else:
             objects[0]["position"] = self._centre(half)
+            if self.prime_block and not self.extras:
+                self._add_prime_block(objects[0], half, idx)
             if self.extras:                                        # too big to share a plate: their own project
                 lcols = list(dict.fromkeys(c for _, _, _, c in self.extras)); lidx = lambda c: lcols.index(c) + 1
                 row = sum(2 * h for h in extra_halves) + 8 * (len(extra_halves) - 1)
@@ -201,6 +214,20 @@ class Build:
         bambu.write_3mf(str(path), objects, title=self.title(), colours=tuple(cols),
                         overrides=over, base=printer.base_config(self.nozzle), per_filament=pf)
         return pathlib.Path(path)
+
+    def _add_prime_block(self, ob, half, idx):
+        """A 14 x 12 mm pad per colour in the back-left corner, as extra PARTS of the piece's own object (as a
+        second object, Bambu Studio's window showed the block alone). The piece moves right if it needs the room."""
+        pb = self.prime_block; h = pb["layers"] * pb["layer_h"]; n = len(pb["colours"])
+        bx, by = 6 + 7 * n, printer.BED - 14
+        cx, cy = ob["position"]
+        need = half + 8 + math.hypot(7 * n, 6) - math.hypot(cx - bx, cy - by)
+        if need > 0:
+            cx = min(printer.BED - half - 4, cx + need * 1.3); ob["position"] = (cx, cy)
+        for i, c in enumerate(pb["colours"]):
+            m = trimesh.creation.box(extents=[14, 12, h])
+            m.apply_translation([bx - cx + 14 * i - 7 * (n - 1), by - cy, h / 2])
+            ob["parts"].append((f"prime {i + 1}", m, idx(c)))
 
     def _centre(self, half):
         """Where the piece goes. One colour: no prime tower, so dead centre. With a tower: dodge it, or for round
@@ -815,6 +842,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     v = S.resolve(params or {}); warnings = []
     if _raw:                                                    # internal (lid caps): sizes below a shape's minimum
         v.update({k: float(x) for k, x in (params or {}).items()})
+    n_given = len(colours or []) or len(DEFAULT_COLOURS)        # how many colours were actually chosen
     colours = list(colours or []) + DEFAULT_COLOURS[len(colours or []):]
     vstat, vnote = verify.status(texture, nz.size)
     if vstat == "failed":
@@ -937,6 +965,20 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         if not chart:
             chart = colourwork.PRESETS.get(options.get("chart_preset") or colourwork.DEFAULT_PRESET,
                                            colourwork.PRESETS[colourwork.DEFAULT_PRESET])["bands"]
+        look = options.get("loops")
+        if isinstance(look, str):                               # a named look: its loop layout and its colour plan
+            options.pop("loops")
+            if look not in ("", "none"):
+                look_chart, options["loops"] = loops.resolve(look, options, S, v, nz, len(set(colours[:n_given])))
+                chart = look_chart or chart
+        if (options.get("inlay_text") or "").strip():           # words inlaid flush under the base in another colour
+            base_d = 2 * S.profile(v)[0](0.0)
+            geom = extras.text_polygons(options["inlay_text"].strip(), options.get("engrave_font", "futura"), min(14.0, 0.26 * base_d))
+            if geom is not None:
+                from shapely import affinity
+                gx0, _, gx1, _ = geom.bounds; kk = min(1.0, 0.66 * base_d / max(gx1 - gx0, 1e-6))
+                options["floor_inlay"] = dict(geom=affinity.scale(geom, kk, kk, origin=(0, 0)), layers=2,
+                                              slot=(int(options["inlay_slot"]) if options.get("inlay_slot") not in (None, "") else None))
         meshes, info = colourwork.build(S, v, nz, style=texture, chart=chart, size=options.get("stitch_size", "regular"),
                                         band=int(options.get("band", 1) or 1), rim=options.get("rim", "none"),
                                         rim_slot=options.get("rim_slot"), draft=draft, options=options)
@@ -957,24 +999,48 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
             prof_ = S.profile(v)[0]
             by_slot, lspots, lreach = droop.colourwork_loops(prof_, info["layer_h"], info["line_w"], ev_, info, pan_, mode_)
             hang_ = droop.even_hang(ev_); cw_hung = {}
-            for (spot, slot_, rib) in lspots:
-                hung_ = droop.drape(trimesh.Trimesh(), [spot], prof_, lambda z: z, [rib], "fringe", hang=hang_)
-                cw_hung.setdefault(colours[slot_], []).append(hung_)
+            if "pinch" in ev_:                                      # teardrop tiers: round strands piled row on row
+                for slot_, hung_ in droop.hang_pile([(sp_, sl_) for sp_, sl_, _ in lspots], prof_, info["layer_h"],
+                                                    float(ev_["pinch"]), rest=0.5 if ev_.get("vary") else 0.8).items():
+                    cw_hung.setdefault(colours[slot_], []).append(hung_)
+            else:
+                for (spot, slot_, rib) in lspots:
+                    hung_ = droop.drape(trimesh.Trimesh(), [spot], prof_, lambda z: z, [rib], "fringe", hang=hang_)
+                    cw_hung.setdefault(colours[slot_], []).append(hung_)
             merged2, cw_prev = {}, {}
+            knit_ = colourwork.preview(prof_, info, texture) if ("pinch" in ev_ and options.get("rim", "none") == "none") else meshes
+            for slot, mesh in sorted(knit_.items()):
+                cw_prev.setdefault(colours[slot], []).append(mesh)
             for slot, mesh in sorted(meshes.items()):
-                merged2.setdefault(colours[slot], []).append(mesh); cw_prev.setdefault(colours[slot], []).append(mesh)
+                merged2.setdefault(colours[slot], []).append(mesh)
             for slot, ribs in by_slot.items():
                 merged2.setdefault(colours[slot], []).extend(ribs)
             for col, hs in cw_hung.items():
                 cw_prev.setdefault(col, []).extend(hs)
             parts = [(f"colour {k}", trimesh.util.concatenate(ms), k, col) for k, (col, ms) in enumerate(merged2.items(), 1)]
-            cw_preview = [(f"colour {k}", trimesh.util.concatenate(cw_prev[col]), k, col) for k, (col, _) in enumerate(merged2.items(), 1)]
+            cw_preview = [(f"colour {k}", trimesh.util.concatenate(cw_prev[col]), k, col)
+                          for k, (col, _) in enumerate(merged2.items(), 1) if cw_prev.get(col)]
             for kk in ("enable_overhang_speed",):                   # loops only fall if laid at full speed
                 over[kk] = ["0"] * len(printer.base_config(nz.size).get(kk, ["1"]))
+            # a loop must be ONE bead. At the stock 85 % a 1.0 mm ribbon sits on Arachne's one-or-two-bead threshold:
+            # each leg came out as two thin lines and the round end as a zigzag (G-code plot, Nov 10). 200 % keeps
+            # every loop a single full-width strand, out and back (150 % still split 3.5 % of them).
+            over["min_bead_width"] = "200%"
             per_filament = printer.filament_settings(nz.size, ["droop"] * len(parts))
+            # quality over time: the knit wall is laid at 30 mm/s
+            # (well inside any filament's flow limit), loops at 40, the seam sits at the back, and SHORT layers are
+            # slowed to 8 s: with the droop fan a 3-second neck layer would be laid on a still-soft one. Loop layers
+            # are long, so their loops keep their speed.
+            for kk, vv in (("outer_wall_speed", "30"), ("inner_wall_speed", "30"), ("bridge_speed", "40"),
+                           ("small_perimeter_speed", "30")):
+                bv = printer.base_config(nz.size).get(kk)
+                over[kk] = [vv] * len(bv) if isinstance(bv, list) else vv
+            over["seam_position"] = "back"
+            per_filament.update({"slow_down_for_layer_cooling": ["1"] * len(parts), "slow_down_layer_time": ["8"] * len(parts),
+                                 "slow_down_min_speed": ["15"] * len(parts)})
             extra.update(strands=len(lspots), reach=round(lreach, 1))
             warnings.append(f"{len(lspots)} loops ride the colourwork: each takes its layer's colour, so they add no AMS "
-                            "changes. The project runs the fan low and the nozzle 5 °C hotter so they droop.")
+                            "changes. The project lays each loop as one bead with the fan low, so it droops.")
         if swaps > 250:
             warnings.append(f"{swaps} colour changes: long print. 'Layers per colour: 2', plain or stripe bands, or a "
                             "smaller piece cut them.")
@@ -1338,6 +1404,33 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         lid_parts = list(lid_parts) + [("Purge coaster", coaster, 1, parts[0][3])]
         warnings.append("The coaster soaks up part of the purge (Bambu's flush-into-object). In a test it took about "
                         "3 g per 40 mm block — a modest saving that turns waste into a coaster.")
+    if options.get("material") and options.get("material") != "pla":       # e.g. "petg", or one material per colour
+        mats = options["material"]
+        mats = [mats] * len(colours) if isinstance(mats, str) else list(mats) + [list(mats)[-1]] * len(colours)
+        slot_cols = [c for _, c in sorted({(k_, c_) for _, _, k_, c_ in parts})]
+        mat = printer.material_settings(nz.size, [mats[colours.index(c)] for c in slot_cols])
+        if per_filament:                                    # keep the family's own cooling; its nozzle offset rides
+            t0 = int(printer.base_config(nz.size)["nozzle_temperature"][0])      # on the material's temperature
+            for key, vals in per_filament.items():
+                if key == "nozzle_temperature":           # PETG stays soft long enough to fall at its own preset
+                    mat[key] = [m_ if "PETG" in t_ else str(int(m_) + int(v_) - t0)     # temperature; +5 only strings
+                                for m_, v_, t_ in zip(mat[key], vals, mat["filament_type"])]
+                else:
+                    mat[key] = list(vals)
+        per_filament = mat
+        if T["family"] != "colourwork" or not options.get("loops"):
+            warnings.append("PETG: filament settings come from Bambu's Generic PETG preset for the P2S. Only loops on "
+                            "colour-knit have been set up around it; everything else was tuned on PLA Matte.")
+    prime_block = None
+    inlay = options.get("floor_inlay")
+    if options.get("tower") == "inlay" and T["family"] == "colourwork" and inlay:
+        # no prime tower; only the layers that carry the inlay get primed, on a small block
+        tower = False; over["enable_prime_tower"] = "0"
+        prime_block = dict(colours=list(dict.fromkeys([colours[info["inlay_slot"]], colours[info["floor_slot"]]])),
+                           layers=int(inlay.get("layers", 2)),
+                           layer_h=float(over.get("layer_height", nz.layer_h)))
+        warnings.append("No prime tower: only the inlay's layers are primed, on a small block beside the piece. Every "
+                        "other colour change starts unprimed; the seam is at the back.")
     return Build(shape, texture, nz.size, v, T["family"], parts, stats, over, warnings, preview,
                  ranges=ranges, per_filament=per_filament, flush_mult=flush_mult, draft=draft,
-                 extras=lid_parts, assembled=assembled, lid_plate=lid_plate, tower=tower)
+                 extras=lid_parts, assembled=assembled, lid_plate=lid_plate, tower=tower, prime_block=prime_block)

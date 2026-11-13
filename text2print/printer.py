@@ -145,3 +145,56 @@ def filament_settings(size, kinds):
                 vals.append(DROOP_FILAMENT[key] if kind == "droop" else str(first(key)))
         out[key] = vals
     return out
+
+
+# ── materials other than the base PLA Matte ───────────────────────────────────────────────────────────────────────
+MATERIALS = {   # short name -> Bambu Studio system filament preset (the 0.4 name; other nozzles add their suffix)
+    "petg": "Generic PETG",        # regular PETG of any brand, solid or clear
+    "petg-hf": "Bambu PETG HF", "petg-basic": "Bambu PETG Basic",
+    "petg-clear": "Bambu PETG Translucent", "petg-translucent": "Bambu PETG Translucent",
+}
+_FIL_DIRS = (pathlib.Path.home() / "Library/Application Support/BambuStudio/system/BBL/filament",
+             pathlib.Path("/Applications/BambuStudio.app/Contents/Resources/profiles/BBL/filament"))
+_KEEP_BED = ("textured_plate_temp", "hot_plate_temp", "eng_plate_temp")      # the P2S textured plate runs 60 C, always
+
+
+def _filament_chain(name):
+    out = {}
+    while name:
+        f = next((d / f"{name}.json" for d in _FIL_DIRS if (d / f"{name}.json").exists()), None)
+        if f is None:
+            raise FileNotFoundError(f"Bambu Studio has no filament preset {name!r}")
+        d = json.loads(f.read_text())
+        for k, v in d.items():
+            out.setdefault(k, v)
+        name = d.get("inherits")
+    return out
+
+
+def material_settings(size, materials):
+    """Per-filament settings for other materials: one entry per AMS slot, each a MATERIALS key or a Bambu Studio
+    system preset family name ("Bambu PETG HF"). Every filament-preset value is taken from Bambu's own P2S preset
+    (first extruder variant), except the bed temperatures. -> {key: [value per slot], "_preset": the same, untouched}
+    ("_preset" lets the writer flag only what a texture family changes on top, e.g. the droop fan)."""
+    n = nozzle(size); base = base_config(size)
+    out = {"filament_settings_id": [], "filament_ids": [], "filament_type": []}
+    chains = []
+    for m in materials:
+        fam = MATERIALS.get(str(m).lower(), m)
+        name = f"{fam} @BBL P2S {n.size} nozzle"
+        if not any((d / f"{name}.json").exists() for d in _FIL_DIRS):       # generic presets: one file for 0.4-0.8
+            name = f"{fam} @BBL P2S"
+        c = _filament_chain(name); chains.append(c)
+        out["filament_settings_id"].append(name); out["filament_ids"].append(c.get("filament_id", "GFG99"))
+        out["filament_type"].append((c.get("filament_type") or ["PETG"])[0])
+    for key in sorted(set().union(*chains)):
+        if key in out or key not in base or not isinstance(base[key], list) or key.startswith(_KEEP_BED) \
+                or key in ("compatible_printers", "filament_extruder_variant", "filament_self_index"):
+            continue
+        vals = []
+        for c in chains:
+            v = c.get(key, base[key])
+            vals.append(str(v[0] if isinstance(v, list) and v else v))
+        out[key] = vals
+    out["_preset"] = {k: list(v) for k, v in out.items()}
+    return out

@@ -195,14 +195,20 @@ class Profiled(Shape):
         fitted = self.kind in ("cachepot", "sleeve")         # inner size is the fit: the weave grows outward
         wall = v.get("wall", 6.0)
         nf = (lambda k: k + 1 - k % 2)(max(1, int(round(v.get("floor", 4) / rod_h))))
+        lift = 0.0
         if self.kind == "sleeve":
-            nf = 0                                           # open tube: the glass is the floor
+            if v.get("closed", 0) >= 0.5:                    # a closed bottom: the cup stands on it, so the fit starts above it
+                lift = nf * rod_h
+            else:
+                nf = 0                                       # open tube: the glass is the floor
         n = max(nf + 2, _odd_courses(h, rod_h)); fz = nf * rod_h
         zc = (np.arange(n) + 0.5) * rod_h
-        r_in = np.array([max(prof(min(z, h)) - (SHELL if fitted else wall), 0.0) for z in zc])
+        r_in = np.array([max(prof(min(max(z - lift, 0.0), h)) - (SHELL if fitted else wall), 0.0) for z in zc])
         for k in range(1, n):                                # every course rests on the one below
             r_in[k] = min(max(r_in[k], r_in[k - 1] - self.LEAN * rod_h), r_in[k - 1] + self.LEAN * rod_h)
         r_out = r_in + wall
+        if self.kind == "sleeve" and v.get("straight", 0) >= 0.5:   # a straight outside: the pocket tapers, the shell does not
+            r_out = np.full_like(r_in, r_in.max() + wall)
 
         def sdf_at(z):
             k = min(n - 1, max(0, int(z / rod_h)))
@@ -296,6 +302,7 @@ _custom = Profiled("custom", "Your shape", "Draw the silhouette — five points 
     Param("c0", "Foot", 20, 100, 1, 62, "%"), Param("c1", "Lower", 20, 100, 1, 92, "%"),
     Param("c2", "Middle", 20, 100, 1, 100, "%"), Param("c3", "Upper", 20, 100, 1, 74, "%"),
     Param("c4", "Rim", 20, 100, 1, 80, "%"),
+    Param("neck", "Neck", 0, 60, 1, 0), Param("lip", "Lip", 0, 3, 0.5, 0),
         Param("wall", "Wall", 4, 16, 0.5, 6, family="lattice"), Param("floor", "Floor", 2, 10, 0.5, 4, family="lattice")], round=True)
 _custom.kind = "custom"
 SHAPES["custom"] = _custom
@@ -304,8 +311,10 @@ SHAPES["custom"] = _custom
 def custom_profile(v):
     """Monotone cubic (Fritsch-Carlson) through five radii at 0/25/50/75/100 % height, then clamped so the wall
     never leans outward faster than ~42 deg (printable without supports) and never thinner than 12 mm radius."""
-    R = v["diameter"] / 2; h = v["height"]
-    xs = np.array([0, 0.25, 0.5, 0.75, 1.0]) * h
+    R = v["diameter"] / 2; H = v["height"]
+    neck = min(float(v.get("neck", 0.0)), 0.6 * H); lip = float(v.get("lip", 0.0))
+    h = H - neck                                                  # the five points draw the body; a straight neck
+    xs = np.array([0, 0.25, 0.5, 0.75, 1.0]) * h                 # of the rim's radius stands on it, ending in a lip
     ys = np.array([max(12.0, R * v[f"c{i}"] / 100.0) for i in range(5)])
     d = np.diff(ys) / np.diff(xs)
     m = np.zeros(5); m[0], m[-1] = d[0], d[-1]
@@ -316,11 +325,23 @@ def custom_profile(v):
         i = min(3, int(z / (h / 4))); t = (z - xs[i]) / (xs[i + 1] - xs[i]); hh = xs[i + 1] - xs[i]
         rf[k] = ((2 * t ** 3 - 3 * t ** 2 + 1) * ys[i] + (t ** 3 - 2 * t ** 2 + t) * hh * m[i]
                  + (-2 * t ** 3 + 3 * t ** 2) * ys[i + 1] + (t ** 3 - t ** 2) * hh * m[i + 1])
+    if neck > 0:
+        zn = np.arange(h + 0.25, H + 1e-9, 0.25)
+        zf = np.concatenate([zf, zn]); rf = np.concatenate([rf, np.full(len(zn), rf[-1])])
+        j = np.abs(zf - h) < 3.0                                  # ease the shoulder into the neck over 3 mm
+        if j.any():
+            rs = rf.copy()
+            for k in np.where(j)[0]:
+                w = np.exp(-((zf - zf[k]) / 1.2) ** 2); rs[k] = float((w * rf).sum() / w.sum())
+            rf = rs
+    if lip > 0:
+        lh_ = max(1.2, lip / 0.8); t = np.clip((zf - (H - lh_)) / lh_, 0, 1)
+        rf = rf + lip * t ** 2
     for k in range(1, len(rf)):                                   # overhang law: outward lean <= 0.9 mm per mm
         rf[k] = min(rf[k], rf[k - 1] + 0.9 * (zf[k] - zf[k - 1]))
     rf = np.maximum(rf, 12.0)
     rmax = float(rf.max())
-    return (lambda z: float(np.interp(z, zf, rf))), h, rmax
+    return (lambda z: float(np.interp(z, zf, rf))), H, rmax
 _shade = Vessel("shade", "Lamp shade", "Open cylinder — light through the weave", ("lattice",), [
     Param("diameter", "Diameter", 80, 200, 1, 140), Param("height", "Height", 60, 180, 1, 120),
     Param("wall", "Wall", 4, 14, 0.5, 6)], round=True)
@@ -348,8 +369,10 @@ def _cachepot(v):
 
 
 def _sleeve(v):
-    R = v["liner"] / 2 + 1.0 + SHELL
-    return (lambda z: R), v["height"], R
+    # liner = the diameter where the glass meets the table; taper = the glass wall's lean (a takeout
+    # quart is ~5.8 deg), so the sleeve follows a cup that widens upward and seats on it
+    R = v["liner"] / 2 + 1.0 + SHELL; k = math.tan(math.radians(v.get("taper", 0.0)))
+    return (lambda z: R + k * z), v["height"], R + k * v["height"]
 
 
 def _lantern(v):
@@ -391,8 +414,10 @@ _WALL = ("fabric", "droop", "halftone", "colourwork", "mix", "spiral", "shell")
 for key, name, blurb, params in [
     ("cachepot", "Cachepot", "Covers a 3–8 in nursery pot; no water, so any texture works", [
         Param("pot", "Nursery pot", 3, 7, 1, 6, "in"), Param("extra", "Extra height", 0, 40, 1, 8)]),
-    ("sleeve", "Glass sleeve", "Slips over a jar, bottle or test tube — the glass holds the water", [
-        Param("liner", "Glass diameter", 15, 120, 0.5, 70), Param("height", "Height", 30, 240, 1, 110)]),
+    ("sleeve", "Glass sleeve", "Slips over a jar, bottle, test tube or takeout cup — set the taper for a cup that widens upward", [
+        Param("liner", "Glass diameter", 15, 120, 0.5, 70), Param("height", "Height", 30, 240, 1, 110),
+        Param("taper", "Taper", 0, 15, 0.1, 0, "°"), Param("closed", "Closed bottom", 0, 1, 1, 0, "", family="lattice"),
+        Param("straight", "Straight outside", 0, 1, 1, 0, "", family="lattice")]),
     ("lantern", "Tealight lantern", "A tealight pocket in a weighted plinth", [
         Param("diameter", "Diameter", 60, 140, 1, 84), Param("height", "Height", 50, 160, 1, 96)]),
     ("pendant", "Pendant shade", "Hangs from an E27 cord set — the collar has a 40 mm hole", [

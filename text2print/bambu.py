@@ -246,7 +246,9 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
     cfg["filament_density"] = ["1.26"] * n_fil; cfg["filament_cost"] = ["19.99"] * n_fil
     cfg["filament_vendor"] = ["Bambu Lab"] * n_fil; cfg["filament_ids"] = ["GFA00"] * n_fil
     fix_filament_lists(cfg, n_fil)
-    for key, vals in (per_filament or {}).items():
+    per_filament = dict(per_filament or {}); preset = per_filament.pop("_preset", None)
+    stock = {k: (v[0] if isinstance(v, list) and v else v) for k, v in cfg.items()}     # before the per-filament values
+    for key, vals in per_filament.items():
         cfg[key] = [str(v) for v in vals][:n_fil]
     # flag every process value we changed as edited against the system preset; with this list empty, Bambu Studio treats
     # the project as stock "0.20mm Standard" and swaps our profile back to the preset's values on open (285 g, not 159)
@@ -257,7 +259,18 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
     # printed at 50 (Oct 20). Flag them in each filament's own slot so the GUI keeps them.
     fil = [k for k in changed if k.startswith(PER_FILAMENT_PREFIXES) and k not in NOT_PER_FILAMENT]
     proc = [k for k in changed if k not in fil]
-    cfg["different_settings_to_system"] = [";".join(proc)] + [";".join(fil)] * n_fil + [""]
+    # per-filament values a texture family set on top of the filament's preset (the droop fan and nozzle
+    # temperature) are flagged in that filament's slot too, or the GUI puts the preset's values back
+    def own(i):
+        keys = set(fil)
+        for key, vals in per_filament.items():
+            if key in ("filament_settings_id", "filament_ids", "filament_type") or i >= len(vals):
+                continue
+            ref_v = (preset[key][i] if preset and key in preset else stock.get(key))
+            if str(vals[i]) != str(ref_v):
+                keys.add(key)
+        return ";".join(sorted(keys))
+    cfg["different_settings_to_system"] = [";".join(proc)] + [own(i) for i in range(n_fil)] + [""]
 
     content_types = ('<?xml version="1.0" encoding="UTF-8"?>\n<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">\n'
                      ' <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>\n'

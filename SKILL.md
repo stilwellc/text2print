@@ -129,6 +129,21 @@ above (none if top band), range wall_loops=rod_lines over the band, woven speeds
   its stitch bulges, so loops take the knit's colour for free (no extra AMS changes; the colourwork's own ~1 change
   per layer is the cost). Per-loop control in a 3MF: a modifier volume IS honoured for line width and speed; the
   overhang fan can't lower the fan per loop and temperature is per filament/layer — keep the droop fan low.
+- POILU teardrop tiers (Nov 10, second pass; recipe in `examples/poilu_designs.py`): colourwork `loops` with `pinch`
+  (0.3 teardrop .. 1 scallop) builds `droop._tier_rows` — loops packed 0.5 mm apart, brick-offset rows, `collar` (bare
+  neck), `crown_rows` (ruff of long hairpins), `vary`/`stray` (lofty fringe), `flounce*` (ruffles). Loops are ONE
+  layer, 0.8-1.0 mm wide. The project MUST carry `min_bead_width: 200%` (build sets it): at the stock 85 % Arachne
+  prints each 1.0 mm loop as two thin lines with a zigzag end. Check with a G-code layer plot: one bead out and back.
+  Custom shape `neck` + `lip` give a straight neck; chart band `{"course": [slot per layer]}` colours loop rows.
+  Preview = `droop.hang_pile` (strands laid onto the pile) + `colourwork.preview` (knit as the eye reads it): estimates.
+- Loop LOOKS (`text2print/loops.py`, colourwork option `loops`): tiers, shag, fringe, window, petals. Options `loop_colour`
+  auto|rows|salt|chart, `loop_size` small|regular|large. `loops.resolve` returns the chart and the loop spec; pass a
+  dict as `loops` to set every number yourself. Extras: `inlay_text` (words flush under the base in the other colour),
+  `tower=inlay` (no tower; a pad that is PART OF the piece's object primes only the inlay layers), `material=petg`
+  (or a list per colour; Bambu's Generic PETG preset, no +5 C droop offset), custom shape `neck`/`lip`, loops key
+  `bed_reach` (lowest rows may rest on the plate), `arch_spring`/`arch_top`, `edge_taper`, `grow`, `crown_*`.
+  Pieces past the picker's limits: `build.make(..., _raw=True)`; lay the plate out by hand (a 168 x 250 piece with
+  32 mm flat loops fills the P2S bed; a 20 mm tower with brim fits in front of the window, a 30 mm one does not).
 
 ## Extending
 

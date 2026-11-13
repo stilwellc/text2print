@@ -64,8 +64,158 @@ def even_options(o):
     """Options dict -> the even-rows spec (or None). {"rows": "even", "loop_w", "loop_l", "tier", "ruffle", "ruffles"}."""
     if (o or {}).get("rows") != "even":
         return None
-    keys = ("loop_w", "loop_l", "tier", "ruffle", "ruffles", "tall", "line")
+    keys = ("loop_w", "loop_l", "tier", "ruffle", "ruffles", "tall", "line") + TIER_KEYS
     return {k: float(o[k]) for k in keys if o.get(k) not in (None, "")}
+
+
+# Teardrop tiers (Nov 2026, second pass at POILU 3.0): "pinch" switches a row from the open arch to a loop whose two
+# legs leave the wall close together and open into a round end — the teardrop / hairpin of the originals.
+TIER_KEYS = ("pinch", "gap", "vary", "stray", "collar", "crown_rows", "crown_l", "crown_w", "flounce", "flounce_wave",
+             "flounce_waves", "flounce_swirl", "flounce_gain", "l_min", "crown_tier", "crown_step",
+             "petal", "petal_sag", "petals", "petal_share", "petal_seed", "bed_reach",
+             "arch_spring", "arch_top", "edge_taper", "grow")
+
+
+def strand_d(width, layer_h):
+    """Diameter of the round strand a width x layer_h line becomes when it is laid in air."""
+    return 2.0 * math.sqrt(width * layer_h / math.pi)
+
+
+def petal_field(th, z, P, D, n):
+    """(see petal_slot for a petal's colour) Overlapping petals (the frills of POILU's ruffled pieces): rows of n lobes around, every other row half a lobe
+    over, each lobe's hem a hanging arc D mm deep, rows P mm apart, all gently warped so no two lobes match.
+    -> (u = mm above the hem of the lobe that owns the point, lobe id). numpy-friendly."""
+    th = np.asarray(th, float); z = np.asarray(z, float)
+    tw = th + 0.10 * np.sin(z / 17.0 + 1.3); zw = z + 0.18 * P * np.sin(3 * th + z / 23.0)
+    best_u = np.full(np.broadcast(th, z).shape, np.inf); best_id = np.zeros(best_u.shape, np.int64)
+    for par in (0, 1):
+        c = tw * n / (2 * math.pi) + 0.5 * par; col = np.floor(c); x = c - col - 0.5
+        g = zw + D * (1 - 4 * x * x) - par * P
+        k = np.floor(g / (2 * P)); u = g - 2 * P * k
+        lid = (par + 2 * (col.astype(np.int64) % n) + 2 * n * (k.astype(np.int64) + 50))
+        take = u < best_u
+        best_u = np.where(take, u, best_u); best_id = np.where(take, lid, best_id)
+    return best_u, best_id
+
+
+def petal_slot(lid, share=0.38, seed=3):
+    """Colour slot of a petal: 1 for `share` of them (hash of the lobe id), else 0."""
+    return (((np.sin((np.asarray(lid) + seed) * 12.9898) * 43758.5453) % 1.0) < share).astype(int)
+
+
+def _teardrop(L, W, a, n_arc=13):
+    """Centreline of one loop in its own frame: u = mm out from the wall, s = mm sideways. Legs start at s = +-a,
+    run straight to the tangent points of a round end (radius W/2) whose far side sits L out. a = W/2 gives a
+    straight-sided scallop, a small a the pinched teardrop. A loop too short for a round end is a half ellipse."""
+    rho = W / 2.0; c = L - rho; a = min(a, rho)
+    if c <= 0.25 * rho:
+        t = np.linspace(0.0, math.pi, n_arc + 4)
+        return L * np.sin(t), rho * np.cos(t) * (a + (rho - a) * np.sin(t)) / rho
+    d = math.hypot(c, a)
+    beta = math.atan2(a, -c) - math.acos(min(1.0, rho / d))
+    ang = np.linspace(beta, -beta, n_arc)
+    au, as_ = c + rho * np.cos(ang), rho * np.sin(ang)
+    k = np.array([0.0, 0.5])                                  # the leg: root and one mid point (a straight line)
+    lu, ls = k * au[0], a + k * (as_[0] - a)
+    return np.concatenate([lu, au, lu[::-1]]), np.concatenate([ls, as_, -ls[::-1]])
+
+
+def _loop_ribbon(theta, W, L, z0, height, width, r_of_z, embed, pinch):
+    """One teardrop loop as a printable flat ribbon: straight in its own plane (not wrapped round the wall), both
+    roots sunk `embed` into the wall."""
+    r_w = r_of_z(z0 + height / 2)
+    a = max(pinch * W / 2.0, (width + 0.4) / 2.0)             # the legs keep 0.4 mm of air between them at the root
+    u, s_ = _teardrop(L, W, a)
+    u = np.concatenate([[-embed], u, [-embed]]); s_ = np.concatenate([[s_[0]], s_, [s_[-1]]])
+    c, sn = math.cos(theta), math.sin(theta)
+    P = np.column_stack([(r_w + u) * c - s_ * sn, (r_w + u) * sn + s_ * c])
+    return _strip(P, width, z0, height)
+
+
+def _tier_rows(r_of_z, height, nz, even, seed=11, z_range=None, panels=None):
+    """Teardrop tiers: rows of identical loops packed until neighbours nearly touch, each row half a loop off the
+    one below, the top row landing exactly under the bare collar. even = {
+      loop_w: the loop's width (centreline, mm), loop_l: its reach, tier: row spacing, pinch: root spacing as a
+      fraction of the width (0.3 teardrop .. 1 scallop), gap: air between neighbours (0.5), line: strand width,
+      collar: bare band under the rim (mm), crown_rows / crown_l / crown_w: the top rows as a ruff of long narrow
+      hairpins (crown_tier: their spacing, crown_step: mm shorter per row going up), vary: 0..1 random shortening (lofty fringe), stray: share of loops a third longer,
+      flounce: period (mm) of flounces — loops lengthen up each flounce (flounce_gain mm per mm), so the pile swells
+      to a hem and steps back under it; flounce_wave / flounce_waves / flounce_swirl: the hem's rise and fall around the piece,
+      petal / petal_sag / petals: petal-shaped frills instead (petal_field), l_min: the shortest loop}.
+    -> [(theta, width, reach, z, strand_h, 0, line)]"""
+    lh, lw = nz.layer_h, nz.line_w
+    tall = int(min(4, even.get("tall", 2))); strand_h = tall * lh
+    width = float(even.get("line", 1.15 * lw)); gap = float(even.get("gap", 0.5))
+    W0 = float(even.get("loop_w", 4.5)); L0 = float(even.get("loop_l", 9.0))
+    tier = round(max(float(even.get("tier", 2.8)), (tall + 1) * lh) / lh) * lh
+    vary = float(even.get("vary", 0.0)); stray = float(even.get("stray", 0.0))
+    crown = int(even.get("crown_rows", 0)); cl = float(even.get("crown_l", 1.8 * L0)); cw = float(even.get("crown_w", 0.62 * W0))
+    P = float(even.get("flounce", 0.0)); A = float(even.get("flounce_wave", 0.0)); nw = int(even.get("flounce_waves", 3))
+    gain = float(even.get("flounce_gain", 1.12))            # 1.12: every loop ends at the hem; less: rows peek out as scallops
+    swirl = float(even.get("flounce_swirl", 0.0)); l_min = float(even.get("l_min", max(3.0, 0.8 * W0)))
+    a_spring = float(even.get("arch_spring", 0.0)); a_top = float(even.get("arch_top", 0.0))
+    taper = int(even.get("edge_taper", 0)); grow = float(even.get("grow", 0.0))
+    pet = float(even.get("petal", 0.0)); pet_sag = float(even.get("petal_sag", 0.7 * pet)); pet_n = int(even.get("petals", 5))
+    if z_range is None:
+        z_range = (0.0, height - 1.0)
+    z_hi = z_range[1] - strand_h - float(even.get("collar", 0.0))
+    # bed_reach: rows start at the very first wall layers and a loop may be this much LONGER than its height above
+    # the bed, so the lowest rows come to rest on the plate and flare (default: every loop stops CLEAR short of it)
+    reach_bed = even.get("bed_reach")
+    z_lo = z_range[0] if reach_bed is not None else max(z_range[0], CLEAR + l_min)
+    n_rows = int((z_hi - z_lo) / tier) + 1
+    out = []
+    # crown_tier: the crown rows sit this close together (a fringe of several colours on consecutive layers, as
+    # on POILU's rims); crown_step: each crown row above the lowest is this much shorter, so every colour shows
+    ct = round(max(float(even.get("crown_tier", tier)), (tall + 1) * lh) / lh) * lh; cstep = float(even.get("crown_step", 0.0))
+    drop = max(0, crown - 1) * (tier - ct)                     # the regular rows move up by what the crown saves
+    n_rows = int((z_hi - z_lo + drop) / tier) + 1
+    for k in range(n_rows):                                    # k = 0 is the TOP row: the collar line stays crisp
+        z = z_hi - k * ct if k < crown else z_hi - k * tier + drop
+        row = n_rows - 1 - k; r = r_of_z(z)
+        W, L = (cw, max(l_min, cl - (crown - 1 - k) * cstep)) if k < crown else (W0, L0)
+        pitch = W + width + gap
+        # arch: the bare window between panels keeps its width up to arch_spring (mm), then closes in a round arch at
+        # arch_top; above it (and in the crown rows) the loops run right round. edge_taper: the first loops beside
+        # the window are short and lengthen over that many loops, so the fringe swells away from a crisp edge.
+        # grow: loops at the top are this fraction shorter than at the foot.
+        row_panels = panels
+        if panels and (k < crown or (a_top > a_spring and z >= a_top)):
+            row_panels = None
+        elif panels and a_top > a_spring and z > a_spring:
+            shut = 1.0 - math.sqrt(max(0.0, 1.0 - ((z - a_spring) / (a_top - a_spring)) ** 2))
+            row_panels = [(c0_, hw_ + (math.pi / len(panels) - hw_) * shut) for c0_, hw_ in panels]
+        for c0, hw in (row_panels or [(0.0, math.pi)]):
+            arc = 2 * hw * r
+            n = max(1, int(arc / pitch)) if row_panels else max(3, int(arc / pitch))
+            step = (2 * hw / n) if not row_panels else pitch / r
+            start = c0 - hw + (0.5 * step if not row_panels else (hw - (n - 1) * step / 2))
+            odd = row % 2
+            n_here = n - (1 if (row_panels and odd) else 0)
+            for i in range(n_here):
+                th = start + (i + 0.5 * odd) * step
+                Lk = L
+                if k >= crown and grow:
+                    Lk *= 1.0 - grow * (z - z_lo) / max(z_hi - z_lo, 1e-6)
+                if k >= crown and row_panels and taper:
+                    e = min(i, n_here - 1 - i)
+                    if e < taper:
+                        Lk *= 0.35 + 0.65 * e / taper
+                if k >= crown:
+                    if pet > 0:
+                        Lk = min(L, l_min + gain * float(petal_field(th, z, pet, pet_sag, pet_n)[0]))
+                    elif P > 0:
+                        u = (z - A * math.sin(nw * th + swirl * z)) % P
+                        Lk = min(L, l_min + gain * u)
+                    if vary:
+                        Lk *= 1.0 - vary * _h(seed, "v", row, round(th, 4))
+                    if stray and _h(seed, "s", row, round(th, 4)) < stray:
+                        Lk *= 1.35
+                Lk = min(Lk, z + float(reach_bed)) if reach_bed is not None else min(Lk, z - CLEAR)
+                if Lk < max(2.2, 0.6 * W):
+                    continue
+                out.append((th % (2 * math.pi), W, Lk, z, strand_h, 0.0, width))
+    return out[::-1]                                           # bottom row first: print order
 
 
 def _h(*key):
@@ -282,42 +432,136 @@ def colourwork_loops(prof, lh, lw, even, info, panels=None, mode="chart", seed=1
     turns layer by layer, so a one-layer loop is whatever colour its layer is — free per-LOOP colour. mode:
       "chart": each loop goes on the nearest layer where ITS stitch bulges, so the loops continue the knit's picture
       "layer": each loop keeps its row's layer (rows mix the band's colours)
+      "petal": each loop on the nearest layer of its petal's colour (petal_field / petal_slot)
       int slot: every loop on the nearest layer of that colour.
-    -> ({slot: [ribbons]}, spots, reach). Loops never add AMS changes."""
+    A loop whose layer is already taken at its place moves to the next layer that suits it (never dropped while one
+    is free within 5 layers). -> ({slot: [ribbons]}, spots, reach). Loops never add AMS changes."""
     import types
     seq, n_floor, cols, slot_seq = info["seq"], info["floor_layers"], info["cols"], info["slot_seq"]
     nz = types.SimpleNamespace(layer_h=lh, line_w=lw)
     ev = dict(even, tall=1, line=float(even.get("line", lw)))
+    tiers = "pinch" in ev
     z_lo, z_hi = (n_floor + 2) * lh, info["wall_top"] - 2 * lh
-    spots = _even_rows(prof, info["wall_top"], nz, ev, seed, (z_lo, z_hi), panels)
-    placed = []
+    spots = (_tier_rows if tiers else _even_rows)(prof, info["wall_top"], nz, ev, seed, (z_lo, z_hi), panels)
+    air = (ev["line"] + float(ev.get("gap", 0.5))) / 2 - 1e-3 if tiers else 1.5 * ev["line"]
+    taken, by_slot, out_spots = {}, {}, []
+    two_pi = 2 * math.pi
+
+    def free(L, lo, hi):
+        for a_, b_ in taken.get(L, ()):
+            for off in (-two_pi, 0.0, two_pi):
+                if lo < b_ + off and a_ + off < hi:
+                    return False
+        return True
+
     for th, ch, bu, z, hh, lean, w in spots:
-        L0 = int(round(z / lh)); col = int(th / (2 * math.pi) * cols) % cols; L = L0
+        L0 = int(round(z / lh)); col = int(th / two_pi * cols) % cols
+        half = (ch / 2 + air) / prof(z); lo, hi = th - half, th + half
+        pick = None; want = mode
+        if mode == "petal":                                        # the loop takes its OWN petal's colour, whatever
+            lid = petal_field(th, z, float(ev["petal"]), float(ev.get("petal_sag", 0.7 * ev["petal"])), int(ev.get("petals", 5)))[1]
+            want = int(petal_slot(lid, float(ev.get("petal_share", 0.38)), int(ev.get("petal_seed", 3))))
+            if want not in slot_seq[max(0, L0 - 5):L0 + 6]:        # the knit cell under it says: no such layer near
+                want = "layer"
         for d in (0, 1, -1, 2, -2, 3, -3, 4, -4, 5, -5):
             Lc = L0 + d; k = Lc - n_floor
             if not (0 <= k < len(seq)) or Lc >= len(slot_seq):
                 continue
-            if mode == "layer":
-                L = Lc; break
-            if isinstance(mode, int) or str(mode).isdigit():
-                if slot_seq[Lc] == int(mode):
-                    L = Lc; break
-                continue
-            kind, slot, data = seq[k]
-            if kind == "plain" or data is None or bool(np.asarray(data[0])[col]):
-                L = Lc; break
-        z0 = (L + 0.25) * lh                                       # inside layer L only: the slicer samples mid-layer
-        placed.append((th, ch, min(bu, z0 - CLEAR), z0, 0.5 * lh, 0.0, w, L))
-    placed = [p_ for p_ in placed if p_[2] >= 2.5]
-    kept = _never_touch([p_[:7] for p_ in placed], prof, lambda z: z)
-    keep_set = {(round(t[0], 6), round(t[3], 6)) for t in kept}
-    by_slot, out_spots = {}, []
-    for th, ch, bu, z0, hh, lean, w, L in placed:
-        if (round(th, 6), round(z0, 6)) not in keep_set:
+            if isinstance(want, int) or str(want).isdigit():
+                ok = slot_seq[Lc] == int(want)
+            elif want == "layer":
+                ok = True
+            else:
+                kind, slot, data = seq[k]
+                ok = kind == "plain" or data is None or bool(np.asarray(data[0])[col])
+            if ok and free(Lc, lo, hi):
+                pick = Lc; break
+        if pick is None:
             continue
-        rib = _ribbon(th, ch, bu, z0, hh, w, prof, 0.55 * lw, 0.55, 0.0)
-        by_slot.setdefault(slot_seq[L], []).append(rib); out_spots.append(((th, ch, bu, z0, hh, 0.0, w), slot_seq[L], rib))
+        z0 = (pick + 0.25) * lh                                    # inside its layer only: the slicer samples mid-layer
+        bu = min(bu, z0 + float(ev["bed_reach"])) if ev.get("bed_reach") is not None else min(bu, z0 - CLEAR)
+        if bu < 2.2:
+            continue
+        taken.setdefault(pick, []).append((lo, hi))
+        if tiers:
+            rib = _loop_ribbon(th, ch, bu, z0, 0.5 * lh, w, prof, 0.55 * lw, float(ev["pinch"]))
+        else:
+            rib = _ribbon(th, ch, bu, z0, 0.5 * lh, w, prof, 0.55 * lw, 0.55, 0.0)
+        slot = slot_seq[pick]
+        by_slot.setdefault(slot, []).append(rib); out_spots.append(((th, ch, bu, z0, 0.5 * lh, 0.0, w), slot, rib))
     return by_slot, out_spots, max([s_[0][2] for s_ in out_spots] or [0.0])
+
+
+def _tube(P, r, sides=5):
+    """Polyline P (k, 3) -> a closed tube of radius r (preview strands)."""
+    T = np.empty_like(P); T[1:-1] = P[2:] - P[:-2]; T[0] = P[1] - P[0]; T[-1] = P[-1] - P[-2]
+    T /= np.maximum(np.linalg.norm(T, axis=1), 1e-9)[:, None]
+    ref = np.array([0.0, 0.0, 1.0]); N = np.cross(T, ref)
+    bad = np.linalg.norm(N, axis=1) < 1e-6
+    N[bad] = np.cross(T[bad], [1.0, 0.0, 0.0])
+    N /= np.linalg.norm(N, axis=1)[:, None]; B = np.cross(T, N)
+    a = np.linspace(0, 2 * math.pi, sides, endpoint=False)
+    V = (P[:, None, :] + r * (np.cos(a)[None, :, None] * N[:, None, :] + np.sin(a)[None, :, None] * B[:, None, :])).reshape(-1, 3)
+    k = len(P); i = np.arange(k - 1)[:, None] * sides; j = np.arange(sides)[None, :]; jn = (j + 1) % sides
+    F = np.vstack([np.column_stack([(i + j).ravel(), (i + jn).ravel(), (i + sides + jn).ravel()]),
+                   np.column_stack([(i + j).ravel(), (i + sides + jn).ravel(), (i + sides + j).ravel()])])
+    return V, F
+
+
+def hang_pile(loops, prof, lh, pinch, seed=11, rest=0.8, bend=2.2):
+    """Preview only: the loops as round strands, laid in print order onto the pile. A loop leaves the wall almost
+    level, then falls as steeply as its stiffness (bend radius `bend` mm) and whatever is already under it allow:
+    the wall where it widens, and the loops of the rows below, which it comes to rest ON (it adds `rest` strand
+    diameters to the pile for the rows above). Dense tiers therefore stand off like scales and long fringe builds a
+    lofty curtain, as on the printed pieces. loops: [((theta, W, L, z, hh, lean, line), key)] bottom row first.
+    -> {key: mesh}. An estimate, not a simulation; the print files always carry the flat loops."""
+    nb = 360; dz = 0.25; ds = 0.4
+    z_top = max((sp[3] for sp, _ in loops), default=1.0) + 2.0
+    zg = np.arange(0.0, z_top + dz, dz)
+    env = np.tile(np.array([prof(z) for z in zg]), (nb, 1))            # outermost matter per (angle bin, height)
+    cands = np.radians([88.0, 76.0, 62.0, 48.0, 34.0, 20.0, 8.0, 0.0])
+    out = {}
+    for n_, ((th, W, L, z, hh, lean, w), key) in enumerate(loops):
+        d = strand_d(w, lh if hh < lh else hh); r_a = prof(z)
+        hwid = (W / 2) / max(r_a, 1.0)
+        b0 = int(math.floor((th - hwid) / (2 * math.pi) * nb)); b1 = int(math.floor((th + hwid) / (2 * math.pi) * nb))
+        bins = np.arange(b0, b1 + 1) % nb
+        col = env[bins].max(0)
+        steps = max(2, int(math.ceil(L / ds))); h_ = L / steps
+        dphi = h_ / bend * (0.85 + 0.3 * _h(seed, "stiff", n_))
+        phi = math.radians(6.0 + 10.0 * _h(seed, "exit", n_))
+        rr, zz = [r_a], [z]
+        for _ in range(steps):
+            r0, z0 = rr[-1], zz[-1]; done = False
+            for c in cands:
+                c = min(c, phi + dphi)                                    # never bend tighter than its stiffness
+                r1, z1 = r0 + h_ * math.cos(c), z0 - h_ * math.sin(c)
+                if z1 < d / 2:
+                    continue
+                if r1 >= col[min(len(zg) - 1, max(0, int(round(z1 / dz))))] + 0.5 * d:
+                    phi = c; done = True; break
+            if not done:
+                r1, z1 = r0 + h_, z0; phi = 0.0
+            rr.append(r1); zz.append(z1)
+        rr, zz = np.array(rr), np.array(zz)
+        order = np.argsort(zz)
+        zi = np.arange(max(0, int(math.ceil(zz.min() / dz))), min(len(zg), int(math.floor(z / dz)) + 1))
+        if len(zi):
+            add = np.interp(zg[zi], zz[order], rr[order]) + rest * d
+            env[np.ix_(bins, zi)] = np.maximum(env[np.ix_(bins, zi)], add[None, :])
+        aa = max(pinch * W / 2.0, (w + 0.4) / 2.0)
+        u, s_ = _teardrop(L, W, aa, n_arc=11)
+        u = np.clip(u, 0.0, L)
+        sway = 0.10 * (_h(seed, "sway", n_) - 0.5) * (1.0 + L / 8.0)
+        s_ = s_ + sway * u                                               # a little sideways lean, more on long loops
+        sg = np.linspace(0.0, L, steps + 1)
+        ru, zu = np.interp(u, sg, rr), np.interp(u, sg, zz)
+        c, sn = math.cos(th), math.sin(th)
+        P = np.column_stack([ru * c - s_ * sn, ru * sn + s_ * c, zu])
+        V, F = _tube(P, d / 2)
+        acc = out.setdefault(key, [[], [], 0])
+        acc[0].append(V); acc[1].append(F + acc[2]); acc[2] += len(V)
+    return {k: trimesh.Trimesh(np.vstack(v[0]), np.vstack(v[1]), process=False) for k, v in out.items()}
 
 
 def even_hang(even):

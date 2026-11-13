@@ -16,6 +16,7 @@ A chart is a list of BANDS, bottom to top (options["chart"]), each one of:
      "colours": [...], + picture options (text, font, picture_place, ...)}
     {"plain": slot, "mm": 6}                                                           one colour, no changes
     {"stripes": [slot, slot, ...], "mm": 10, "layers": 2}                              thin stacked stripes
+    {"course": [slot, slot, ...]}                                                      one colour per layer, spelled out
 
 Art legend: "." ground, "X" motif, "o" accent (colours[0], [1], [2]). Motifs tile an integer number of times
 around (spare columns spread as ground between repeats, so nothing is cut at the seam); "once": true places the art
@@ -179,6 +180,10 @@ def plan(chart, cols, n_layers, lh, row_mm, col_mm, econ, options):
         if "plain" in b:
             last[0] = int(b["plain"])
             return [("plain", int(b["plain"]), None)] * max(1, int(round(float(b.get("mm", 4)) / lh)))
+        if "course" in b:                                      # one colour per LAYER, spelled out (row-coloured tiers)
+            out = [("plain", int(s), None) for s in b["course"]] or [("plain", 0, None)]
+            last[0] = out[-1][1]
+            return out
         if "stripes" in b:
             seq = [int(s) for s in b["stripes"]] or [0]; per = max(1, int(b.get("layers", 2)))
             n = max(1, int(round(float(b.get("mm", 8)) / lh)))
@@ -250,7 +255,19 @@ def build(shape, v, nz, style="jacquard", chart=None, size="regular", band=1, ri
     parts = {}
     first = seq[0][1] if seq else 0
     disc = trimesh.creation.cylinder(radius=prof(floor_t / 2), height=n_floor * lh, sections=max(96, cols * 2))
-    disc.apply_translation([0, 0, n_floor * lh / 2]); parts.setdefault(first, []).append(disc)
+    disc.apply_translation([0, 0, n_floor * lh / 2])
+    inlay_slot = None
+    inl = (options or {}).get("floor_inlay")            # {"geom": shapely shape (mm, centred), "slot", "layers": 2}
+    if inl:                                             # a mark inlaid flush in the bottom face, read from below
+        from shapely import affinity
+        from . import extras
+        g = affinity.scale(inl["geom"], -1, 1, origin=(0, 0)) if inl.get("mirror", True) else inl["geom"]
+        polys = list(g.geoms) if hasattr(g, "geoms") else [g]
+        h = int(inl.get("layers", 2)) * lh
+        disc = extras._tm(extras._m3d(disc) - extras.prism(polys, -0.1, h))
+        inlay_slot = int(inl["slot"]) if inl.get("slot") is not None else (1 if first == 0 else 0)   # not the floor's colour
+        parts.setdefault(inlay_slot, []).append(extras._tm(extras.prism(polys, 0.0, h)))
+    parts.setdefault(first, []).append(disc)
     slots_seq = [first] * n_floor
     for k, (kind, slot, data) in enumerate(seq):
         L = n_floor + k; z0, z1 = L * lh, (L + 1) * lh; zm = (z0 + z1) / 2
@@ -279,4 +296,61 @@ def build(shape, v, nz, style="jacquard", chart=None, size="regular", band=1, ri
     swaps = sum(1 for a_, b_ in zip(slots_seq, slots_seq[1:]) if a_ != b_)
     meshes = {s: trimesh.util.concatenate(ms) for s, ms in parts.items() if ms}
     return meshes, dict(layers=len(slots_seq), cols=cols, stitch_mm=round(col_mm, 2), layer_h=lh, line_w=lw,
-                        floor_layers=n_floor, swaps=swaps, slot_seq=slots_seq, seq=seq, wall_top=(n_floor + len(seq)) * lh)
+                        floor_layers=n_floor, swaps=swaps, slot_seq=slots_seq, seq=seq, wall_top=(n_floor + len(seq)) * lh,
+                        floor_slot=first, inlay_slot=inlay_slot)
+
+
+def preview(prof, info, style="jacquard", sub=6):
+    """Preview only: the wall as the eye reads it. In each layer a stitch's crown takes the colour that bulges there
+    (its own layer's, or the neighbouring layer's whose stitch stands in front) and the valleys between stitches keep
+    the layer's own colour, so the chart shows with the softened contrast a real colour-knit has. -> {slot: mesh}"""
+    seq, n_floor, cols, lh, lw = info["seq"], info["floor_layers"], info["cols"], info["layer_h"], info["line_w"]
+    n = len(seq)
+    own = np.array([s_[1] for s_ in seq])
+    on = np.array([np.ones(cols, bool) if (s_[0] == "plain" or s_[2] is None) else np.asarray(s_[2][0], bool) for s_ in seq])
+    phase = np.array([0.5 if (s_[0] == "plain" or s_[2] is None) else s_[2][1] for s_ in seq])
+    plain = np.array([s_[0] == "plain" for s_ in seq])
+    app = np.where(on, own[:, None], -1)
+    for d in range(1, 9):                                       # a flat stitch shows the nearest layer that bulges
+        for sgn in (1, -1):
+            sh = np.full_like(app, -1)
+            if sgn > 0:
+                sh[:-d] = np.where(on[d:], own[d:, None], -1)
+            else:
+                sh[d:] = np.where(on[:-d], own[:-d, None], -1)
+            app = np.where(app < 0, sh, app)
+    app = np.where(app < 0, own[:, None], app)
+    n_th = cols * sub
+    th = np.linspace(0, 2 * np.pi, n_th, endpoint=False)
+    wave = 0.5 - 0.5 * np.cos(cols * th)
+    zc = (n_floor + np.arange(n) + 0.5) * lh
+    R = np.array([prof(z) for z in zc])
+    dome = np.where(plain, 0.0, np.sin(np.pi * phase) ** 0.7 if style == "beads" else 1.0)
+    rad = R[:, None] + 0.5 * lw * dome[:, None] * wave[None, :] - 0.12 * lw * (1 - wave[None, :])
+    c, s_ = np.cos(th), np.sin(th)
+    V = np.empty((n, 2, n_th, 3))
+    rad_top = np.vstack([rad[1:], rad[-1:]])                     # each strip leans to meet the next layer: on a steep
+    V[:, 0, :, 0] = rad * c; V[:, 0, :, 1] = rad * s_            # shoulder upright strips leave slits you see through
+    V[:, 1, :, 0] = rad_top * c; V[:, 1, :, 1] = rad_top * s_
+    V[:, 0, :, 2] = (zc - lh / 2)[:, None]; V[:, 1, :, 2] = (zc + lh / 2)[:, None]
+    V = V.reshape(-1, 3)
+    j = np.arange(n_th); jn = (j + 1) % n_th
+    crown = (j % sub >= 1) & (j % sub < sub - 1)
+    col_of = j // sub
+    cell = np.where(crown[None, :], app[:, col_of], own[:, None])           # (layers, n_th) slot per quad
+    base = (np.arange(n) * 2 * n_th)[:, None]
+    a0 = base + j[None, :]; a1 = base + jn[None, :]; b0 = a0 + n_th; b1 = a1 + n_th
+    out = {}
+    for slot in np.unique(cell):
+        m = cell == slot
+        F = np.vstack([np.column_stack([a0[m], a1[m], b1[m]]), np.column_stack([a0[m], b1[m], b0[m]])])
+        out[int(slot)] = [trimesh.Trimesh(V, F, process=False)]
+    first = int(np.bincount(own).argmax()) if n else 0          # the inside shows the wall's main colour
+    zs = np.concatenate([[0.0], zc, [zc[-1] + lh / 2]]) if n else np.array([0.0, 1.0])
+    inner = [(max(prof(z) - lw, 1.0), z) for z in zs]; outer = [(max(prof(z) - 0.4 * lw, 1.2), z) for z in zs[::-1]]
+    liner = trimesh.creation.revolve(np.array([(0.0, 0.0)] + [(prof(0.0), 0.0)] + outer[::-1][1:] + inner[::-1] + [(0.0, n_floor * lh)]),
+                                     sections=max(96, cols))
+    out.setdefault(first, []).append(liner)
+    last = int(own[-1]) if n else first
+    out.setdefault(last, []).append(_ring(th, rad[-1] - lw, rad[-1], zc[-1] - lh / 2, zc[-1] + lh / 2))
+    return {k: trimesh.util.concatenate(ms) for k, ms in out.items()}

@@ -11,7 +11,8 @@
 <p align="center"><img src="docs/studio.png" alt="The text2print studio: shapes and patterns on the left, a live 3D preview on the print plate, and the print card with time, filament and an Open in Bambu Studio button" width="920"></p>
 
 text2print makes textured objects for 3D printing. Every texture is a construction, not a surface effect:
-woven rods stacked course by course into open basketry, or printed fabric whose layers zigzag in mid-air.
+woven rods stacked course by course into open basketry, printed fabric whose layers zigzag in mid-air, or
+colour-knit walls hung with thousands of single-strand loops.
 You pick a shape, a texture, sizes, colours and a nozzle; it builds the object live and hands you a
 Bambu Studio project with the right settings already in it.
 
@@ -33,6 +34,8 @@ Everything else lives in the studio too:
 
 - **Up to 4 colours.** Any fabric or droop piece (and woven pieces coloured by height) splits into 1–4 colour
   bands or repeating stripes, cut exactly on layer boundaries. Mixes give each band its own AMS slot.
+- **PLA or PETG.** Every texture has a *Filament* switch. PETG takes Bambu's own Generic PETG preset for the P2S,
+  per colour, with the bed held at 60 °C.
 - **Lids.** Cups, vases, bowls, dishes, trays, baskets, catch-alls and platters can get a lid, set up in its own
 **Lid** section. By default the lid gets the piece's own treatment: a short cap of the same shape, texture and
 colours, printed top-face down, whose rim lands on the piece's rim so the texture carries across. Or pick any look
@@ -51,6 +54,7 @@ python -m text2print list                                     # shapes, textures
 python -m text2print make tray twill --set width=117 --colours "#8B3A2F,#EDE3D1" --out ~/Downloads/tray --slice
 python -m text2print make vase wave --set height=200 --nozzle 0.6 --out ~/Downloads/vase
 python -m text2print make cup halftone --nozzle 0.8 --image flames.png --colours "#F3D34A,#C3302C" --out ~/Downloads/flames
+python -m text2print make vase jacquard --option loops=tiers --option band=2 --colours "#2E4E7E,#E8752F,#F3D34A" --out ~/Downloads/tiers
 ```
 
 ## Textures
@@ -158,6 +162,39 @@ third colour or mix colours inside a course. Mixes work on cup, vase, bowl and g
 # mixes are easiest in the studio; every mix is a shareable link (/?shape=vase&texture=mix&mix=[...])
 ```
 
+## Loops on colour-knit
+
+<p align="center"><img src="docs/loops.png" alt="Five loop looks on the same pear-shaped vase: teardrop tiers fading blue to orange to yellow, a black and white shag, tan fringe panels over a wave knit, a black fringe around a salt-speckled window, and red and white petal ruffles" width="920"></p>
+
+A colour-knit wall (Jacquard or Bead knit) already changes colour layer by layer. Hang a loop that is one layer
+tall from it and the loop takes that layer's colour, so thousands of loops in two or three colours cost no AMS
+changes beyond the knit's own. The printer lays each loop flat in the air and it droops as it cools; the studio's
+*After droop* view shows them hung. Pick a look under **Loops**:
+
+| Look | What it is | Default colours |
+|---|---|---|
+| Teardrop tiers | pinched teardrop loops in brick-offset rows, with a fringe of long hairpins under the rim | by row, faded up the piece |
+| Shag | short scallops in close rows: a shaggy coat | by row |
+| Fringe panels | two side panels of long, uneven hairpins; the knit shows front and back | follow the chart |
+| Fringe and a window | the fringe wraps the piece and leaves one arched knit window; loops are short beside the window and lengthen away from it and toward the foot | salt |
+| Petal ruffles | scallops that lengthen down overlapping petals, each petal one colour | by petal |
+
+**Loop colours** picks the plan: *By row* gives each loop row, and the wall it hangs from, one colour (two or three
+colours fade up the piece by error diffusion, so the change reads as mixing, not bands); *Salt* scatters single
+stitches of the second colour through the first and keeps about half the stitch rows one colour, because a
+one-colour row costs no changes; *Follow the chart* keeps any chart or picture you chose and matches each loop to
+the stitch under it. **Loop size** scales the loops. *Layers per colour: 2* halves the changes.
+
+Two more things a looped piece can carry, from the command line or a design file:
+
+- `inlay_text=hello` inlays words flush under the base in the other colour, two layers deep, mirrored to read
+  from below.
+- `tower=inlay` drops the prime tower and primes only the inlay's layers on a small pad beside the piece. Every
+  other change then starts unprimed, at the back seam.
+
+Loops have not been print-verified on any nozzle yet. The renders are an estimate of how they hang. Print a small
+piece first; PETG droops and strings more than PLA.
+
 ## Custom pictures and patterns
 
 Every picture texture (halftone, wall lithophane, flat lithophane, CMYK tile, halftone mix bands) reads from one
@@ -204,9 +241,9 @@ connection*, which logs in and reads the printer's status and AMS colours withou
 | Vase | woven, fabric, droop or halftone | belly, height, neck |
 | Goblet | woven, fabric, droop or halftone | a cup on a stem and foot |
 | Candle holder | droop | a solid bell with a socket for a taper candle |
-| Your shape | woven, fabric, droop, halftone, mix, vase mode, shell | widest, height, and a 5-point drawn silhouette |
+| Your shape | woven, fabric, droop, halftone, mix, vase mode, shell | widest, height, a 5-point drawn silhouette, and an optional straight neck and flared lip |
 | Cachepot | woven, fabric, halftone, vase mode, shell | sized to a 3–7 in nursery pot, with a foot ring that lifts it |
-| Liner sleeve | woven, fabric, vase mode, shell | slides over a glass liner (a cylinder vase or jar) |
+| Liner sleeve | woven, fabric, vase mode, shell | slides over a glass liner (a cylinder vase or jar); set a taper for a cup that widens upward, and (woven) a closed bottom or a straight outside |
 | Tealight lantern | fabric, shell, halftone | plinth with a 41 × 17 mm tealight pocket |
 | Pendant shade | fabric, droop, shell | top plate with a 40 mm hole for an E27 socket ring |
 | Puck lamp | fabric, shell, halftone | collar pocket for a 59 × 18 mm LED puck, with a cable notch |
@@ -254,6 +291,10 @@ nozzle) with every `inherits` link resolved, so projects don't depend on your Ba
 at its stock 10 mm/s the print takes twice as long for nothing); fabric prints as a 2-loop shell with
 0% infill and no top layers. Objects are capped at 200 mm so the prime tower always fits back-right.
 
+PETG (`material=petg`, or one material per colour) swaps in Bambu's `Generic PETG @BBL P2S` filament preset for
+each AMS slot and keeps the texture family's own cooling on top of it. Only loops on colour-knit were set up
+around PETG; everything else was tuned on PLA Matte, and the app says so when you switch.
+
 ## What the slicer confirmed
 
 - Bambu Studio's CLI honours each part's AMS slot once every per-filament setting list is the right length, so
@@ -276,6 +317,18 @@ at its stock 10 mm/s the print takes twice as long for nothing); fabric prints a
   Bambu arc-fits, so a round part is mostly arcs; a G1-only, positive-E-only sum is 3× low then 46 % high. Not
   toolpath length × filament area (≈9× too high). `bambu.support_grams` lands within 0.1 g of the declared weight.
 
+- A loop must print as ONE bead. At the stock `min_bead_width` (85 %) Arachne traces each 1.0 mm loop as two thin
+  lines with a zigzag at the round end; 150 % still split 3.5 % of them; 200 % gives one full-width strand out and
+  back. Check it in the G-code: no loop length narrower than the strand.
+- A modifier volume is honoured for line width and speed, but it cannot lower the fan for part of a layer, and
+  temperature is per filament and per layer. Loop cooling is therefore a per-filament setting.
+- Filament-preset keys (fan, temperatures) changed on top of a preset must be flagged per filament slot in
+  `different_settings_to_system`, or Bambu Studio's window puts the preset's values back on open.
+- A prime pad as a second object made Bambu Studio's window show the pad alone, though the CLI sliced both. The pad
+  is now extra parts of the piece's own object.
+- With the prime tower off, purge moves at the chute appear in the G-code as wall-type extrusions far from the
+  piece; leave them out of any wall-continuity check.
+
 ## Laws
 
 These are print-verified, and the tests enforce the geometric ones.
@@ -288,6 +341,12 @@ These are print-verified, and the tests enforce the geometric ones.
 - Droop strands are one extrusion wide, at most 4 layers tall, never touch each other in the mesh, and start high
   enough that the droop can't reach the bed. They print with overhang slow-down off, fan at 20 % and the nozzle
   5 °C hotter; slow or cold strands freeze where they are laid.
+- Loops on colour-knit are one layer tall and one bead wide (0.8-1.0 mm), anchored in the wall at both ends, and never
+  share a layer where they overlap: a loop whose layer is taken moves to the next layer that suits its colour. The
+  wall is laid at 30 mm/s and loops at 40 with the fan at 20 %; layers shorter than 8 s are slowed, so a neck
+  is not laid on a soft layer. PLA runs 5 °C hot so loops stay molten; PETG stays at its preset temperature.
+- A colour plan is laid out against the piece's real height. (An oversize piece once had its chart computed for the
+  picker's 220 mm limit and every feature near the top landed 30 mm low.)
 - Fine 2-colour detail in PETG (a flat logo inlaid in a cap, verified Nov 2026 after three failed prints): rough,
   furry tops are a SPEED problem — top surface 25, outer wall 35, small perimeters 15, solid 60, minimum 30 s per
   layer — never ironing, never 0 walls (free line ends curl). Layer 0.12, top line width 0.3 (0.2 ropes); the
@@ -302,7 +361,8 @@ These are print-verified, and the tests enforce the geometric ones.
 ## Repo
 
 ```
-text2print/   shapes.py · lattice.py (woven rods) · droop.py (strands, fur) · halftone.py · compose.py (mix) · extras.py (zones, lids)
+text2print/   shapes.py · lattice.py (woven rods) · droop.py (strands, fur, loops) · halftone.py · colourwork.py (knit charts)
+              loops.py (loop looks and colour plans) · compose.py (mix) · extras.py (zones, lids)
               spiral.py (vase mode) · shell.py (voronoi, litho, fuzzy) · flat.py (tiles) · fittings.py · meshops.py
               sampler.py (test plates) · verify.py · store.py (~/.text2print) · lan.py (send) · fabric.py + fabric_wall.py + fabric_presets.py (fabric)
               floors.py · build.py (pick -> project) · printer.py + data/ (P2S) · bambu.py (3MF + CLI slice)
