@@ -1470,7 +1470,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
             if marks is not None:                           # the dot in the middle of the cap, in the mark's colour
                 cm = fittings._m(cap); ink_c = next(c for n_, _, _, c in parts if n_ == "mark")
                 lid_parts = list(lid_parts) + [("Pour cap", fittings._t(cm - marks[1]), 1, parts[0][3]),
-                                               ("Pour cap dot", fittings._t(cm ^ marks[1]), 2, ink_c)]
+                                               ("Pour cap", fittings._t(cm ^ marks[1]), 2, ink_c)]   # same name: one object
             else:
                 lid_parts = list(lid_parts) + [("Pour cap", cap, 1, parts[0][3])]
             warnings.append("Pour opening: the small cap screws in with half a turn. It is a dust cap, not a seal.")
