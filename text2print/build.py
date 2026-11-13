@@ -1240,7 +1240,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
                 per_filament = printer.filament_settings(nz.size, ["fur" if texture == "fur" else "droop"] * len(parts))
         extra["zones"] = zones
     # ── fittings (after zones, so the fitting takes the bottom zone's colour): collars, pockets, plinths, foot rings, crush ribs ──
-    if shape in ("pendant", "puck", "lantern", "cachepot", "candle") and T["family"] != "lattice":
+    if shape in ("pendant", "puck", "lantern", "cachepot", "candle", "jarlid") and T["family"] != "lattice":
         parts = fittings.apply(parts, shape, v, S.profile(v)[0], 1.0)
         if len({c for _, _, _, c in parts}) > 1:          # the fitting shares layers with the wall: recount
             transitions = _geom_transitions(parts, over, ranges); swaps = len(transitions)
