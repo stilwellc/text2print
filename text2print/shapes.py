@@ -435,6 +435,21 @@ for key, name, blurb, params in [
 
 
 
+# A screw lid for a glass mason jar, printed top-face down: a short cap whose skirt carries the texture, with a solid
+# liner and one right-hand thread inside (fittings.MASON). "inside" is the lid's inside diameter: 86 mm (3 3/8 in)
+# for a wide-mouth jar, 70 mm (2 3/4 in) for a regular one.
+def _jarlid(v):
+    from .fittings import MASON
+    R = v["inside"] / 2 + MASON["clear"] + MASON["liner"] + 0.5
+    return _clamped(lambda z: R, v["skirt"] + MASON["top"])
+
+
+_jl = Profiled("jarlid", "Mason jar lid", "Screws onto a glass mason jar: 86 mm inside for wide mouth, 70 for regular",
+               ("fabric", "halftone", "colourwork", "shell"),
+               [Param("inside", "Inside diameter", 50, 120, 0.1, 86), Param("skirt", "Skirt height", 12, 40, 0.5, 19)], round=True)
+_jl.kind = "jarlid"; KIND_PROFILES["jarlid"] = _jarlid; SHAPES["jarlid"] = _jl
+
+
 # ── non-round footprints (woven) and flat tiles ───────────────────────────────
 def sd_round_rect(x, y, hx, hy, r):
     r = min(r, hx, hy); qx, qy = np.abs(x) - (hx - r), np.abs(y) - (hy - r)

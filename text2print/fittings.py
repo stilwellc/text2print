@@ -20,6 +20,10 @@ TEALIGHT_POCKET = (41.0, 17.0)
 TAPER_BORE, TAPER_RIB = 23.0, 0.5
 POT_CLEAR = 5.0
 LINER_GAP = 1.0
+# Glass mason jars (regular 70 mm and wide 86 mm mouths): one continuous right-hand thread at 4 per inch. The lid's
+# inside wall clears the glass thread crests; its own ridge reaches in under them. NOT print-verified: the pitch is
+# the published figure, the depths are set from typical jars. Print one and check before making several.
+MASON = dict(pitch=6.35, turns=1.1, depth=1.4, clear=0.3, liner=2.4, top=3.0, start=4.5)
 
 
 def _m(mesh):
@@ -42,6 +46,31 @@ def _ring(r0, r1, z0, z1, n=160):
     return _cyl(r1, z0, z1, n) - _cyl(r0, z0 - 0.5, z1 + 0.5, n)
 
 
+def _thread_in(r_wall, depth, lead, turns, z0, n_per_turn=120, embed=0.4):
+    """One right-hand ridge on the INSIDE of a bore of radius r_wall: a 45-degree triangle `depth` tall whose
+    centre climbs `lead` per turn from z0. (cos a, sin a, z rising with a) is a right-hand helix whichever way up
+    the part is printed."""
+    import manifold3d as m3d
+    n = max(12, int(n_per_turn * turns)); w = depth; V, F = [], []
+    for i in range(n + 1):
+        a = 2 * math.pi * turns * i / n; zc = z0 + lead * turns * i / n
+        k = min(1.0, i / 8, (n - i) / 8)                         # the ridge ramps in and out over a few steps
+        ca, sa = math.cos(a), math.sin(a)
+        for rr, zz in ((r_wall + embed, zc - w - embed), (r_wall - depth * max(k, 0.15), zc), (r_wall + embed, zc + w + embed)):
+            V.append([rr * ca, rr * sa, zz])
+    for i in range(n):
+        p_, q_ = 3 * i, 3 * (i + 1)
+        for k in range(3):
+            k2 = (k + 1) % 3
+            F += [[p_ + k, q_ + k, q_ + k2], [p_ + k, q_ + k2, p_ + k2]]
+    F += [[0, 2, 1], [3 * n, 3 * n + 1, 3 * n + 2]]
+    mesh = trimesh.Trimesh(np.array(V), np.array(F), process=True)
+    trimesh.repair.fix_winding(mesh); trimesh.repair.fix_normals(mesh)
+    if mesh.volume < 0:
+        mesh.invert()
+    return _m(mesh)
+
+
 def plan(shape_key, v, prof, shell):
     """-> (adds, cuts) manifold lists for this shape's fitting, or ([], [])."""
     import manifold3d as m3d
@@ -60,6 +89,12 @@ def plan(shape_key, v, prof, shell):
     elif shape_key == "cachepot":
         rid = (v["pot"] * 25.4 + POT_CLEAR) / 2; rr = rid * 0.62
         adds.append(_ring(rr, rr + 4.0, 0.5, 9.0))                                  # foot ring lifts the pot
+    elif shape_key == "jarlid":
+        M = MASON; r_in = v["inside"] / 2 + M["clear"]; h = v["skirt"] + M["top"]; r_out = prof(h / 2) - shell * 0.5
+        adds.append(_cyl(r_out, 0.0, M["top"]))                                    # the top plate (printed on the bed)
+        adds.append(_ring(r_in, r_out, M["top"] - 0.01, h))                        # the liner the thread grows from
+        adds.append(_thread_in(r_in, M["depth"], M["pitch"], min(M["turns"], max(0.5, (v["skirt"] - M["start"] - 2 * M["depth"] - 1.0) / M["pitch"])),
+                               M["top"] + M["start"] + M["depth"]))
     elif shape_key == "candle":
         top = v["height"]; sock = TAPER_BORE / 2
         for k in range(6):
@@ -109,5 +144,7 @@ NOTES = {
     "lantern": "Tealight pocket 41 × 17 mm. Use an LED tealight or a glass cup — a real tealight puts out ~32 W.",
     "candle": "Taper bore 23 mm with crush ribs (grips ~22 mm candles). Never leave a lit candle unattended; PLA softens near 60 °C.",
     "cachepot": "Holds a nursery pot, not water — the foot ring lifts the pot so it can drain.",
+    "jarlid": "Mason jar thread (4 per inch, right-hand), printed top down. Not print-verified: check the fit on your jar. "
+              "It closes the jar but is not a canning seal; add a gasket for liquids.",
     "sleeve": "Slides over your glass liner (1 mm clearance a side, following its taper); the liner holds the water.",
 }

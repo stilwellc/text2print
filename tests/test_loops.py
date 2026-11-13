@@ -244,3 +244,19 @@ def test_front_is_one_angle_for_motifs_pictures_and_loop_windows():
     for look in ("window", "fringe"):
         _, spec = loops.resolve(look, {}, S, v, nz, 2)
         assert not droop.in_panels(front, droop.panel_windows(spec["panels"], spec["panel_width"], spec["panel_offset"]))
+
+
+def test_mason_jar_lid_has_one_right_hand_thread_inside_a_clear_bore():
+    from text2print.fittings import MASON
+    b = build.make("jarlid", "domes", {"inside": 86, "skirt": 19})
+    fit = next(m for n, m, _, _ in b.parts if n == "fitting")
+    assert all(m.is_watertight for _, m, _, _ in b.parts)
+    def bore(z):
+        pts = np.vstack(list(fit.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1]).discrete))
+        return 2 * np.hypot(pts[:, 0], pts[:, 1]).min()
+    assert abs(bore(MASON["top"] + 1.0) - (86 + 2 * MASON["clear"])) < 0.1           # clear of the glass threads
+    assert abs(bore(MASON["top"] + 9.0) - (86 + 2 * MASON["clear"] - 2 * MASON["depth"])) < 0.3     # the ridge
+    # right-hand: the ridge climbs as the angle increases
+    v = fit.vertices; r = np.hypot(v[:, 0], v[:, 1]); crest = v[r < 43 + MASON["clear"] - 0.8 * MASON["depth"]]
+    ang = np.unwrap(np.arctan2(crest[:, 1], crest[:, 0])[np.argsort(crest[:, 2])])
+    assert ang[-1] - ang[0] > np.pi and abs((crest[:, 2].max() - crest[:, 2].min()) / ((ang[-1] - ang[0]) / (2 * np.pi)) - MASON["pitch"]) < 0.8
