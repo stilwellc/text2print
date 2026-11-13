@@ -285,10 +285,10 @@ def test_jar_lid_fluted_grip_is_one_clean_solid():
     import numpy as np
     from text2print.fittings import GRIP, MASON, POUR, _pour
     b = build.make("jarlid", "domes", {"inside": 86, "skirt": 19, "wall": 6.35, "pour": 30, "grip": 1}, colours=["#F4F1E8", "#151515"])
-    assert [n for n, *_ in b.parts] == ["fitting", "mark"] and [n for n, *_ in b.extras] == ["Pour cap", "Pour cap dot"]
+    assert [n for n, *_ in b.parts] == ["fitting", "mark"] and [n for n, *_ in b.extras] == ["Pour cap", "Pour cap"]       # one object, two colours
     lid = b.parts[0][1]
     assert all(m.is_watertight and len(m.split(only_watertight=False)) == 1 for _, m, _, _ in b.parts + b.extras)
-    assert all(m.bounds[1][2] <= 1.0 + 1e-6 and c == "#151515" for n, m, _, c in b.parts + b.extras if n in ("mark", "Pour cap dot"))
+    assert all(m.bounds[1][2] <= 1.0 + 1e-6 and c == "#151515" for n, m, _, c in b.parts + b.extras if n == "mark" or c == "#151515")
     R = 86 / 2 + MASON["clear"] + 6.35
 
     def r_at(z, deg):
@@ -299,5 +299,10 @@ def test_jar_lid_fluted_grip_is_one_clean_solid():
     assert abs(r_at(12, land) - R) < 0.05                                   # the lands keep the full wall
     assert abs(r_at(12, flute) - (R - GRIP["depth"])) < 0.1                 # the flutes are cut to depth
     assert abs(r_at(GRIP["band"] - 0.5, flute) - R) < 0.05                  # and stop under the plain band
+    import tempfile, zipfile
+    with tempfile.TemporaryDirectory() as d:                                # the project: two objects, lid and cap
+        b.write_3mf(f"{d}/lid.3mf")
+        cfg = zipfile.ZipFile(f"{d}/lid.3mf").read("Metadata/model_settings.config").decode()
+    assert cfg.count("<object ") == 2 and cfg.count("<part ") == 4
     r, cx, _ = _pour(b.params)
     assert abs(2 * r - 30) < 1e-6 and 86 / 2 + MASON["clear"] - (cx + r + POUR["boss"]) >= POUR["jar"] - 1e-6
