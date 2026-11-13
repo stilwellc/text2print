@@ -268,37 +268,43 @@ def test_pour_cap_screws_into_an_open_hole_without_clashing(nozzle):
     import trimesh
     from text2print.fittings import POUR, _m, _pour
     b = build.make("jarlid", "domes", {"inside": 86, "skirt": 19, "pour": 30}, nozzle=nozzle)
-    r, cx, _ = _pour(b.params)
+    r, cx, _ = _pour(b.params); off = POUR["cap_t"] + POUR["gap"]              # the shadow gap under the flange
     assert [n for n, *_ in b.extras] == ["Pour cap"] and all(m.is_watertight for _, m, _, _ in b.parts + b.extras)
     whole = trimesh.util.concatenate([p[1] for p in b.parts])
     assert not len(whole.ray.intersects_location([[cx, 0.3, -50.0]], [[0, 0, 1.0]])[0])            # open right through
     lid = m3d.Manifold.batch_boolean([_m(m) for _, m, _, _ in b.parts], m3d.OpType.Add); cap = _m(b.extras[0][1])
-    seat = min(((lid ^ cap.rotate([0, 0, d]).translate([cx, 0, -POUR["cap_t"]])).volume(), d) for d in range(0, 180, 3))
-    assert seat[0] < 0.5                                                                           # seated flush
-    assert (lid ^ cap.rotate([0, 0, seat[1] - 90]).translate([cx, 0, -POUR["cap_t"] - 1.5])).volume() < 0.5   # and on the way out
+    seat = min(((lid ^ cap.rotate([0, 0, d]).translate([cx, 0, -off])).volume(), d) for d in range(0, 180, 3))
+    assert seat[0] < 0.5                                                                           # seated on its cone
+    assert (lid ^ cap.rotate([0, 0, seat[1] - 90]).translate([cx, 0, -off - 1.5])).volume() < 0.5   # and on the way out
     assert not build.make("jarlid", "domes", {"inside": 86, "skirt": 19}).extras                  # no opening: no cap
 
 
 def test_jar_lid_fluted_grip_is_one_clean_solid():
-    """grip=1: the lid is one solid with finger flutes that stop under a plain band, at the asked wall; the second
-    colour is a line and a dot in the first five layers only; the pour boss stays clear of the jar's glass rim."""
+    """grip=1: the lid is one solid; its flutes sit between two plain bands, so both rims are true circles, and the
+    one on the pour axis is left out; the cap is cut with the same tool; the second colour is a thin ring on the cap
+    and a tick on the lid, first five layers only; the pour boss stays clear of the jar's glass rim; the project holds two objects."""
     import numpy as np
     from text2print.fittings import GRIP, MASON, POUR, _pour
     b = build.make("jarlid", "domes", {"inside": 86, "skirt": 19, "wall": 6.35, "pour": 30, "grip": 1}, colours=["#F4F1E8", "#151515"])
-    assert [n for n, *_ in b.parts] == ["fitting", "mark"] and [n for n, *_ in b.extras] == ["Pour cap", "Pour cap"]       # one object, two colours
-    lid = b.parts[0][1]
+    assert [n for n, *_ in b.parts] == ["fitting", "mark"] and [n for n, *_ in b.extras] == ["Pour cap", "Pour cap"]
+    lid = b.parts[0][1]; h = 19 + MASON["top"]
     assert all(m.is_watertight and len(m.split(only_watertight=False)) == 1 for _, m, _, _ in b.parts + b.extras)
-    assert all(m.bounds[1][2] <= 1.0 + 1e-6 and c == "#151515" for n, m, _, c in b.parts + b.extras if n == "mark" or c == "#151515")
-    R = 86 / 2 + MASON["clear"] + 6.35
+    ink = [m for _, m, _, c in b.parts + b.extras if c == "#151515"]        # a tick on the lid, a ring on the cap
+    assert len(ink) == 2 and all(m.bounds[1][2] <= 1.0 + 1e-6 for m in ink)
+    assert max(m.extents[:2].min() for m in ink[:1]) <= GRIP["stroke"] + 1e-4 and ink[0].volume + ink[1].volume < 150   # thin strokes
+    R = 86 / 2 + MASON["clear"] + 6.35; step = 360.0 / GRIP["lid_flutes"]
 
-    def r_at(z, deg):
-        pts = np.vstack(list(lid.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1]).discrete))
+    def r_at(mesh, z, deg):
+        pts = np.vstack(list(mesh.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1]).discrete))
         a = np.degrees(np.arctan2(pts[:, 1], pts[:, 0])); r = np.hypot(pts[:, 0], pts[:, 1])
         return r[np.abs(a - deg) < 1].max()
-    n = max(8, int(round(2 * np.pi * R / GRIP["pitch"]))); flute = 180.0 / n; land = 360.0 / n
-    assert abs(r_at(12, land) - R) < 0.05                                   # the lands keep the full wall
-    assert abs(r_at(12, flute) - (R - GRIP["depth"])) < 0.1                 # the flutes are cut to depth
-    assert abs(r_at(GRIP["band"] - 0.5, flute) - R) < 0.05                  # and stop under the plain band
+    assert abs(r_at(lid, h / 2, step / 2) - R) < 0.05                       # the lands keep the full wall
+    assert abs(r_at(lid, h / 2, step) - (R - GRIP["depth"])) < 0.1          # the flutes are cut to depth
+    assert abs(r_at(lid, h / 2, 0.0) - R) < 0.05                            # none on the pour axis
+    edge = GRIP["chamfer"] + GRIP["band"]
+    assert abs(r_at(lid, edge - 0.3, step) - R) < 0.05 and abs(r_at(lid, h - edge + 0.3, step) - R) < 0.05   # two plain bands
+    cap = b.extras[0][1]; Rc = 15 + POUR["cap_lip"]
+    assert abs(r_at(cap, POUR["cap_t"] - 2.0, 360.0 / GRIP["cap_flutes"]) - (Rc - GRIP["depth"])) < 0.1      # the same tool
     import tempfile, zipfile
     with tempfile.TemporaryDirectory() as d:                                # the project: two objects, lid and cap
         b.write_3mf(f"{d}/lid.3mf")
