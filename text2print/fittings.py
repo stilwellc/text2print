@@ -106,5 +106,5 @@ NOTES = {
     "lantern": "Tealight pocket 41 × 17 mm. Use an LED tealight or a glass cup — a real tealight puts out ~32 W.",
     "candle": "Taper bore 23 mm with crush ribs (grips ~22 mm candles). Never leave a lit candle unattended; PLA softens near 60 °C.",
     "cachepot": "Holds a nursery pot, not water — the foot ring lifts the pot so it can drain.",
-    "sleeve": "Slides over your glass liner (1 mm clearance a side); the liner holds the water.",
+    "sleeve": "Slides over your glass liner (1 mm clearance a side, following its taper); the liner holds the water.",
 }
