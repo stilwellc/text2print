@@ -45,6 +45,14 @@ def main(argv=None):
     lk.add_argument("spec"); lk.add_argument("--port", type=int, default=7384)
     pr = sub.add_parser("printer", help="printer status | test (LAN connection check; never starts a print)")
     pr.add_argument("action", choices=["status", "test"])
+    ak = sub.add_parser("ask", help='ask "WORDS": Design with Claude from the command line (starts a Claude run)')
+    ak.add_argument("words"); ak.add_argument("--design", metavar="SPEC", help="the design to start from or to review")
+    ak.add_argument("--ideas", type=int, default=0, help="ask for N different directions")
+    ak.add_argument("--photo", help="a photo to work from; with --review, a photo of the print")
+    ak.add_argument("--review", action="store_true", help="review a print of --design from --photo")
+    ak.add_argument("--hours", type=float); ak.add_argument("--changes", type=int); ak.add_argument("--grams", type=float)
+    tz = sub.add_parser("taste", help="taste like|dislike SPEC [--note ...]: teach it what you like")
+    tz.add_argument("verdict", choices=["like", "dislike"]); tz.add_argument("spec"); tz.add_argument("--note", default="")
     sd = sub.add_parser("send", help="send SPEC --confirm: slice a design and START PRINTING it on the configured printer")
     sd.add_argument("spec"); sd.add_argument("--confirm", action="store_true"); sd.add_argument("--out", default=None)
     sp = sub.add_parser("sampler"); sp.add_argument("--nozzle", type=float, default=0.4)
@@ -258,6 +266,43 @@ def _design_commands(a, build, dz):
             print(json.dumps(lan.test(c), indent=1, default=str)); return 0
         except ValueError as e:
             raise dz.DesignError(str(e)) from None
+    if a.cmd == "taste":
+        from studio import ask
+        d = dz.normalise(dz.load(a.spec))
+        print(json.dumps(dict(noted=ask.note_taste(a.verdict, d, " ".join(a.note.split())[:300])), indent=1)); return 0
+    if a.cmd == "ask":
+        import time
+        from studio import ask
+        from . import plugins
+        if not ask.available():
+            raise dz.DesignError("the Claude CLI is not installed on this machine")
+        cur = dz.normalise(dz.load(a.design)) if a.design else {}
+        photo = None
+        if a.photo:
+            photo = pathlib.Path(a.photo).expanduser()
+            if not photo.is_file():
+                raise dz.DesignError(f"no such photo: {a.photo}")
+            photo = str(photo.resolve())
+        if a.review and not (photo and cur):
+            raise dz.DesignError("a review needs --design (what was printed) and --photo (how it came out)")
+        if len(a.words.strip()) < 3 and not a.review:
+            raise dz.DesignError("describe what you want in a few words")
+        budget = {k: v for k, v in (("hours", a.hours), ("changes", a.changes), ("grams", a.grams)) if v}
+        tid, err = ask.start(a.words.strip()[:2000] or "Here's how it printed.", cur, sys.executable, plugins.DIR, photo=photo,
+                             mode="review" if a.review else "design", variations=max(0, a.ideas), budget=budget)
+        if err:
+            raise dz.DesignError(err)
+        seen = 0
+        while True:                                         # progress on stderr, the result as JSON on stdout
+            st = ask.status(tid) or {}
+            for step in (st.get("steps") or [])[seen:]:
+                print(f"  {step}", file=sys.stderr)
+            seen = len(st.get("steps") or [])
+            if st.get("state") != "running":
+                break
+            time.sleep(1.0)
+        print(json.dumps({k: st.get(k) for k in ("state", "result", "error")}, indent=1, default=str))
+        return 0 if st.get("state") == "done" else 1
     if a.cmd == "send":
         from . import bambu, lan
         if not a.confirm:
@@ -273,7 +318,7 @@ def _design_commands(a, build, dz):
         res = bambu.slice_project(p3, out / f".slice_{d['shape']}_{d['texture']}")
         if "error" in res:
             print(json.dumps(dict(error="slice failed", slice=res), indent=1)); return 1
-        cmd = lan.send(out / f".slice_{d['shape']}_{d['texture']}" / "sliced.3mf", cfg, b.title(), ams_mapping=list(range(len(b.parts))))
+        cmd = lan.send(out / f".slice_{d['shape']}_{d['texture']}" / "sliced.3mf", cfg, b.title(), ams_mapping=b.ams_mapping())
         print(json.dumps(dict(sent=cmd["print"]["subtask_name"], project=str(p3), slice=res), indent=1)); return 0
 
     # make

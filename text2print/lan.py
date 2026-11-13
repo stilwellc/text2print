@@ -75,7 +75,10 @@ def send(sliced_3mf, cfg, name, ams_mapping, timeout=60):
     client.username_pw_set("bblp", cfg["access_code"]); client.tls_set_context(_ctx()); client.tls_insecure_set(True)
     client.connect(cfg["ip"], 8883, keepalive=30); client.loop_start()
     info = client.publish(f"device/{cfg['serial']}/request", json.dumps(cmd), qos=1); info.wait_for_publish(timeout)
+    sent = info.is_published()
     client.loop_stop(); client.disconnect()
+    if not sent:                                                # uploaded, but the start command never reached it
+        raise ConnectionError("the file was uploaded but the printer did not acknowledge the print command")
     return cmd
 
 

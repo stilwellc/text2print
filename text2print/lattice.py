@@ -8,6 +8,7 @@ paths and their colour slot; the shape decides where rods may be (a Region from 
 Colour costs: a pattern that keeps one colour per course swaps once per course; one that mixes colours inside a
 course (tartan, over-under) swaps about once per print LAYER."""
 import math
+import types
 
 import numpy as np
 import trimesh
@@ -378,6 +379,15 @@ def p_overunder(region, nz, rods):
     for b in range(region.n // 2):
         zb = (2 * b + 1) * nz.rod_h
         c = Course(region, nz, 2 * b + 1)
+        low = Course(region, nz, 2 * b)
+        if low.sdf(0.0, 0.0) < 0 <= c.sdf(0.0, 0.0):
+            # the band that straddles the top of the floor: its lower course is still floor, but the band is laid to
+            # the wall ring, which left every over-under floor one course thin. Fill that course inside the ring with
+            # flat rods (the cross direction of the course below), so the floor is as thick as any other weave's.
+            ring = c.sdf; inner = types.SimpleNamespace(region=region, nz=nz, i=low.i, z=low.z, E=low.E,
+                                                        sdf=lambda x, y: np.maximum(low.sdf(x, y), -ring(x, y) - nz.rod_w))
+            for j, t0, t1, pf in Course.lines(inner, (b % 2) * math.pi / 2):
+                rods.line(_pt(pf, t0, low.z), _pt(pf, t1, low.z), b % 2)
         for axis in (0, 1):
             th = axis * math.pi / 2
             for j, t0, t1, pf in c.lines(th, step=0.6):

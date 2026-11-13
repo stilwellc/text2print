@@ -83,3 +83,16 @@ def test_polar_needs_a_round_shape():
     assert build.compatible("dish", "polar") and not build.compatible("tray", "polar")
     with pytest.raises(ValueError):
         build.make("tray", "polar")
+
+
+def test_over_under_floor_is_as_thick_as_a_plain_weaves():
+    """The band straddling the top of the floor was laid only on the wall ring: every over-under floor was a course thin."""
+    import numpy as np
+    import trimesh
+    from text2print import build
+
+    def floor_top(b):
+        m = trimesh.util.concatenate([p[1] for p in b.parts]); g = np.linspace(-6, 6, 9)
+        o = np.array([[x, y, 500.0] for x in g for y in g])
+        return float(m.ray.intersects_location(o, np.tile([0, 0, -1.0], (len(o), 1)), multiple_hits=False)[0][:, 2].max())
+    assert abs(floor_top(build.make("platter", "overunder", {})) - floor_top(build.make("platter", "grid", {}))) < 0.1

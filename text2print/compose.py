@@ -507,10 +507,12 @@ def _blend(layers, bands, zs, wall_contour, prof, floor_z, rmax, n_theta, cuts=N
         th = np.linspace(0, 2 * np.pi, n_c, endpoint=False)
         R0 = prof(zb)
         edge = _edge(style, th, R0, max(6.0, size * 1.2), seed=bi) if style in ("wave", "zigzag", "scallop", "drip", "noise") else None
-        first = {b_: next(i for i, L in enumerate(layers) if L["band"] == b_) for b_ in (bi - 1, bi)}
+        for L in layers:                                           # an earlier blend hands layers to the band below:
+            L.setdefault("band0", L["band"])                       # count each band's stitch rhythm from where the
+        first = {b_: next(i for i, L in enumerate(layers) if L["band0"] == b_) for b_ in (bi - 1, bi)}     # band began
         for i, L in enumerate(layers):
             zm = (L["z0"] + L["z1"]) / 2
-            if not (z_lo <= zm <= z_hi) or L["band"] not in (bi - 1, bi):
+            if not (z_lo <= zm <= z_hi) or L["band0"] not in (bi - 1, bi):
                 continue
             t = (zm - z_lo) / (z_hi - z_lo)
             kA = i - first[bi - 1]; kB = i - first[bi]

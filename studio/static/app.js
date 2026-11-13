@@ -64,11 +64,17 @@ function readUrl() {
   if (q.get("c")) state.colours = q.get("c").split(",").map((h) => "#" + h.replace("#", ""));
   const optKeys = Object.values(CAT.options).flat().map((o) => o.key).concat(["picture", "image"]).concat(TEXT_KEYS).concat(WEAVE_KEYS).concat(["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "lid_over_w", "lid_over_d", "floor_skin", "floor_border", "floor_text", "lid_lines", "tower", "engrave_base", "engrave_lid", "engrave_font"]);
   const toggleKeys = Object.values(CAT.options).flat().filter((o) => o.kind === "toggle").map((o) => o.key).concat(["text_invert", "picture_invert"]);
+  // sizes are the shape's own keys; everything else is an option. (Unknown keys used to be read as sizes, which
+  // dropped every option the picker has no control for: a hand-set loop spec, panel widths, an inlay.)
+  const sizeKeys = shapeOf(state.shape).params.map((p) => p.key);
   for (const [k, v] of q) {
-    if (k === "mix") { try { state.bands = JSON.parse(v); } catch (e) { /* a bad link keeps the default */ } }
+    if (["shape", "texture", "nozzle", "c"].includes(k)) continue;
+    if (k === "mix") { try { const m = JSON.parse(v); if (Array.isArray(m) && m.length) state.bands = m; } catch (e) { /* a bad link keeps the default */ } }
     else if (k === "chart") { try { state.options.chart = JSON.parse(v); } catch (e) { /* a bad link keeps the preset */ } }
-    else if (optKeys.includes(k) || k.startsWith("pp_")) state.options[k] = toggleKeys.includes(k) ? v === "1" : v;
-    else if (!["shape", "texture", "nozzle", "c"].includes(k)) state.params[k] = parseFloat(v);
+    else if (sizeKeys.includes(k)) { const n = parseFloat(v); if (Number.isFinite(n)) state.params[k] = n; }
+    else if (toggleKeys.includes(k)) state.options[k] = v === "1";
+    else if (/^[\[{]/.test(v)) { try { state.options[k] = JSON.parse(v); } catch (e) { state.options[k] = v; } }
+    else state.options[k] = v;
   }
 }
 function linkFor() {
@@ -79,7 +85,7 @@ function linkFor() {
   if (isChart() && Array.isArray(state.options.chart)) q.set("chart", JSON.stringify(state.options.chart));
   for (const o of familyOptions()) {
     const v = state.options[o.key] ?? o.default;
-    if (v !== o.default) q.set(o.key, v === true ? "1" : v === false ? "0" : v);
+    if (v !== o.default) q.set(o.key, v === true ? "1" : v === false ? "0" : typeof v === "object" ? JSON.stringify(v) : v);
   }
   if (state.options.image && textureOf(state.texture).family === "halftone") q.set("image", state.options.image);
   if (IMAGE_TEXTURES.includes(state.texture) || isMix() || isChart() || ["in", "out"].includes(state.options.mask))
@@ -93,6 +99,12 @@ function linkFor() {
   if (textureOf(state.texture).family === "lattice") {
     for (const k of WEAVE_KEYS) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k]);
     if (state.options.weave_picture) for (const k of TEXT_KEYS) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k] === true ? "1" : state.options[k] === false ? "0" : state.options[k]);
+  }
+  // options no control owns (set through a link, the command line or Design with Claude) ride along too
+  const owned = new Set(Object.values(CAT.options).flat().map((o) => o.key).concat(TEXT_KEYS, WEAVE_KEYS, ["chart", "bands", "image", "picture", "lid_colours"]));
+  for (const [k, v] of Object.entries(state.options)) {
+    if (owned.has(k) || q.has(k) || k.startsWith("lid") || k.startsWith("floor_") || v === undefined || v === null || v === "") continue;
+    q.set(k, v === true ? "1" : v === false ? "0" : typeof v === "object" ? JSON.stringify(v) : v);
   }
   return "?" + q.toString();
 }
@@ -966,7 +978,7 @@ $("saveBtn").addEventListener("click", () => {
     renderer.render(scene, camera);
     const thumb = squareThumb();
     await fetch("/api/designs", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: input.value || job.title, link: linkFor(), stats: { ...job.stats, slice: job.slice }, thumb }) });
+      body: JSON.stringify({ name: input.value || job.title, link: linkFor(), design: currentDesign(), stats: { ...job.stats, slice: job.slice }, thumb }) });
     closeSheet(); toast("Saved");
   });
   sheet(el("h3", {}, "Save design"), form);

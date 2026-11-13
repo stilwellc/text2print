@@ -93,14 +93,15 @@ def art_grid(rows):
 
 def tile(art, cols, once=False):
     """Repeat art (h, w) around `cols` columns a whole number of times; spare columns become ground between the
-    repeats (so no motif is cut at the seam). once: a single copy centred at the front (u = 0.5)."""
+    repeats (so no motif is cut at the seam). once: a single copy centred at the front (pictures.FRONT_U)."""
     h, w = art.shape
     if w >= cols:
         s = (w - cols) // 2
         return art[:, s:s + cols]
-    if once:
-        out = np.zeros((h, cols), np.int8); s = (cols - w) // 2; out[:, s:s + w] = art
-        return out
+    if once:                                                    # centred on the FRONT: the side the studio camera and
+        out = np.zeros((h, cols), np.int8); out[:, :w] = art    # a "front" picture face (pictures.FRONT_U), not 180 deg
+        from .pictures import FRONT_U
+        return np.roll(out, int(round(FRONT_U * cols - w / 2)), axis=1)
     reps = cols // w; extra = cols - reps * w
     parts = []
     for i in range(reps):
@@ -190,13 +191,19 @@ def plan(chart, cols, n_layers, lh, row_mm, col_mm, econ, options):
             out = [("plain", seq[(k // per) % len(seq)], None) for k in range(n)]
             last[0] = out[-1][1]
             return out
-        R2 = rows_for(2)
-        cells = _band_cells(b, cols, R2 * lh, col_mm, max(1, rows_left_layers // R2), options)
+        # a row is as many layers as the band has colours (x band): a 3-tone picture's rows are taller than a
+        # 2-colour one's, so size the picture with the cycle it will really be laid at
+        three = "picture" in b and int(b.get("tones", 2)) >= 3 and len(set(int(x) for x in slots[:3])) >= 3
+        Rg = rows_for(3 if three else 2)
+        cells = _band_cells(b, cols, Rg * lh, col_mm, max(1, rows_left_layers // Rg), options)
         used = sorted(set(np.unique(cells).tolist()))
         loc = [i for i in used if i < len(slots)] or [0]
         gslots = [int(slots[i]) for i in loc]
         order = list(dict.fromkeys(gslots))                    # the band's colour cycle (distinct slots)
         R = rows_for(len(order)) if len(order) > 1 else rows_for(1)
+        if b.get("fill") and "picture" not in b and rows_left_layers:      # a motif that fills: repeat it up the wall
+            want = max(cells.shape[0], rows_left_layers // R)
+            cells = np.vstack([cells] * (want // cells.shape[0] + 1))[:want]       # the last repeat may be cut at the rim
         out = []
         slot_cells = np.vectorize(lambda i: int(slots[i]) if i < len(slots) else int(slots[0]))(cells)
         for r in range(cells.shape[0]):
@@ -211,6 +218,10 @@ def plan(chart, cols, n_layers, lh, row_mm, col_mm, econ, options):
                 s = cyc[(l // econ) % len(cyc)]
                 out.append(("cw", s, (slot_cells[r] == s, (l + 0.5) / R)))
             last[0] = out[-1][1]
+        if b.get("fill") and out and 0 < rows_left_layers - len(out) < 4 * R:
+            out += out[-R:][: rows_left_layers - len(out)] * 1   # "takes the rest": the top row carries on to the rim
+            while len(out) < rows_left_layers:
+                out.append(out[-R])
         if out:
             last[0] = out[-1][1]
         return out

@@ -62,6 +62,9 @@ choice), `watertight`, and `render` / `slice` / `saved` when asked.
 | `verify TEXTURE NOZZLE ok\|fail --note "..."` | record a real print; drives the Printed badges and warnings |
 | `printer status` / `printer test` | is a LAN printer set up; connection check (never prints) |
 | `send SPEC --confirm` | slices and STARTS A PRINT. Only when the person has said to print it |
+| `ask "WORDS" [--design SPEC] [--ideas N] [--photo P] [--hours H --changes N --grams G]` | Design with Claude without the studio: starts a Claude run, prints its steps, returns the designs as JSON |
+| `ask "how it went" --review --design SPEC --photo PRINT.jpg` | review a real print of a design |
+| `taste like\|dislike SPEC --note "..."` | teach it what they like (read before every design) |
 | `studio [--port N] [--no-browser]` | the picker, when they want to look and drag |
 
 Options worth knowing: zones 1-4 + zone_style bands|stripes (fabric, droop; lattice with colour_by=height),
