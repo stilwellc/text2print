@@ -7,6 +7,8 @@ for free. A look pairs a loop layout (`droop._tier_rows`) with a colour plan for
     shag     short scallops, close rows: a shaggy coat
     fringe   two side panels of long, uneven hairpins over a bare knit front and back
     window   the fringe wraps the piece and leaves one arched knit window at the front
+("front" is pictures.FRONT_U, 315 degrees: the side the studio camera looks at, where a "front" picture and a
+once-only motif also sit)
     petals   scallops that lengthen down overlapping petals, each petal one colour
 
     plan "rows"    each loop row (and the wall it hangs from) takes one colour, faded up the piece
@@ -33,10 +35,10 @@ LOOKS = {
         crown_rows=2, crown_l=6.5, crown_w=2.0, crown_tier=0.56)),
     "fringe": dict(name="Fringe panels", plan="chart", loops=dict(
         loop_w=3.4, loop_l=17.0, tier=0.84, pinch=0.3, line=0.8, gap=0.5, vary=0.45, stray=0.08, collar=8.0,
-        panels=2, panel_width=115)),
+        panels=2, panel_width=115, panel_offset=45)),          # at the silhouette edges seen from the front (315 deg)
     "window": dict(name="Fringe and a window", plan="salt", loops=dict(
         loop_w=3.4, loop_l=16.0, tier=0.84, pinch=0.3, line=0.8, gap=0.5, vary=0.35, collar=8.0,
-        panels=1, panel_width=250, panel_offset=180, edge_taper=4, grow=0.4, crown_rows=3, crown_l=7.0, crown_w=2.4)),
+        panels=1, panel_width=250, panel_offset=135, edge_taper=4, grow=0.4, crown_rows=3, crown_l=7.0, crown_w=2.4)),
     "petals": dict(name="Petal ruffles", plan="petals", loops=dict(
         loop_w=4.8, loop_l=15.0, tier=1.96, pinch=1.0, line=1.0, gap=0.5, collar=7.0, l_min=4.5,
         petal=13.0, petal_sag=9.0, petals=5, petal_share=0.38, petal_seed=3, flounce_gain=0.62)),

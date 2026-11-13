@@ -186,8 +186,20 @@ def _worker(conn, req):
         conn.close()
 
 
-def _run_build(req):
+def _run_build(req, export=False):
+    """export=True: the full build behind a download, a slice or a send. It runs beside the preview builds: it does
+    not cancel one and a newer preview does not cancel it (touching a slider used to kill an export in flight)."""
     parent, child = _CTX.Pipe(duplex=False)
+    if export:
+        proc = _CTX.Process(target=_worker, args=(child, req), daemon=True); proc.start(); child.close()
+        try:
+            while proc.is_alive() or parent.poll(0.05):
+                if parent.poll(0.1):
+                    return parent.recv()
+        except EOFError:
+            pass
+        proc.join(timeout=1)
+        return ("err", "the build worker stopped unexpectedly", 0)
     with _RUN_LOCK:
         old = _RUNNING["proc"]
         if old is not None and old.is_alive():
@@ -375,7 +387,7 @@ def _stem(b):
 def _full(j):
     """Downloads, slicing and sending always use a full build, even if the preview was a draft."""
     if j["build"].draft:
-        status, b, _ = _run_build(dict(j["design"], draft=False))
+        status, b, _ = _run_build(dict(j["design"], draft=False), export=True)
         if status != "ok":
             abort(409 if status == "cancelled" else 500)
         j["build"] = b
@@ -565,10 +577,12 @@ def send(jid):
     j = _job(jid); cfg = store.printer_config()
     try:
         lan.check(cfg)
-        _slice_job(j)
+        res = _slice_job(j)
+        if "error" in res:                                       # never send a project the slicer rejected
+            return jsonify(error=f"the slicer could not slice it: {res['error']}"), 502
         sliced = j["dir"] / "slice" / "sliced.3mf"
         b = j["build"]
-        cmd = lan.send(sliced, cfg, b.title(), ams_mapping=list(range(len(b.parts))))
+        cmd = lan.send(sliced, cfg, b.title(), ams_mapping=b.ams_mapping())
     except Exception as e:
         return jsonify(error=str(e)), 502
     return jsonify(ok=True, sent=cmd["print"]["subtask_name"])

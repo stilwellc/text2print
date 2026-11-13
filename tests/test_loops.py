@@ -192,3 +192,55 @@ def test_petals_on_bead_knit_keep_their_collar_and_colours():
     meshes, info = colourwork.build(S, v, nz, style="beads", chart=chart, band=2, draft=True, options={})
     knit_top = max(i for i, s_ in enumerate(info["seq"]) if s_[0] == "cw") * info["layer_h"]
     assert knit_top < v["height"] - spec["collar"] + 3.0          # the bare collar is still there
+
+
+# ── the open items from the review, closed ──
+def test_a_piece_that_nearly_fills_the_bed_goes_in_the_corner_clear_of_the_tower(tmp_path):
+    import re
+    b = build.make("tray", "zigzag", {"width": 200, "height": 12}, colours=C4, options={"zones": 3}, draft=True)
+    cfg, model = _cfg(b, tmp_path / "a.3mf")
+    t = re.search(r'<item[^>]*transform="([^"]+)"', model).group(1).split(); px, py = float(t[9]), float(t[10])
+    v = np.vstack([m.vertices[:, :2] for _, m, _, _ in b.parts]) + [px, py]
+    tx, ty = float(cfg["wipe_tower_x"][0]), float(cfg["wipe_tower_y"][0])
+    near = v[(v[:, 0] > tx - 5) & (v[:, 1] < ty + 60)]
+    assert not len(near) and v.min() >= 0 and v.max() <= printer.BED          # once the tower sat inside the piece
+
+
+def test_the_purge_coaster_prints_on_the_pieces_plate(tmp_path):
+    b = build.make("cup", "halftone", {"diameter": 60, "height": 40}, colours=C4[:2], options={"lid": "slip", "purge_piece": "coaster"}, draft=True)
+    with zipfile.ZipFile(b.write_3mf(tmp_path / "a.3mf")) as z:
+        s = z.read("Metadata/model_settings.config").decode()
+    assert 'value="Purge coaster"' in s and "flush_into_objects" in s
+    big = build.make("cup", "halftone", {"diameter": 160, "height": 40}, colours=C4[:2], options={"purge_piece": "coaster"}, draft=True)
+    big.write_3mf(tmp_path / "b.3mf")
+    assert not (tmp_path / "b-lid.3mf").exists() and any("coaster" in w and "left out" in w for w in big.warnings)
+
+
+def test_ams_trays_follow_the_colours_as_chosen():
+    b = build.make("cup", "mix", {}, colours=C4, draft=True,
+                   options={"bands": [{"texture": "plain", "share": 1, "slot": 0}, {"texture": "zigzag", "share": 1, "slot": 2}]})
+    assert b.project_colours() == [C4[0], C4[2]] and b.ams_mapping() == [0, 2]      # trays 1 and 3, not 1 and 2
+
+
+@pytest.mark.parametrize("shape, texture", [("lantern", "zigzag"), ("puck", "fringe"), ("cachepot", "zigzag"), ("pendant", "zigzag")])
+def test_sketch_builds_of_fitted_shapes_take_colour_zones(shape, texture):
+    assert build.make(shape, texture, {}, colours=C4, options={"zones": 2}, draft=True).parts
+
+
+def test_fill_bands_reach_the_rim_and_three_tone_pictures_keep_their_height():
+    S = SHAPES["cup"]; v = S.defaults(); nz = printer.nozzle(0.4)
+    top = lambda chart: colourwork.build(S, v, nz, chart=chart, draft=True, options={})[1]
+    assert top([{"motif": "hearts", "fill": True, "colours": [0, 1]}])["wall_top"] > v["height"] - 0.5
+    assert top([{"picture": "fade", "fill": True, "tones": 3, "colours": [0, 1, 2]}])["wall_top"] > v["height"] - 0.5
+    info = top([{"picture": "fade", "mm": 40, "tones": 3, "colours": [0, 1, 2]}, {"plain": 0, "mm": 200}])
+    assert abs(sum(1 for q in info["seq"] if q[0] == "cw") * info["layer_h"] - 40) < 2.5
+
+
+def test_front_is_one_angle_for_motifs_pictures_and_loop_windows():
+    from text2print import pictures
+    t = colourwork.tile(colourwork.art_grid(["XXX"]), 120, once=True)
+    assert abs((np.where(t[0] == 1)[0].mean() + 0.5) / 120 - pictures.FRONT_U) < 0.02
+    S = SHAPES["cup"]; v = S.defaults(); nz = printer.nozzle(0.4); front = 2 * math.pi * pictures.FRONT_U
+    for look in ("window", "fringe"):
+        _, spec = loops.resolve(look, {}, S, v, nz, 2)
+        assert not droop.in_panels(front, droop.panel_windows(spec["panels"], spec["panel_width"], spec["panel_offset"]))

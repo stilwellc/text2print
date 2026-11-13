@@ -46,8 +46,24 @@ def image_path(key):
 
 
 # ── slice cache ───────────────────────────────────────────────────────────────
+def _code_stamp():
+    """Changes whenever the code or anything a design can pull in changes: the package, plugins, library pictures.
+    A cached slice is only as good as the code that built the project it measured."""
+    newest = 0.0
+    roots = [pathlib.Path(__file__).parent, pathlib.Path(os.environ.get("T2P_PLUGINS") or HOME / "plugins"),
+             pathlib.Path(os.environ.get("T2P_PICTURES") or HOME / "pictures"), HOME / "lid_lines"]
+    for root in roots:
+        try:
+            for f in root.iterdir():
+                if f.suffix in (".py", ".png", ".json", ".jpg"):
+                    newest = max(newest, f.stat().st_mtime)
+        except OSError:
+            pass
+    return f"{newest:.0f}"
+
+
 def design_key(d: dict) -> str:
-    return hashlib.sha1(json.dumps(d, sort_keys=True, default=str).encode()).hexdigest()[:20]
+    return hashlib.sha1((json.dumps(d, sort_keys=True, default=str) + _code_stamp()).encode()).hexdigest()[:20]
 
 
 def get_slice(key):

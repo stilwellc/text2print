@@ -91,7 +91,10 @@ def apply(parts, shape_key, v, prof, shell):
             out.append((n, mesh, s, c)); continue
         for cut in cuts:
             man = man - cut
-        out.append((n, _t(man), s, c))
+        res = _t(man)
+        if not len(res.faces) and len(mesh.faces):           # a sketch build's open mesh: a boolean empties it, and an
+            res = mesh                                       # empty part crashes everything after. Keep it uncut.
+        out.append((n, res, s, c))
     if added is not None:
         for cut in cuts:
             added = added - cut

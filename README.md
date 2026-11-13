@@ -77,6 +77,8 @@ name of a saved design:
 ./t2p link cup.json                       # the same design as a studio link; give it a link to get the JSON back
 ./t2p designs list                        # the studio's Saved list: show, save, delete, or build one by name
 ./t2p printer test                        # LAN connection check; `send DESIGN --confirm` slices and starts a print
+./t2p ask "a low bowl that fades from brick to bone, our name under it" --ideas 3      # Design with Claude
+./t2p taste like cup.json --note "more of this"
 ```
 
 | `make` flag | |
@@ -366,6 +368,11 @@ around PETG; everything else was tuned on PLA Matte, and the app says so when yo
   `different_settings_to_system`, or Bambu Studio's window puts the preset's values back on open.
 - A prime pad as a second object made Bambu Studio's window show the pad alone, though the CLI sliced both. The pad
   is now extra parts of the piece's own object.
+- A piece that nearly fills the bed goes into the back-left corner with the tower hard in the front-right one;
+  a 200 mm three-colour tray that used to fail with "G-code conflicts" slices that way. If they still meet, the
+  build says so.
+- "Front" is one angle everywhere (315°, the side the studio camera looks at): a front picture, a once-only motif
+  and the bare window of the loop looks all face it.
 - With the prime tower off, purge moves at the chute appear in the G-code as wall-type extrusions far from the
   piece; leave them out of any wall-continuity check.
 

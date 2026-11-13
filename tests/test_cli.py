@@ -32,8 +32,9 @@ def test_link_carries_mixes_and_charts_as_json_and_toggles_as_booleans():
     assert d["options"]["bands"] == [{"texture": "plain", "share": 1}]
     d = dz.from_link("?shape=cup&texture=domes&rim_loops=1")
     assert d["options"]["rim_loops"] is True
-    url, dropped = dz.to_link(dict(DESIGN, options={"loops": {"loop_w": 4}}))
-    assert dropped == ["loops"]                             # a hand-set loop spec does not fit in a link: say so
+    url, dropped = dz.to_link(dict(DESIGN, options={"loops": {"loop_w": 4}, "material": ["pla", "petg"]}))
+    back = dz.from_link(url)["options"]                     # structured options travel as JSON
+    assert not dropped and back["loops"] == {"loop_w": 4} and back["material"] == ["pla", "petg"]
 
 
 @pytest.mark.parametrize("bad, says", [

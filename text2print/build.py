@@ -122,6 +122,8 @@ class Build:
     assembled: list = field(default_factory=list)       # the same, placed on the piece for the viewer
     lid_plate: str = "same"                              # "same": lid beside the piece; "own": its own project
     tower: bool = True                                   # prime tower for multi-colour prints
+    picked: list = None                                  # the colours as chosen, in AMS tray order
+    coaster: tuple = None                                # (mesh, colour): a purge coaster beside the piece
     material: list = None                                # e.g. ["petg"]: the lid's own project uses it too
     prime_block: dict = None                             # {"colours": [...], "layers": n}: no tower; a small block, part
                                                          # of the piece's object, primes just those first layers
@@ -208,6 +210,7 @@ class Build:
                 bambu.write_3mf(str(pathlib.Path(path).with_name(pathlib.Path(path).stem + "-lid.3mf")), lid_objects,
                                 title=self.title() + " — lid", colours=tuple(lcols), overrides=over,
                                 base=printer.base_config(self.nozzle), per_filament=lid_pf)
+        self._add_coaster(objects, idx)
         v_ = np.vstack([np.asarray(p_[1].vertices)[:, :2] for p_ in objects[0]["parts"]])       # never write it off the bed:
         (x0, y0), (x1, y1) = v_.min(0), v_.max(0); px, py = objects[0]["position"]              # slide it back inside
         px = min(max(px, 1.0 - x0), printer.BED - 1.0 - x1) if x1 - x0 <= printer.BED - 2 else printer.BED / 2 - (x0 + x1) / 2
@@ -241,6 +244,53 @@ class Build:
             m.apply_translation([bx - cx + 14 * i - 7 * (n - 1), by - cy, h / 2])
             ob["parts"].append((f"prime {i + 1}", m, idx(c)))
 
+    def project_colours(self):
+        """The project's filaments in order: the piece's colours, then any the lid, knob or coaster add."""
+        cols = list(self.colours)
+        for _, _, _, c in self.extras:
+            if c not in cols:
+                cols.append(c)
+        return cols
+
+    def ams_mapping(self):
+        """For each project filament, the AMS tray (0-based) that holds it. Trays follow the colours as chosen:
+        the first colour is tray 1, and a design that uses the 1st and 3rd is trays 1 and 3, not 1 and 2. A colour
+        that was not among the chosen ones (a lid's own) takes the next free tray."""
+        picked = list(self.picked or self.colours); used, out = set(), []
+        for c in self.project_colours():
+            t = picked.index(c) if c in picked and picked.index(c) not in used else None
+            if t is None:
+                t = next(i for i in range(16) if i not in used and (i >= len(picked) or picked[i] not in self.project_colours()))
+            used.add(t); out.append(t)
+        return out
+
+    def _add_coaster(self, objects, idx):
+        """The purge coaster goes on the piece's plate, in the free corner farthest from everything already there
+        (other objects and the prime tower). No room: leave it out and say so."""
+        if not self.coaster:
+            return
+        mesh, colour = self.coaster; r = float(np.abs(mesh.bounds[:, :2]).max()); B = printer.BED
+        taken = []
+        for ob in objects:
+            v = np.vstack([np.asarray(p_[1].vertices)[:, :2] for p_ in ob["parts"]]) + np.asarray(ob["position"], float)
+            taken.append(v[:: max(1, len(v) // 4000)])
+        if self.overrides.get("enable_prime_tower") != "0":
+            tx = float(self.overrides.get("wipe_tower_x", [printer.TOWER[0]])[0]); ty = float(self.overrides.get("wipe_tower_y", [printer.TOWER[1]])[0])
+            taken.append(np.array([[tx + dx, ty + dy] for dx in (-6, 20, 46) for dy in (-6, 30, 66)]))
+        pts = np.vstack(taken); best, gap = None, 6.0
+        for cx in np.arange(r + 4, B - r - 3, 8.0):
+            for cy in np.arange(r + 4, B - r - 3, 8.0):
+                d = float(np.hypot(pts[:, 0] - cx, pts[:, 1] - cy).min()) - r
+                if d > gap:
+                    best, gap = (float(cx), float(cy)), d
+        note = "No room on the plate for the purge coaster beside this piece; it was left out."
+        if best is None:
+            if note not in self.warnings:
+                self.warnings.append(note)
+            return
+        objects.append({"name": "Purge coaster", "position": best, "parts": [("Purge coaster", mesh, idx(colour))],
+                        "settings": dict(SOLID_OBJECT, flush_into_objects="1")})
+
     def _centre(self, half):
         """Where the piece goes. One colour: no prime tower, so dead centre. With a tower: dodge it, or for round
         pieces up to ~116 mm radius sit in the centre and park the tower in the far corner instead. Three or more
@@ -252,7 +302,9 @@ class Build:
             tx = printer.BED - printer.TOWER[2] - 20                 # 20 mm margins: the tower's brim and growth
             self.overrides = dict(self.overrides, wipe_tower_x=[f"{tx:g}"], wipe_tower_y=["20"])
             x = min(c, tx - 8 - half)
-            return (max(half + 6, x), c)
+            if x >= half + 6:
+                return (x, c)
+            return self._corner_layout(deep=True)             # too wide to stand beside the tower
         safe = printer.TOWER[0] - printer.TOWER[2] / 2 - 8
         if c + half <= safe:
             return (c, c)
@@ -265,7 +317,24 @@ class Build:
         if half <= c - 10 and self.round_footprint():
             self.overrides = dict(self.overrides, wipe_tower_x=["218"], wipe_tower_y=["218"])
             return (c, c)
-        return (max(half + 8, safe - half), max(half + 8, safe - half))
+        return self._corner_layout(deep=False)
+
+    def _corner_layout(self, deep):
+        """A piece that nearly fills the bed: push it into the back-left corner and park the tower hard in the
+        front-right one. If they still meet, say so (once) rather than write a plate that cannot print."""
+        v = np.vstack([np.asarray(m.vertices)[:, :2] for _, m, _, _ in self.parts])
+        (x0, y0), (x1, y1) = v.min(0), v.max(0); B = printer.BED
+        px, py = 2.0 - x0, B - 2.0 - y1
+        tw = printer.TOWER[2] + 6.0; td = 60.0 if deep else 36.0     # tower + brim; 3+ colours grow backwards
+        tx, ty = B - tw - 2.0, 6.0
+        self.overrides = dict(self.overrides, wipe_tower_x=[f"{tx + 3:g}"], wipe_tower_y=[f"{ty:g}"])
+        q = v + [px, py]; m = 5.0
+        hit = bool(((q[:, 0] > tx - m) & (q[:, 1] < ty + td + m) & (q[:, 1] > ty - m)).any()) or x1 - x0 > B - 2 or y1 - y0 > B - 2
+        note = ("This piece nearly fills the bed and the prime tower does not fit beside it. Turn the tower off "
+                "(tower=off), use fewer colours, or make it smaller.")
+        if hit and note not in self.warnings:
+            self.warnings.append(note)
+        return (float(px), float(py))
 
     def round_footprint(self):
         v = np.vstack([m.vertices for _, m, _, _ in self.parts])
@@ -1406,7 +1475,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
             lid_plate = "own"
         if "lid" in stats:
             stats["lid"].update(plate=lid_plate, swaps=len(lid_alone) if lid_plate == "own" else 0)
-    tower = True
+    tower = True; purge_coaster = None
     if options.get("tower") == "off":                       # purge goes to the chute only: no tower, no tower sliver
         tower = False; over["enable_prime_tower"] = "0"
         if stats.get("swaps"):
@@ -1416,7 +1485,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
                             "colour can carry a little of the old one. Fine on most pieces — try a small one first.")
     if options.get("purge_piece") == "coaster" and len({c for _, _, _, c in parts}) > 1:
         coaster = trimesh.creation.cylinder(radius=45.0, height=6.0, sections=96); coaster.apply_translation([0, 0, 3.0])
-        lid_parts = list(lid_parts) + [("Purge coaster", coaster, 1, parts[0][3])]
+        purge_coaster = (coaster, parts[0][3])                  # it prints beside the PIECE, whichever plate the lid is on
         warnings.append("The coaster soaks up part of the purge (Bambu's flush-into-object). In a test it took about "
                         "3 g per 40 mm block — a modest saving that turns waste into a coaster.")
     mats = options.get("material")
@@ -1460,7 +1529,10 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
                            layer_h=float(over.get("layer_height", nz.layer_h)))
         warnings.append("No prime tower: only the inlay's layers are primed, on a small block beside the piece. Every "
                         "other colour change starts unprimed; the seam is at the back.")
-    return Build(shape, texture, nz.size, v, T["family"], parts, stats, over, warnings, preview,
+    made = Build(shape, texture, nz.size, v, T["family"], parts, stats, over, warnings, preview,
                  ranges=ranges, per_filament=per_filament, flush_mult=flush_mult, draft=draft,
                  extras=lid_parts, assembled=assembled, lid_plate=lid_plate, tower=tower, prime_block=prime_block,
-                 material=material)
+                 material=material, coaster=purge_coaster, picked=list(colours))
+    if not made.extras:                                     # lay the plate out now, so a piece that cannot share the
+        made._centre(max(float(np.abs(m_.bounds[:, :2]).max()) for _, m_, _, _ in parts))     # bed with its tower says so
+    return made

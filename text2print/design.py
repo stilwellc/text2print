@@ -41,8 +41,15 @@ def from_link(url):
             out["options"]["chart"] = _json(v, "chart")
         elif k in sizes:
             out["params"][k] = float(v)
+        elif k in toggles:
+            out["options"][k] = v == "1"
+        elif v[:1] in "[{":                                   # a structured value (a hand-set loop spec, a material list)
+            try:
+                out["options"][k] = json.loads(v)
+            except json.JSONDecodeError:
+                out["options"][k] = v
         else:
-            out["options"][k] = (v == "1") if k in toggles else v
+            out["options"][k] = v
     return out
 
 
@@ -73,6 +80,8 @@ def to_link(design, base=STUDIO):
         elif isinstance(v, (str, int, float)):
             if v != "":
                 q.append((k, str(v)))
+        elif isinstance(v, (dict, list)):
+            q.append((k, json.dumps(v, separators=(",", ":"))))
         elif v is not None:
             dropped.append(k)
     return base.rstrip("/") + "/?" + urllib.parse.urlencode(q), dropped
