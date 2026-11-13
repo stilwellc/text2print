@@ -111,3 +111,84 @@ def test_the_picker_offers_loops_filament_and_even_droop_rows():
     keys = lambda fam: {o[0] for o in build.OPTIONS[fam]}
     assert {"loops", "loop_colour", "loop_size", "material"} <= keys("colourwork")
     assert {"rows", "panels", "material"} <= keys("droop") and all("material" in keys(f) for f in build.OPTIONS)
+
+
+# ── defects found in review (Nov 2026): each of these crashed or wrote the wrong settings ──
+C4 = ["#8B3A2F", "#EDE3D1", "#C58A3F", "#2E4E7E"]
+
+
+def _cfg(b, path):
+    with zipfile.ZipFile(b.write_3mf(path)) as z:
+        return json.loads(z.read("Metadata/project_settings.config")), z.read("3D/3dmodel.model").decode()
+
+
+def test_a_lid_in_its_own_colour_writes_with_petg_and_with_loops(tmp_path):
+    b = build.make("cup", "zigzag", {"diameter": 60, "height": 40}, colours=C4, draft=True,
+                   options={"material": "petg", "lid": "slip", "lid_texture": "plain", "lid_colours": ["#2E4E7E"], "lid_plate": "same"})
+    cfg, _ = _cfg(b, tmp_path / "a.3mf")
+    assert set(cfg["filament_type"]) == {"PETG"} and len(cfg["filament_type"]) == len(cfg["filament_colour"])
+    b = build.make("vase", "jacquard", {}, colours=C4, draft=True,
+                   options={"loops": "tiers", "lid": "slip", "lid_texture": "plain", "lid_colours": ["#2E4E7E"], "lid_plate": "same"})
+    cfg, _ = _cfg(b, tmp_path / "b.3mf")
+    assert len(cfg["slow_down_layer_time"]) == len(cfg["filament_colour"])
+
+
+def test_material_accepts_a_mixed_list_any_case_and_families_with_their_own_colours(tmp_path):
+    cfg, _ = _cfg(build.make("cup", "zigzag", {}, colours=C4, options={"zones": 2, "material": ["pla", "petg"]}, draft=True), tmp_path / "a.3mf")
+    assert cfg["filament_type"] == ["PLA", "PETG"]
+    assert build.make("cup", "zigzag", {}, options={"material": "PLA"}, draft=True).per_filament is None
+    cfg, _ = _cfg(build.make("tile", "flatlitho", {}, options={"material": "petg"}, draft=True), tmp_path / "b.3mf")
+    assert set(cfg["filament_type"]) == {"PETG"}
+    with pytest.raises(ValueError, match="Materials: pla"):
+        build.make("cup", "zigzag", {}, options={"material": "nylon"}, draft=True)
+
+
+def test_petg_keeps_a_familys_own_cooling_but_not_pla_stock_values():
+    mix = build.make("cup", "mix", {}, colours=C4, options={"material": "petg"}, draft=True).per_filament
+    assert set(mix["fan_max_speed"]) == {"90"}                   # the PETG preset's, not PLA Matte's 100
+    fur = build.make("cup", "fur", {"diameter": 60, "height": 60}, colours=C4, options={"zones": 2}, draft=True).per_filament
+    assert set(fur["fan_max_speed"]) == {"100"}                  # fur needs full fan; zones once gave it the droop fan
+
+
+def test_inlay_priming_stays_on_the_tower_when_a_lid_shares_the_job():
+    b = build.make("vase", "jacquard", {}, colours=C4[:2], options={"inlay_text": "CS", "tower": "inlay", "lid": "slip"}, draft=True)
+    assert b.tower and not b.prime_block and any("tower=inlay" in w for w in b.warnings)
+
+
+def test_a_wide_piece_is_written_on_the_bed(tmp_path):
+    import re
+    b = build.make("box", "twill", {"width": 250, "depth": 200}, colours=C4[:2], draft=True)
+    _, model = _cfg(b, tmp_path / "a.3mf")
+    t = re.search(r'<item[^>]*transform="([^"]+)"', model).group(1).split(); px, py = float(t[9]), float(t[10])
+    v = np.vstack([m.vertices[:, :2] for _, m, _, _ in b.parts])
+    assert v[:, 0].min() + px >= 0 and v[:, 0].max() + px <= printer.BED and v[:, 1].min() + py >= 0 and v[:, 1].max() + py <= printer.BED
+
+
+def test_even_rows_alone_switch_the_rows_on():
+    loose = build.make("cup", "fringe", {"diameter": 60, "height": 70}, draft=True).stats
+    even = build.make("cup", "fringe", {"diameter": 60, "height": 70}, options={"rows": "even"}, draft=True).stats
+    assert even["strands"] != loose["strands"] and even["reach"] < loose["reach"]
+
+
+def test_course_boundaries_never_fall_inside_a_strand():
+    nz = printer.nozzle(0.4); S = SHAPES["cup"]; v = S.defaults(); prof = S.profile(v)[0]; lh = nz.layer_h
+    spots = droop._rows("fringe", prof, v["height"], nz, 1.0, 1.0, aligned=True)
+    layers = [(math.floor(z / lh), math.floor(z / lh) + round(hh / lh)) for _, _, _, z, hh, _, _ in spots]
+    for edge in droop.courses(spots, lh):
+        k = round(edge / lh)
+        assert not any(a < k < b for a, b in layers)
+
+
+def test_short_loops_do_not_fold_back_through_the_wall():
+    from shapely.geometry import Polygon
+    for L in (2.2, 3.0, 4.0, 9.0):
+        u, s_ = droop._teardrop(L, 4.0, 0.7)
+        assert u.min() >= -1e-9 and Polygon(np.column_stack([u, s_])).is_valid
+
+
+def test_petals_on_bead_knit_keep_their_collar_and_colours():
+    S = SHAPES["cup"]; v = S.defaults(); nz = printer.nozzle(0.4)
+    chart, spec = loops.resolve("petals", {"band": 2}, S, v, nz, 2, style="beads")
+    meshes, info = colourwork.build(S, v, nz, style="beads", chart=chart, band=2, draft=True, options={})
+    knit_top = max(i for i, s_ in enumerate(info["seq"]) if s_[0] == "cw") * info["layer_h"]
+    assert knit_top < v["height"] - spec["collar"] + 3.0          # the bare collar is still there

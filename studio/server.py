@@ -98,6 +98,31 @@ def _coupon_name(c):
     return build.TEXTURES[tex]["name"]
 
 
+PORT = [7384]                                   # the port this server answers on (set by run)
+
+
+def _loopback(netloc):
+    """127.0.0.1 or localhost on this server's port. (No port at all is Flask's test client: no socket, no browser.)"""
+    host, sep, port = (netloc or "").rpartition(":")
+    if not sep:
+        return netloc == "localhost" and app.testing
+    return host in ("127.0.0.1", "localhost") and port == str(PORT[0])
+
+
+@app.before_request
+def only_this_machine():
+    """The studio can write files, launch Claude and start a print, so only its own page may call it.
+    Host must be this server: that stops DNS rebinding, because a rebound page still sends its own host name.
+    A request that carries an Origin must come from this server: browsers attach Origin to every cross-site
+    request that can change state, so another site's script or form is refused. A request with no Origin is not
+    from a web page (curl, the tests) and is allowed."""
+    if not _loopback(request.host):
+        abort(403)
+    origin = request.headers.get("Origin")
+    if origin is not None and not _loopback(origin.split("://", 1)[-1]):
+        abort(403)
+
+
 @app.get("/")
 def index():
     return send_from_directory(STATIC, "index.html")
@@ -283,7 +308,11 @@ def api_taste():
     b = request.get_json(force=True) or {}
     if b.get("verdict") not in ("like", "dislike"):
         return jsonify(error="like or dislike"), 400
-    return jsonify(line=ask.note_taste(b["verdict"], b.get("design"), (b.get("note") or "")[:300]))
+    d = b.get("design") if isinstance(b.get("design"), dict) else {}
+    clean = lambda v: " ".join(str(v).split())[:60]             # one line, short: this text is pasted into prompts
+    d = dict(d, shape=clean(d.get("shape", "")), texture=clean(d.get("texture", "")),
+             colours=[clean(c)[:9] for c in (d.get("colours") or [])[:4] if isinstance(c, str)])
+    return jsonify(line=ask.note_taste(b["verdict"], d, clean(b.get("note") or "")[:300]))
 
 
 @app.get("/api/thumb/shape/<key>")
@@ -547,6 +576,7 @@ def send(jid):
 
 def run(port=7384, browser=True):
     WORK.mkdir(parents=True, exist_ok=True)
+    PORT[0] = int(port)
     url = f"http://127.0.0.1:{port}/"
     if browser:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()

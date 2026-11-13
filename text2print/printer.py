@@ -180,7 +180,12 @@ def material_settings(size, materials):
     out = {"filament_settings_id": [], "filament_ids": [], "filament_type": []}
     chains = []
     for m in materials:
-        fam = MATERIALS.get(str(m).lower(), m)
+        if str(m).strip().lower() in ("pla", ""):               # this slot stays on the base PLA Matte preset
+            chains.append(dict(base, filament_id=(base.get("filament_ids") or ["GFA00"])[0]))
+            out["filament_settings_id"].append((base.get("filament_settings_id") or [""])[0])
+            out["filament_ids"].append((base.get("filament_ids") or ["GFA00"])[0]); out["filament_type"].append("PLA")
+            continue
+        fam = MATERIALS.get(str(m).strip().lower(), m)
         name = f"{fam} @BBL P2S {n.size} nozzle"
         if not any((d / f"{name}.json").exists() for d in _FIL_DIRS):       # generic presets: one file for 0.4-0.8
             name = f"{fam} @BBL P2S"

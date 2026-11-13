@@ -8,6 +8,7 @@ from studio import server  # noqa: E402
 
 @pytest.fixture
 def client():
+    server.app.testing = True
     return server.app.test_client()
 
 
@@ -65,3 +66,20 @@ def test_catalogue_has_status_plates_and_lan(client):
     tw = next(t for t in c["textures"] if t["key"] == "twill")
     assert tw["status"]["0.4"] == "printed" and {p["key"] for p in c["plates"]} == {"woven", "colour", "droop", "fabric", "fit", "band", "courses", "lids", "fur"}
     assert "configured" in c["lan"]
+
+
+def test_only_the_studios_own_page_may_call_the_api(client):
+    """The studio can write files, launch Claude and start a print: another site's script, or a page that has
+    rebound its host name to 127.0.0.1, must be refused."""
+    assert client.get("/api/designs").status_code == 200
+    assert client.get("/api/designs", headers={"Host": "evil.example:7384"}).status_code == 403          # DNS rebinding
+    assert client.post("/api/build", data="{}", headers={"Origin": "https://evil.example", "Content-Type": "text/plain"}).status_code == 403
+    assert client.post("/api/taste", json={"verdict": "like"}, headers={"Origin": "http://evil.example:7384"}).status_code == 403
+    assert client.post("/api/taste", json={"verdict": "nope"}, headers={"Origin": "http://localhost"}).status_code == 400   # own page: reaches the route
+
+
+def test_a_saved_designs_id_can_never_be_a_path(client, tmp_path, monkeypatch):
+    from text2print import store
+    monkeypatch.setattr(store, "HOME", tmp_path / "home")
+    r = client.post("/api/designs", json={"id": "../../pwn", "name": "x", "thumb": "data:image/png;base64,AAAA"}).get_json()
+    assert r["id"] != "../../pwn" and not list(tmp_path.glob("**/pwn.png"))

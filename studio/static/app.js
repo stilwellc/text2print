@@ -88,7 +88,7 @@ function linkFor() {
     for (const k of ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_slot", "lid_slot2", "lid_plate", "lid_over_w", "lid_over_d", "floor_skin", "floor_border", "floor_text", "lid_lines", "tower", "engrave_base", "engrave_lid", "engrave_font"]) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k]);
   }
   if (state.options.image && IMAGE_TEXTURES.includes(state.texture)) q.set("image", state.options.image);
-  for (const k of ["engrave_base", "engrave_font"]) if (state.options[k]) q.set(k, state.options[k]);
+  for (const k of ["engrave_base", "engrave_font", "tower", "inlay_text"]) if (state.options[k]) q.set(k, state.options[k]);
   for (const [k, v] of Object.entries(state.options)) if (k.startsWith("pp_")) q.set(k, v);
   if (textureOf(state.texture).family === "lattice") {
     for (const k of WEAVE_KEYS) if (state.options[k] !== undefined && state.options[k] !== "") q.set(k, state.options[k]);
@@ -461,7 +461,7 @@ function renderAll() { if (!askDrawn) { askDrawn = true; renderAsk(); } renderSh
 
 function buildOptions() {
   const lidKeys = ["lid", "lid_colour", "lid_fit", "lid_texture", "lid_height", "lid_knob", "lid_plate", "tower", "engrave_base", "engrave_lid", "engrave_font"];
-  const o = isMix() ? { bands: state.bands, purge: state.options.purge } : { ...state.options };
+  const o = isMix() ? { bands: state.bands, purge: state.options.purge, material: state.options.material } : { ...state.options };
   for (const k of lidKeys) if (state.options[k] !== undefined) o[k] = state.options[k];
   const ls = lidSlots();
   if (ls.length) o.lid_colours = ls.map((i) => state.colours[i]);

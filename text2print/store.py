@@ -7,7 +7,7 @@ import pathlib
 import time
 import uuid
 
-HOME = pathlib.Path(os.environ.get("TEXT2PRINT_HOME", pathlib.Path.home() / ".text2print"))
+HOME = pathlib.Path(os.environ.get("T2P_HOME") or os.environ.get("TEXT2PRINT_HOME") or pathlib.Path.home() / ".text2print")
 IMAGES = HOME / "images"
 MAX_IMAGE = 8 * 1024 * 1024
 
@@ -66,9 +66,15 @@ def designs():
     return _read("designs.json", [])
 
 
+def _id(did):
+    """A design id is short hex. Anything else (a path, say) is replaced, never used as a file name."""
+    did = str(did or "")
+    return did if 0 < len(did) <= 32 and all(c in "0123456789abcdef" for c in did) else None
+
+
 def save_design(entry: dict):
     data = designs()
-    entry = dict(entry, id=entry.get("id") or uuid.uuid4().hex[:10], saved=time.time())
+    entry = dict(entry, id=_id(entry.get("id")) or uuid.uuid4().hex[:10], saved=time.time())
     data = [d for d in data if d["id"] != entry["id"]] + [entry]
     _write("designs.json", data[-200:])
     return entry
@@ -76,16 +82,20 @@ def save_design(entry: dict):
 
 def delete_design(did):
     data = [d for d in designs() if d["id"] != did]; _write("designs.json", data)
-    thumb = HOME / "thumbs" / f"{did}.png"
-    thumb.unlink(missing_ok=True)
+    if _id(did):
+        (HOME / "thumbs" / f"{did}.png").unlink(missing_ok=True)
 
 
 def save_thumb(did, png: bytes):
+    if not _id(did) or not png.startswith(b"\x89PNG"):
+        return
     (HOME / "thumbs").mkdir(parents=True, exist_ok=True)
     (HOME / "thumbs" / f"{did}.png").write_bytes(png[:2_000_000])
 
 
 def thumb_path(did):
+    if not _id(did):
+        return None
     p = HOME / "thumbs" / f"{did}.png"
     return p if p.exists() else None
 
@@ -97,6 +107,8 @@ def printer_config():
 
 def save_printer_config(cfg: dict):
     keep = {k: str(cfg.get(k, "")).strip() for k in ("ip", "serial", "access_code", "name")}
+    if not keep["access_code"]:                                 # the dialog leaves the code blank to mean "unchanged"
+        keep["access_code"] = str(printer_config().get("access_code", ""))
     _write("printer.json", keep)
     try:
         os.chmod(HOME / "printer.json", 0o600)

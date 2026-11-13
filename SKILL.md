@@ -8,25 +8,69 @@ description: Textured 3D prints for a Bambu Lab P2S, picked from a catalogue. Us
 Everything here is a TEXTURE ON A SHAPE. Don't model from scratch: pick from the catalogue, set sizes,
 build, and hand over the Bambu project. Repo: ~/Dev/text2print (python package `text2print`, studio in `studio/`).
 
-## Use it
+## Use it from the command line
+
+Everything the studio does is available without it. `t2p` (in the repo root) runs from any folder; it is
+`.venv/bin/python -m text2print` with the path set. Every command prints JSON; a bad request exits 2 with
+`{"error": "..."}` that says what to fix; a failed slice exits 1.
 
 ```bash
-cd ~/Dev/text2print
-.venv/bin/python -m text2print list                                   # shapes, textures, what fits
-.venv/bin/python -m text2print studio                                 # the picker, http://127.0.0.1:7384
-.venv/bin/python -m text2print make <shape> <texture> --set key=mm ... --colours "#hex,#hex" \
-    --nozzle 0.4 --out ~/Downloads/<name> --slice --render              # 3MF + STLs (+ CLI slice, render)
+T=~/Dev/text2print/t2p
+$T list                               # shapes, their sizes, the textures that fit each
+$T options jacquard                   # every option a texture takes, its choices and default (--json)
+$T catalogue                          # everything a design can use, as JSON: mixes, charts, lids, pictures, palette
+$T make cup twill --set diameter=90 --colours "#8B3A2F,#EDE3D1" --out ~/Downloads/cup --preview --slice
+$T make vase jacquard --option loops=tiers --option band=2 --colours "#2E4E7E,#E8752F,#F3D34A" --out ~/Downloads/tiers
+$T make --design piece.json --out ~/Downloads/piece --preview --slice --save "Piece" --open
 ```
 
-Deep-link the studio to a pick for the user: `/?shape=tray&texture=twill&nozzle=0.4&width=117&c=8B3A2F,EDE3D1`.
-In Python: `from text2print import build; b = build.make("tray", "twill", {"width": 117}); b.write_3mf(path)`.
+**The loop:** find the names (`list`, `options TEXTURE`, `catalogue`) -> write a design -> `make ... --draft --preview`
+and LOOK at the PNG -> adjust -> `make ... --preview --slice` for the real project and the slicer's time and grams ->
+hand over the folder. `--draft` is a sketch for looking, never for printing.
 
-More CLI: `sampler --nozzle 0.4 --slice` (test plates) · `verify <texture> <nozzle> ok|fail --note` (records a print;
-drives the Printed badges and warnings) · `make ... --option zones=3 --option lid=lid`.
+**A design** is one JSON object, and `--design` takes it as a file, `-` (stdin), a studio link, or a saved design's name:
+
+```json
+{"shape": "cup", "texture": "jacquard", "nozzle": 0.4,
+ "params": {"diameter": 90, "height": 110},
+ "colours": ["#151515", "#F4F2EC"],
+ "options": {"loops": "shag", "band": 2, "stitch_size": "fine", "material": "petg"}}
+```
+
+Sizes go in `params` (mm; `list` shows each shape's), everything else in `options`. `--set k=mm`, `--option k=value`,
+`--colours`, `--nozzle` change a loaded design. An option value that is JSON is read as JSON, so mixes and charts fit
+on the command line: `--option 'bands=[{"texture":"plain","share":1},{"texture":"twill","share":2}]'`,
+`--option 'chart=[{"motif":"hearts","colours":[0,1]},{"plain":0,"mm":6}]'`.
+
+**`make` flags:** `--out DIR` · `--name STEM` · `--draft` · `--preview` (`STEM_preview.png`: loops and strands hung as
+they fall, lid on) · `--render` (`STEM.png`: as printed) · `--slice` (Bambu Studio CLI: real time, grams, layers) · `--no-stls` · `--save NAME` (adds it to the
+studio's Saved list) · `--open` (opens the project in Bambu Studio) · `--image PHOTO` (halftone, litho, flat).
+**Output:** `project`, `design` (as built), `link` (opens the same design in the studio), `params`, `stats` (size,
+swaps = AMS changes, grams_est, strands...), `warnings` (read them: they include options whose value is not a known
+choice), `watertight`, and `render` / `slice` / `saved` when asked.
+
+**Other commands**
+
+| Command | What it does |
+|---|---|
+| `designs list` / `show NAME` / `save SPEC --name N` / `delete NAME` | the studio's Saved list |
+| `link SPEC` | a studio link for a design; given a link, prints the design as JSON |
+| `design check FILE.json [--draft] [--preview PNG]` · `design slice FILE.json` | build and report without writing a project; slice with real AMS changes |
+| `picture prepare PHOTO --out NAME` · `picture text WORDS` · `pictures` · `palette match PHOTO` | photos and words as pictures; a photo's colours as filaments |
+| `plugin list` / `new KIND NAME` / `check FILE` | user-written textures, pictures, charts and shapes |
+| `sampler --nozzle 0.4 [--slice]` | test plates |
+| `verify TEXTURE NOZZLE ok\|fail --note "..."` | record a real print; drives the Printed badges and warnings |
+| `printer status` / `printer test` | is a LAN printer set up; connection check (never prints) |
+| `send SPEC --confirm` | slices and STARTS A PRINT. Only when the person has said to print it |
+| `studio [--port N] [--no-browser]` | the picker, when they want to look and drag |
+
 Options worth knowing: zones 1-4 + zone_style bands|stripes (fabric, droop; lattice with colour_by=height),
-lid=slip|thread|magnets + lid_fit=snug|slip|loose (+ lid_colour) on cup/vase/bowl/dish/tray/custom, purge=lean,
+lid=slip|gift|thread|magnets + lid_fit=snug|slip|loose (+ lid_colour, lid_texture, lid_knob), purge=lean, tower=off,
 picture/--image for halftone, litho and flat; halftone band=1|2|3, area=full|half|third, silk=silk,
-purge_piece=coaster; spiral folds/turn; shell cell (voronoi), noise + fuzzy_bands (fuzzy).
+purge_piece=coaster; spiral folds/turn; shell cell (voronoi), noise + fuzzy_bands (fuzzy); droop rows=even,
+panels=2|3; colourwork loops=tiers|shag|fringe|window|petals, loop_colour, loop_size; material=petg on anything.
+
+In Python: `from text2print import design; d, b = design.build_design({...}); b.write_3mf(path)`.
 
 Deliver to ~/Downloads/<project>/ (Collin's rule): the .3mf, the per-colour STLs, a render, and the numbers
 from `--slice` plus the AMS change estimate in `stats`.
@@ -44,7 +88,7 @@ boundaries + build._course_edges; curls snap to the row grid when aligned) | ban
 Slicer-verified: 3-colour swag cup = 13 changes in both app and slicer. `Build.preview` holds the strands hung
 by gravity (display only — strands pass through each other); the print files carry the flat strands.
 Halftone (`halftone.py`, texture "halftone" on cup/vase/bowl/goblet): options picture = flames|fade|dots|chevron|waves,
-band = 1|2 layers per colour, CLI `--image path` (dark = colour 1). Recipe `halftone.RECIPE`: layer = nozzle max
+band = 1|2|3 layers per colour, CLI `--image path` (dark = colour 1). Recipe `halftone.RECIPE`: layer = nozzle max
 (0.7 x nozzle), one line 2.5x (0.2/0.4) to 1.75x (0.8) the nozzle, 1 wall, 0 % infill. Colour flips every layer;
 rib swing = min(0.5, 0.6 - local wall lean) x line. Stats split grams_part and grams_purge.
 Vase mode (`spiral.py`, family "spiral"): pleats, flutes, twist, lowpoly, pinch print in spiral_mode (one wall,
@@ -64,7 +108,7 @@ r - R -> along the normal; floors scale in from 4 mm inside the wall). Basket ha
 plug = opening buffered -clear, LIP_W ring; plate = convex hull of the outline + 0.6). Per-family shape cards:
 thumbs.render_family_shapes -> static/thumbs/shape_<key>__<family>.png; the studio shows the picked family's card.
 Mix (`compose.py`, texture "mix" on cup/vase/bowl/goblet): options {"bands": [{texture, share, slot, slot2?, options}]}
-bottom-up; textures from `compose.MIXABLE` (plain + fabric + halftone + droop; never lattice or candle). One layer
+bottom-up; textures from `compose.MIXABLE` (plain, fabric, halftone, droop and the woven bands listed below; never candle). One layer
 height (nozzle standard) and the fabric shell for all bands; each band emits per-layer contours, same-colour runs
 become staircase solids, a same-colour neighbour reaches 1/4 layer down and is unioned (never coplanar); droop
 strands union into their band's colour (a strand adding a body raises). Any droop band -> droop cooling for the
@@ -155,7 +199,7 @@ the `scaled()` displacement. New shape: a `Block`, `Vessel` or `Profiled` entry 
 Then `python -m text2print thumbs` and `python -m pytest`. Verify visually: render, and screenshot the studio.
 
 ## Verification sweeps (Oct 14)
-- Geometry: every shape x texture (519) builds watertight at 0.4 full and 0.8 draft (script pattern: loop
+- Geometry: every shape x texture (800 today) builds watertight at 0.4 full and 0.8 draft (script pattern: loop
   build.compatible pairs, record wt/size/swaps/sec). Found + fixed: catchall+melt zero-volume flap (meshops.drop_flaps).
 - Slicer: one texture per shape x family (121) slices with zero CLI errors; app colour-change counts equal the
   slicer's except the lantern (fitting shares layers; build._geom_transitions recounts from geometry, ~1 % off).

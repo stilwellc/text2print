@@ -141,7 +141,7 @@ def _prompt(T, request, current, py, plugins, photo, mode, variations, budget):
                plugins=plugins, work=T["work"], home=HOME)
     fmt["rules"] = RULES.format(memory=_memory(), **fmt)
     fmt["photo"] = (f"\nThey added a photo: {photo}  (Read it).\n" if photo and mode != "review" else "")
-    b = {k: v for k, v in (budget or {}).items() if v}
+    b = {k: v for k, v in (budget.items() if isinstance(budget, dict) else []) if v and k in ("hours", "changes", "grams")}
     fmt["budget"] = ("\nBudget — the design must fit: " + ", ".join(
         f"{ {'hours': 'print time ≤ ', 'changes': 'colour changes ≤ ', 'grams': 'filament ≤ '}[k]}{v}"
         + ({"hours": " h", "changes": "", "grams": " g"}[k]) for k, v in b.items()) + " (confirm with design slice).\n") if b else ""
