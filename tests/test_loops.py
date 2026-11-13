@@ -280,33 +280,36 @@ def test_pour_cap_screws_into_an_open_hole_without_clashing(nozzle):
 
 
 def test_jar_lid_fluted_grip_is_one_clean_solid():
-    """grip=1: the lid is one solid; its flutes sit between two plain bands, so both rims are true circles, and the
-    one on the pour axis is left out; the cap is cut with the same tool; the second colour is a thin ring on the cap
-    and a tick on the lid, first five layers only; the pour boss stays clear of the jar's glass rim; the project holds two objects."""
+    """grip=1: the lid is one solid; its flutes sit between two plain bands, so both rims are true circles; on the
+    pour axis three flutes run together into one relief at the same depth; the knob is the lid's grip scaled down;
+    the accent is a thin ring on the knob and an arc on the lid, first five layers only; the pour boss stays clear
+    of the jar's glass rim; the project holds two objects."""
     import numpy as np
     from text2print.fittings import GRIP, MASON, POUR, _pour
-    b = build.make("jarlid", "domes", {"inside": 86, "skirt": 19, "wall": 6.35, "pour": 30, "grip": 1}, colours=["#F4F1E8", "#151515"])
+    b = build.make("jarlid", "domes", {"inside": 86, "skirt": 19, "wall": 6.35, "pour": 30, "grip": 1}, colours=["#151515", "#F4F1E8"])
     assert [n for n, *_ in b.parts] == ["fitting", "mark"] and [n for n, *_ in b.extras] == ["Pour cap", "Pour cap"]
     lid = b.parts[0][1]; h = 19 + MASON["top"]
     assert all(m.is_watertight and len(m.split(only_watertight=False)) == 1 for _, m, _, _ in b.parts + b.extras)
-    ink = [m for _, m, _, c in b.parts + b.extras if c == "#151515"]        # a tick on the lid, a ring on the cap
-    assert len(ink) == 2 and all(m.bounds[1][2] <= 1.0 + 1e-6 for m in ink)
-    assert max(m.extents[:2].min() for m in ink[:1]) <= GRIP["stroke"] + 1e-4 and ink[0].volume + ink[1].volume < 150   # thin strokes
-    R = 86 / 2 + MASON["clear"] + 6.35; step = 360.0 / GRIP["lid_flutes"]
+    ink = [m for _, m, _, c in b.parts + b.extras if c == "#F4F1E8"]        # an arc on the lid, a ring on the knob
+    assert len(ink) == 2 and all(m.bounds[1][2] <= 1.0 + 1e-6 for m in ink) and sum(m.volume for m in ink) < 160
+    R = 86 / 2 + MASON["clear"] + 6.35; step = 360.0 / GRIP["flutes"]
 
     def r_at(mesh, z, deg):
         pts = np.vstack(list(mesh.section(plane_origin=[0, 0, z], plane_normal=[0, 0, 1]).discrete))
         a = np.degrees(np.arctan2(pts[:, 1], pts[:, 0])); r = np.hypot(pts[:, 0], pts[:, 1])
-        return r[np.abs(a - deg) < 1].max()
-    assert abs(r_at(lid, h / 2, step / 2) - R) < 0.05                       # the lands keep the full wall
-    assert abs(r_at(lid, h / 2, step) - (R - GRIP["depth"])) < 0.1          # the flutes are cut to depth
-    assert abs(r_at(lid, h / 2, 0.0) - R) < 0.05                            # none on the pour axis
+        return r[np.abs(a - deg) < 0.6].max()
+    assert abs(r_at(lid, h / 2, 90 + step / 2) - R) < 0.05                  # the lands keep the full wall
+    assert abs(r_at(lid, h / 2, 90) - (R - GRIP["depth"])) < 0.1            # the flutes are cut to depth
+    assert abs(r_at(lid, h / 2, 0.0) - (R - GRIP["depth"])) < 0.1           # the pour relief: the same depth,
+    assert abs(r_at(lid, h / 2, step / 2) - (R - GRIP["depth"])) < 0.1      # right across between its flutes
     edge = GRIP["chamfer"] + GRIP["band"]
-    assert abs(r_at(lid, edge - 0.3, step) - R) < 0.05 and abs(r_at(lid, h - edge + 0.3, step) - R) < 0.05   # two plain bands
-    cap = b.extras[0][1]; Rc = 15 + POUR["cap_lip"]
-    assert abs(r_at(cap, POUR["cap_t"] - 2.0, 360.0 / GRIP["cap_flutes"]) - (Rc - GRIP["depth"])) < 0.1      # the same tool
+    for deg in (90, 0):                                                     # two plain bands: true circles at both rims
+        assert abs(r_at(lid, edge - 0.3, deg) - R) < 0.05 and abs(r_at(lid, h - edge + 0.3, deg) - R) < 0.05
+    cap = b.extras[0][1]; Rc = 15 + POUR["cap_lip"]; T = POUR["cap_t"]
+    assert abs(r_at(cap, T / 2 + 0.2, 90) - (Rc - GRIP["cap_depth"])) < 0.1 and abs(r_at(cap, T / 2 + 0.2, 90 + step / 2) - Rc) < 0.05
+    assert abs(r_at(cap, T - GRIP["foot"] - 0.4, 90) - Rc) < 0.05           # closed at the foot as well
     import tempfile, zipfile
-    with tempfile.TemporaryDirectory() as d:                                # the project: two objects, lid and cap
+    with tempfile.TemporaryDirectory() as d:                                # the project: two objects, lid and knob
         b.write_3mf(f"{d}/lid.3mf")
         cfg = zipfile.ZipFile(f"{d}/lid.3mf").read("Metadata/model_settings.config").decode()
     assert cfg.count("<object ") == 2 and cfg.count("<part ") == 4
