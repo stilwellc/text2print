@@ -90,15 +90,19 @@ def _pour_thread(r, z_from, z_to, outward):
 
 # A pour opening in a jar lid: a threaded hole near the edge with its own small screw cap (the house thread: two
 # starts, half a turn). The hole's boss grows INTO the jar, so the lid still prints top-face down with a flat top.
-POUR = dict(boss=4.0, depth_in=9.0, jar=8.0, cap_t=9.0, cap_lip=5.0, plain=2.6, lead=6.0, starts=2, depth=1.2, clear=0.25,
-            seat=2.0, gap=0.4, plug_wall=2.4)
+POUR = dict(boss=4.0, depth_in=9.0, jar=8.0, cap_t=11.0, cap_lip=5.0, plain=2.6, lead=6.0, starts=2, depth=1.2, clear=0.25,
+            seat=1.6, gap=0.8, plug_wall=2.4)
 # plain: bore above the top plate before the thread starts. seat: a 45-degree countersink the cap's cone drops into,
 # so the cap centres itself and closes on a cone, not flat on flat. gap: the shadow line left under the cap's flange.
 
 # One grip language for the lid and its cap: the same cutter (a 9 mm radius scoop, 1.8 deep) cut into both, starting
 # under a plain band and ending on 45-degree run-outs, so every rim is a true circle. One chamfer size on every edge.
 # The lid's flute on the pour axis is left out: that wide plain land is where you pour, found by eye or by thumb.
-GRIP = dict(cutter=9.0, depth=1.8, band=2.4, chamfer=1.6, foot=0.6, lid_flutes=18, cap_flutes=9, stroke=1.2, tick=7.2)
+GRIP = dict(cutter=6.0, depth=1.5, band=2.4, chamfer=1.6, flutes=24, lid_skip=3, cap_scale=1 / 3, cap_depth=0.8, cap_band=1.6,
+            cap_foot=1.6, foot=0.8, stroke=1.2, land=5.0)
+# The knob is the lid at cap_scale: the same count of flutes at the same angles, cut with the lid's cutter scaled
+# down, between equal bands. land: the plain strip left between flutes. The pour relief is the three flutes on the
+# pour axis run together into one, at the flutes' own depth, square under the upper band: a step that breaks a dribble.
 
 
 def _pour(v):
@@ -122,11 +126,11 @@ def _edge(R, z, c, low):
     return _ring(R - c - 1.0, R + 2.0, z - c, z + 1.0) - m3d.Manifold.cylinder(c + 2.0, R + 1.0, R - c - 1.0, 180).translate([0, 0, z - c - 1.0])
 
 
-def _flutes(R, n, z_lo, z_hi, skip=()):
+def _flutes(R, n, z_lo, z_hi, skip=(), rc=None, dep=None):
     """n scoops round a cylinder of radius R, full depth from z_lo + depth to z_hi - depth, with 45-degree run-outs
     to nothing at z_lo and z_hi (z_hi None: the scoop runs out through the end). Flute k sits at k * 360 / n."""
     import manifold3d as m3d
-    G = GRIP; rc = G["cutter"]; dep = G["depth"]; d = R + rc - dep; a0 = z_lo + dep
+    G = GRIP; rc = rc or G["cutter"]; dep = dep or G["depth"]; d = R + rc - dep; a0 = z_lo + dep
     top = (z_hi - dep) if z_hi is not None else a0 + 200.0
     tool = (m3d.Manifold.cylinder(top - a0, rc, rc, 128).translate([0, 0, a0])
             + m3d.Manifold.cylinder(rc, 0.0, rc, 128).translate([0, 0, a0 - rc]))
@@ -147,38 +151,59 @@ def pour_cap(v):
     z_t = MASON["top"] + P["plain"]
     ridges, r_p = _pour_thread(r, face + z_t, face + z_top - 0.2, +1)    # the same span as the bore's
     R = r + P["cap_lip"]; knob = m3d.Manifold.cylinder(T, R, R, 180)
-    for cut in _flutes(R, G["cap_flutes"], G["chamfer"] + G["band"], None) + [_edge(R, 0.0, G["chamfer"], True), _edge(R, T, G["foot"], False)]:
+    cuts = _flutes(R, G["flutes"], G["chamfer"] + G["cap_band"], T - G["foot"] - G["cap_foot"],
+                   rc=G["cutter"] * G["cap_scale"], dep=G["cap_depth"])
+    for cut in cuts + [_edge(R, 0.0, G["chamfer"], True), _edge(R, T, G["foot"], False)]:
         knob = knob - cut
     rs = r + P["seat"] - 0.15                                            # the cone, a hair under the countersink
     cone = _cyl(rs, T - 0.01, face) + m3d.Manifold.cylinder(P["seat"], rs, rs - P["seat"], 180).translate([0, 0, face])
     h = z_top - 0.4                                                      # the plug stops short of the boss's end
     plug = _cyl(r_p, T - 0.01, face + h) + ridges
+    plug = plug - _edge(r_p + P["depth"], face + h, P["depth"] + 0.8, False)      # a blunt, chamfered start to find the thread with
     bore = _cyl(r_p - P["plug_wall"], T + 1.2, face + h + 1.0)
     return _t(knob + cone + plug - bore)
 
 
+def _arc(r_in, r_out, deg, z0, z1):
+    """An arc band centred on +x, spanning deg degrees, its ends cut square on the radius."""
+    import manifold3d as m3d
+    n = max(8, int(deg)); A = [math.radians(-deg / 2 + deg * k / n) for k in range(n + 1)]
+    pts = [(r_out * math.cos(a), r_out * math.sin(a)) for a in A] + [(r_in * math.cos(a), r_in * math.sin(a)) for a in reversed(A)]
+    return m3d.CrossSection([pts]).extrude(z1 - z0).translate([0, 0, z0])
+
+
+def _land_span(R):
+    """Degrees of arc of the pour relief: its outer flutes' centres plus half a flute's width each side."""
+    G = GRIP; n = G["flutes"]
+    half_flute = math.degrees(math.asin(math.sqrt(G["cutter"] ** 2 - (G["cutter"] - G["depth"]) ** 2) / R))
+    return 360.0 * (G["lid_skip"] - 1) / n + 2 * half_flute
+
+
 def grip_marks(v, depth):
-    """The accent colour, in the first layers of the top faces only, both in one stroke width on the pour axis: a
-    thin ring on the cap (the part you turn) and a short tick at the lid's rim (where it pours, above the plain
-    land). -> (lid tick, cap ring) manifolds in each part's own frame, or None."""
+    """The accent colour, in the first layers of the top faces only, both one stroke wide and the same margin in from
+    their edge: a ring on the knob (the part you turn) and an arc along the lid's rim, exactly as long as the pour
+    relief under it (the edge it pours over). -> (lid arc, knob ring) manifolds in each part's own frame, or None."""
     import manifold3d as m3d
     spec = _pour(v)
     if spec is None:
         return None
     r, cx, _ = spec; G = GRIP; w = G["stroke"]; inset = G["chamfer"] + G["band"]
     R = v["inside"] / 2 + MASON["clear"] + max(MASON["liner"], v.get("wall", MASON["liner"]))
-    x1 = R - inset - w / 2; x0 = x1 - G["tick"] + w
-    dot = lambda x: m3d.Manifold.cylinder(depth + 1.0, w / 2, w / 2, 48).translate([x, 0, -1.0])
-    tick = m3d.Manifold.cube([x1 - x0, w, depth + 1.0]).translate([x0, -w / 2, -1.0]) + dot(x0) + dot(x1)
+    arc = _arc(R - inset - w, R - inset, _land_span(R), -1.0, depth)
     ro = r + POUR["cap_lip"] - inset
-    ring = (m3d.Manifold.cylinder(depth + 1.0, ro, ro, 180) - m3d.Manifold.cylinder(depth + 3.0, ro - w, ro - w, 180).translate([0, 0, -1.0])).translate([0, 0, -1.0])
-    return tick, ring
+    ring = m3d.Manifold.cylinder(depth + 1.0, ro, ro, 180).translate([0, 0, -1.0]) - m3d.Manifold.cylinder(depth + 3.0, ro - w, ro - w, 180).translate([0, 0, -2.0])
+    return arc, ring
 
 
 def _grip_cuts(R, h, has_pour):
-    G = GRIP; z = G["chamfer"] + G["band"]
-    return (_flutes(R, G["lid_flutes"], z, h - z, skip=(0,) if has_pour else ())
-            + [_edge(R, 0.0, G["chamfer"], True), _edge(R, h, G["chamfer"], False)])
+    import manifold3d as m3d
+    G = GRIP; z = G["chamfer"] + G["band"]; n = G["flutes"]
+    cuts = _flutes(R, n, z, h - z) + [_edge(R, 0.0, G["chamfer"], True), _edge(R, h, G["chamfer"], False)]
+    if has_pour:                    # the pour relief: the flutes either side of the pour axis joined at full depth,
+        d = G["depth"]; span = 360.0 * (G["lid_skip"] - 1) / n      # square under the upper band (the drip edge)
+        prof = [(R - d, z), (R + 1.0, z), (R + 1.0, h - z + 1.0), (R, h - z), (R - d, h - z - d)]
+        cuts.append(m3d.CrossSection([prof]).revolve(180, span).rotate([0, 0, -span / 2]))
+    return cuts
 
 
 def plan(shape_key, v, prof, shell):
@@ -213,7 +238,7 @@ def plan(shape_key, v, prof, shell):
             plate = plate - _cyl(r, -1.0, M["top"] + 1.0).translate([cx, 0, 0]) - sink
             z_t = M["top"] + POUR["plain"]; rb = r + POUR["boss"]
             boss = (_ring(r, rb, M["top"] - 0.01, z_top) - _edge(rb, z_top, 0.8, False)
-                    + (m3d.Manifold.cylinder(1.5, rb + 1.5, rb, 180).translate([0, 0, M["top"] - 0.01]) - _cyl(r, 0.0, z_top))   # a root, not a raw corner
+                    + (m3d.Manifold.cylinder(0.8, rb + 0.8, rb, 180).translate([0, 0, M["top"] - 0.01]) - _cyl(r, 0.0, z_top))   # a root, not a raw corner
                     + _pour_thread(r, z_t, z_top - 0.2, -1)[0])
             adds.append(boss.translate([cx, 0, 0]))
             cuts.append(_cyl(r, -1.0, z_t - 0.05).translate([cx, 0, 0]))           # through the wall family's own floor
