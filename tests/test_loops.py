@@ -260,3 +260,20 @@ def test_mason_jar_lid_has_one_right_hand_thread_inside_a_clear_bore():
     v = fit.vertices; r = np.hypot(v[:, 0], v[:, 1]); crest = v[r < 43 + MASON["clear"] - 0.8 * MASON["depth"]]
     ang = np.unwrap(np.arctan2(crest[:, 1], crest[:, 0])[np.argsort(crest[:, 2])])
     assert ang[-1] - ang[0] > np.pi and abs((crest[:, 2].max() - crest[:, 2].min()) / ((ang[-1] - ang[0]) / (2 * np.pi)) - MASON["pitch"]) < 0.8
+
+
+@pytest.mark.parametrize("nozzle", [0.4, 0.8])
+def test_pour_cap_screws_into_an_open_hole_without_clashing(nozzle):
+    import manifold3d as m3d
+    import trimesh
+    from text2print.fittings import POUR, _m, _pour
+    b = build.make("jarlid", "domes", {"inside": 86, "skirt": 19, "pour": 30}, nozzle=nozzle)
+    r, cx, _ = _pour(b.params)
+    assert [n for n, *_ in b.extras] == ["Pour cap"] and all(m.is_watertight for _, m, _, _ in b.parts + b.extras)
+    whole = trimesh.util.concatenate([p[1] for p in b.parts])
+    assert not len(whole.ray.intersects_location([[cx, 0.3, -50.0]], [[0, 0, 1.0]])[0])            # open right through
+    lid = m3d.Manifold.batch_boolean([_m(m) for _, m, _, _ in b.parts], m3d.OpType.Add); cap = _m(b.extras[0][1])
+    seat = min(((lid ^ cap.rotate([0, 0, d]).translate([cx, 0, -POUR["cap_t"]])).volume(), d) for d in range(0, 180, 3))
+    assert seat[0] < 0.5                                                                           # seated flush
+    assert (lid ^ cap.rotate([0, 0, seat[1] - 90]).translate([cx, 0, -POUR["cap_t"] - 1.5])).volume() < 0.5   # and on the way out
+    assert not build.make("jarlid", "domes", {"inside": 86, "skirt": 19}).extras                  # no opening: no cap

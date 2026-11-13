@@ -1454,6 +1454,11 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     from . import timing
     stats["minutes_est"] = timing.estimate(T["family"], stats["grams_part"], stats["swaps"], stats["size"][2],
                                            sum(float(m.area) for _, m, _, _ in parts), nz.size)
+    if shape == "jarlid" and not draft:
+        cap = fittings.pour_cap(v)
+        if cap is not None:                                 # the small screw cap for the pour opening, beside the lid
+            lid_parts = list(lid_parts) + [("Pour cap", cap, 1, parts[0][3])]
+            warnings.append("Pour opening: the small cap screws in with half a turn. It is a dust cap, not a seal.")
     if lid_parts:
         stats["colours"] = len({c for _, _, _, c in parts + lid_parts})   # the lid's own filaments count too
         probe = Build(shape, texture, nz.size, v, T["family"], parts, stats, over, extras=lid_parts)
