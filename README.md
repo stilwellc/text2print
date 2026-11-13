@@ -292,7 +292,7 @@ connection*, which logs in and reads the printer's status and AMS colours withou
 | Lidded box | `box` | woven, fabric, halftone, colour-knit, vase mode, shell, mix | width 170 (60–250), depth 95 (50–200), height 50 (20–120), round 100 (0–100), wall 9 (6–16), floor 4 (2–10) |
 | Paneled gourd | `gourd` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | diameter 130 (70–190), height 220 (60–240), sides 8 (0–16), panel 3 (0–10), wall 6 (4–16), floor 4 (2–10) |
 | Paneled jar | `jar` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | diameter 110 (70–190), height 170 (60–240), sides 8 (0–16), panel 3 (0–10), wall 6 (4–16), floor 4 (2–10) |
-| Mason jar lid | `jarlid` | fabric, halftone, colour-knit, shell | inside 86 (50–120), skirt 19 (12–40), pour 0 (0–40): 86 for a wide-mouth jar, 70 for a regular one; pour adds a threaded opening with its own small screw cap |
+| Mason jar lid | `jarlid` | fabric, halftone, colour-knit, shell | inside 86 (50–120), skirt 19 (12–40), wall 2.4 (2.4–25), pour 0 (0–40): 86 for a wide-mouth jar, 70 for a regular one; pour adds a threaded opening with its own small screw cap |
 
 **Woven vessels.** Woven rods work on every round silhouette, not just the cup: bowl, vase, goblet, your drawn
 shape, cachepot, glass sleeve and amphora. The rod ring follows the silhouette course by course, and no course

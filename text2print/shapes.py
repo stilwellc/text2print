@@ -440,14 +440,14 @@ for key, name, blurb, params in [
 # for a wide-mouth jar, 70 mm (2 3/4 in) for a regular one.
 def _jarlid(v):
     from .fittings import MASON
-    R = v["inside"] / 2 + MASON["clear"] + MASON["liner"] + 0.5
+    R = v["inside"] / 2 + MASON["clear"] + max(MASON["liner"], v.get("wall", MASON["liner"])) + 0.5
     return _clamped(lambda z: R, v["skirt"] + MASON["top"])
 
 
 _jl = Profiled("jarlid", "Mason jar lid", "Screws onto a glass mason jar: 86 mm inside for wide mouth, 70 for regular",
                ("fabric", "halftone", "colourwork", "shell"),
                [Param("inside", "Inside diameter", 50, 120, 0.1, 86), Param("skirt", "Skirt height", 12, 40, 0.5, 19),
-                Param("pour", "Pour opening", 0, 40, 1, 0)], round=True)
+                Param("wall", "Wall thickness", 2.4, 25, 0.1, 2.4), Param("pour", "Pour opening", 0, 40, 1, 0)], round=True)
 _jl.kind = "jarlid"; KIND_PROFILES["jarlid"] = _jarlid; SHAPES["jarlid"] = _jl
 
 
