@@ -122,6 +122,7 @@ class Build:
     assembled: list = field(default_factory=list)       # the same, placed on the piece for the viewer
     lid_plate: str = "same"                              # "same": lid beside the piece; "own": its own project
     tower: bool = True                                   # prime tower for multi-colour prints
+    material: list = None                                # e.g. ["petg"]: the lid's own project uses it too
     prime_block: dict = None                             # {"colours": [...], "layers": n}: no tower; a small block, part
                                                          # of the piece's object, primes just those first layers
 
@@ -203,14 +204,25 @@ class Build:
                 over["enable_prime_tower"] = "1" if len(lcols) > 1 and self.tower else "0"
                 if len(lcols) > 1:                                 # park the tower front-right, clear of the lids
                     over["wipe_tower_x"] = [f"{printer.BED - printer.TOWER[2] - 20:g}"]; over["wipe_tower_y"] = ["20"]
+                lid_pf = (printer.material_settings(self.nozzle, [self.material[0]] * len(lcols)) if self.material else None)
                 bambu.write_3mf(str(pathlib.Path(path).with_name(pathlib.Path(path).stem + "-lid.3mf")), lid_objects,
                                 title=self.title() + " — lid", colours=tuple(lcols), overrides=over,
-                                base=printer.base_config(self.nozzle))
+                                base=printer.base_config(self.nozzle), per_filament=lid_pf)
+        v_ = np.vstack([np.asarray(p_[1].vertices)[:, :2] for p_ in objects[0]["parts"]])       # never write it off the bed:
+        (x0, y0), (x1, y1) = v_.min(0), v_.max(0); px, py = objects[0]["position"]              # slide it back inside
+        px = min(max(px, 1.0 - x0), printer.BED - 1.0 - x1) if x1 - x0 <= printer.BED - 2 else printer.BED / 2 - (x0 + x1) / 2
+        py = min(max(py, 1.0 - y0), printer.BED - 1.0 - y1) if y1 - y0 <= printer.BED - 2 else printer.BED / 2 - (y0 + y1) / 2
+        objects[0]["position"] = (float(px), float(py))
         over = dict(self.overrides); over["flush_multiplier"] = [f"{self.flush_mult:g}"]
         pf = self.per_filament
-        if pf and len(cols) > len(self.colours):                    # the lid's own filament keeps stock cooling
-            base = printer.filament_settings(self.nozzle, ["normal"])
-            pf = {k: list(v) + base[k] * (len(cols) - len(v)) for k, v in pf.items()}
+        if pf and len(cols) > len(self.colours):                    # the lid's own filament: the same material, but
+            extra_n = len(cols) - len(self.colours)                 # stock cooling (not the piece's droop fan)
+            stock = (printer.material_settings(self.nozzle, [self.material[0]]) if self.material
+                     else printer.filament_settings(self.nozzle, ["normal"]))
+            base = printer.base_config(self.nozzle)
+            first = lambda k: str(base[k][0] if isinstance(base.get(k), list) else base.get(k, ""))
+            pad = lambda k, v: list(v) + [stock[k][0] if k in stock else first(k) if k in base else v[-1]] * extra_n
+            pf = {k: ({kk: pad(kk, vv) for kk, vv in v.items()} if k == "_preset" else pad(k, v)) for k, v in pf.items()}
         bambu.write_3mf(str(path), objects, title=self.title(), colours=tuple(cols),
                         overrides=over, base=printer.base_config(self.nozzle), per_filament=pf)
         return pathlib.Path(path)
@@ -280,7 +292,7 @@ def lid_textures():
 LID_KNOBS = [("knob", "Knob"), ("button", "Flat button"), ("tube", "Tube"), ("none", "None")]
 LID_SKIP = ("lid", "lid_fit", "lid_inner_skin", "lid_inner_lines", "lid_over_w", "lid_over_d", "weave_courses", "lid_lines", "lid_lines_pitch", "lid_lines_amp", "lid_lines_wave", "lid_lines_slot", "weave_face_lines", "floor_skin", "floor_border", "floor_border_w", "floor_text", "floor_text_h", "floor_font", "lid_picture", "lid_colour", "lid_texture", "lid_height", "lid_knob", "lid_colours", "engrave_base",
             "engrave_lid", "zones", "zone_style", "course_rows", "purge_piece", "floor", "rim_loops",
-            "purge", "handles")
+            "purge", "handles", "inlay_text", "inlay_slot", "floor_inlay", "loops", "loop_colour", "loop_size")
 
 
 def _cap_or_plain(lid_parts, assembled, *a):
@@ -969,7 +981,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         if isinstance(look, str):                               # a named look: its loop layout and its colour plan
             options.pop("loops")
             if look not in ("", "none"):
-                look_chart, options["loops"] = loops.resolve(look, options, S, v, nz, len(set(colours[:n_given])))
+                look_chart, options["loops"] = loops.resolve(look, options, S, v, nz, len(set(colours[:n_given])), style=texture)
                 chart = look_chart or chart
         if (options.get("inlay_text") or "").strip():           # words inlaid flush under the base in another colour
             base_d = 2 * S.profile(v)[0](0.0)
@@ -1156,7 +1168,7 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         if len({c for _, _, _, c in parts}) > 1:
             over["enable_prime_tower"] = "1"
             if per_filament:
-                per_filament = printer.filament_settings(nz.size, ["droop"] * len(parts))
+                per_filament = printer.filament_settings(nz.size, ["fur" if texture == "fur" else "droop"] * len(parts))
         extra["zones"] = zones
     # ── fittings (after zones, so the fitting takes the bottom zone's colour): collars, pockets, plinths, foot rings, crush ribs ──
     if shape in ("pendant", "puck", "lantern", "cachepot", "candle") and T["family"] != "lattice":
@@ -1220,6 +1232,9 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
                  grams_part=int(round(float(vol) * 1.26)), grams_purge=int(round(purge_g)), swap_minutes=round(swaps * SWAP_SECONDS / 60),
                  layer_h=extra.pop("layer_h", None) or (halftone.RECIPE[nz.size][0] if T["family"] in ("halftone", "colourwork") else nz.layer_h),
                  nozzle=nz.size, verified=vstat, **extra)
+    if max(hi[0] - lo[0], hi[1] - lo[1]) > printer.BED - 2:
+        warnings.append(f"{hi[0] - lo[0]:.0f} x {hi[1] - lo[1]:.0f} mm as printed (loops and strands lie flat): it does not "
+                        f"fit the {printer.BED:g} mm bed. Make it smaller or the loops shorter.")
     if max(hi[0] - lo[0], hi[1] - lo[1]) > 2 * printer.SAFE_HALF + 1:
         warnings.append("wider than 200 mm — the prime tower may not fit beside it")
     preview = None
@@ -1404,26 +1419,40 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         lid_parts = list(lid_parts) + [("Purge coaster", coaster, 1, parts[0][3])]
         warnings.append("The coaster soaks up part of the purge (Bambu's flush-into-object). In a test it took about "
                         "3 g per 40 mm block — a modest saving that turns waste into a coaster.")
-    if options.get("material") and options.get("material") != "pla":       # e.g. "petg", or one material per colour
-        mats = options["material"]
-        mats = [mats] * len(colours) if isinstance(mats, str) else list(mats) + [list(mats)[-1]] * len(colours)
+    mats = options.get("material")
+    mats = ([mats] if isinstance(mats, str) else list(mats or []))
+    mats = [str(m).strip().lower() if str(m).strip().lower() in ("pla", "") or str(m).strip().lower() in printer.MATERIALS else m for m in mats]
+    material = None
+    if any(m not in ("pla", "") for m in mats):             # e.g. "petg", or one material per colour
+        material = mats
+        mats = mats + [mats[-1]] * len(colours)
         slot_cols = [c for _, c in sorted({(k_, c_) for _, _, k_, c_ in parts})]
-        mat = printer.material_settings(nz.size, [mats[colours.index(c)] for c in slot_cols])
-        if per_filament:                                    # keep the family's own cooling; its nozzle offset rides
-            t0 = int(printer.base_config(nz.size)["nozzle_temperature"][0])      # on the material's temperature
+        # a family with its own colours (photo tiles) has parts in colours the picker never listed
+        try:
+            mat = printer.material_settings(nz.size, [mats[colours.index(c)] if c in colours else mats[0] for c in slot_cols])
+        except FileNotFoundError as e:
+            raise ValueError(f"{e}. Materials: pla, {', '.join(printer.MATERIALS)}") from None
+        if per_filament:                                    # keep what the family CHANGED from stock (the droop fan,
+            base_ = printer.base_config(nz.size)            # the loop slow-down); stock values give way to the material
+            stock = lambda k_: str(base_[k_][0] if isinstance(base_.get(k_), list) else base_.get(k_))
+            t0 = int(base_["nozzle_temperature"][0])
             for key, vals in per_filament.items():
                 if key == "nozzle_temperature":           # PETG stays soft long enough to fall at its own preset
                     mat[key] = [m_ if "PETG" in t_ else str(int(m_) + int(v_) - t0)     # temperature; +5 only strings
                                 for m_, v_, t_ in zip(mat[key], vals, mat["filament_type"])]
                 else:
-                    mat[key] = list(vals)
+                    cur = mat.get(key) or [stock(key)] * len(vals)
+                    mat[key] = [str(v_) if str(v_) != stock(key) else m_ for v_, m_ in zip(vals, cur)]
         per_filament = mat
         if T["family"] != "colourwork" or not options.get("loops"):
             warnings.append("PETG: filament settings come from Bambu's Generic PETG preset for the P2S. Only loops on "
                             "colour-knit have been set up around it; everything else was tuned on PLA Matte.")
     prime_block = None
     inlay = options.get("floor_inlay")
-    if options.get("tower") == "inlay" and T["family"] == "colourwork" and inlay:
+    if options.get("tower") == "inlay" and (lid_parts or not (T["family"] == "colourwork" and inlay)):
+        warnings.append("tower=inlay needs a colour-knit piece with words under its base and nothing else on the plate; "
+                        "the prime tower stays on.")
+    elif options.get("tower") == "inlay":
         # no prime tower; only the layers that carry the inlay get primed, on a small block
         tower = False; over["enable_prime_tower"] = "0"
         prime_block = dict(colours=list(dict.fromkeys([colours[info["inlay_slot"]], colours[info["floor_slot"]]])),
@@ -1433,4 +1462,5 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
                         "other colour change starts unprimed; the seam is at the back.")
     return Build(shape, texture, nz.size, v, T["family"], parts, stats, over, warnings, preview,
                  ranges=ranges, per_filament=per_filament, flush_mult=flush_mult, draft=draft,
-                 extras=lid_parts, assembled=assembled, lid_plate=lid_plate, tower=tower, prime_block=prime_block)
+                 extras=lid_parts, assembled=assembled, lid_plate=lid_plate, tower=tower, prime_block=prime_block,
+                 material=material)

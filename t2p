@@ -1,0 +1,5 @@
+#!/bin/sh
+# text2print from anywhere: t2p list | t2p make cup twill --out ~/Downloads/cup | t2p studio
+here="$(cd "$(dirname "$0")" && pwd)"
+py="$here/.venv/bin/python"; [ -x "$py" ] || py=python3
+PYTHONPATH="$here${PYTHONPATH:+:$PYTHONPATH}" exec "$py" -m text2print "$@"

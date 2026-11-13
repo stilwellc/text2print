@@ -65,7 +65,8 @@ def even_options(o):
     if (o or {}).get("rows") != "even":
         return None
     keys = ("loop_w", "loop_l", "tier", "ruffle", "ruffles", "tall", "line") + TIER_KEYS
-    return {k: float(o[k]) for k in keys if o.get(k) not in (None, "")}
+    spec = {k: float(o[k]) for k in keys if o.get(k) not in (None, "")}
+    return spec or {"loop_w": 5.0}                 # "even" alone must still switch the rows on (an empty dict is falsy)
 
 
 # Teardrop tiers (Nov 2026, second pass at POILU 3.0): "pinch" switches a row from the open arch to a loop whose two
@@ -108,7 +109,7 @@ def _teardrop(L, W, a, n_arc=13):
     run straight to the tangent points of a round end (radius W/2) whose far side sits L out. a = W/2 gives a
     straight-sided scallop, a small a the pinched teardrop. A loop too short for a round end is a half ellipse."""
     rho = W / 2.0; c = L - rho; a = min(a, rho)
-    if c <= 0.25 * rho:
+    if c <= 0.25 * rho or math.hypot(c, a) <= 1.05 * rho:      # root inside the round end: the legs would run backwards
         t = np.linspace(0.0, math.pi, n_arc + 4)
         return L * np.sin(t), rho * np.cos(t) * (a + (rho - a) * np.sin(t)) / rho
     d = math.hypot(c, a)
@@ -422,7 +423,8 @@ HANG = {"fringe": (78, 88), "swag": (55, 72), "curls": (45, 80), "unraveled": (3
 def courses(spots, lh):
     """Layer boundaries (z) where a colour can change without cutting a strand: each strand row's first layer,
     kept only if no other strand spans it. Like woven courses — colour follows the row, one change per row."""
-    occ = [(int(math.floor(z / lh + 1e-9)), int(math.floor(z / lh + 1e-9)) + int(round(hh / lh))) for _, _, _, z, hh, _, _ in spots]
+    # the same floor the build's q() uses to lay each strand; a different rounding put boundaries inside strands
+    occ = [(int(math.floor(z / lh)), int(math.floor(z / lh)) + int(round(hh / lh))) for _, _, _, z, hh, _, _ in spots]
     starts = sorted({a for a, _ in occ})
     return [k * lh for k in starts if not any(a < k <= b for a, b in occ)]
 

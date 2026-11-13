@@ -47,15 +47,50 @@ rings and lids at each clearance. Droop isn't offered for lids: strands would po
 on. On woven lids the hidden plug changes colour course by course with the rods; the change count covers
 everything on the plate.
 
-From the command line:
+## Without the studio
+
+Everything the studio does is also a command. `./t2p` runs from any folder (it is `python -m text2print` with the
+path set). Commands print JSON; a bad request exits 2 with an `error` that says what to fix.
 
 ```bash
-python -m text2print list                                     # shapes, textures, what fits what
-python -m text2print make tray twill --set width=117 --colours "#8B3A2F,#EDE3D1" --out ~/Downloads/tray --slice
-python -m text2print make vase wave --set height=200 --nozzle 0.6 --out ~/Downloads/vase
-python -m text2print make cup halftone --nozzle 0.8 --image flames.png --colours "#F3D34A,#C3302C" --out ~/Downloads/flames
-python -m text2print make vase jacquard --option loops=tiers --option band=2 --colours "#2E4E7E,#E8752F,#F3D34A" --out ~/Downloads/tiers
+./t2p list                                # shapes, their sizes, the textures that fit each
+./t2p options jacquard                    # every option a texture takes, its choices and default
+./t2p make tray twill --set width=117 --colours "#8B3A2F,#EDE3D1" --out ~/Downloads/tray --preview --slice
+./t2p make vase wave --set height=200 --nozzle 0.6 --out ~/Downloads/vase
+./t2p make cup halftone --nozzle 0.8 --image flames.png --colours "#F3D34A,#C3302C" --out ~/Downloads/flames
+./t2p make vase jacquard --option loops=tiers --option band=2 --colours "#2E4E7E,#E8752F,#F3D34A" --out ~/Downloads/tiers
 ```
+
+A design is one JSON object, and `make --design` takes it as a file, from stdin (`-`), as a studio link, or as the
+name of a saved design:
+
+```json
+{"shape": "cup", "texture": "jacquard", "nozzle": 0.4,
+ "params": {"diameter": 90, "height": 110},
+ "colours": ["#151515", "#F4F2EC"],
+ "options": {"loops": "shag", "band": 2, "stitch_size": "fine"}}
+```
+
+```bash
+./t2p make --design cup.json --draft --preview --out /tmp/look     # a quick sketch and a picture of it
+./t2p make --design cup.json --preview --slice --save "Shag cup" --open --out ~/Downloads/shag-cup
+./t2p link cup.json                       # the same design as a studio link; give it a link to get the JSON back
+./t2p designs list                        # the studio's Saved list: show, save, delete, or build one by name
+./t2p printer test                        # LAN connection check; `send DESIGN --confirm` slices and starts a print
+```
+
+| `make` flag | |
+|---|---|
+| `--set key=mm`, `--option key=value`, `--colours`, `--nozzle` | sizes, options, colours and nozzle; they also adjust a loaded design. A value that is JSON is read as JSON, so mixes (`bands=[...]`) and charts (`chart=[...]`) fit on the command line |
+| `--draft` | quick sketch build for looking, never for printing |
+| `--preview` | a PNG with loops and strands hung as they will fall, and the lid on |
+| `--slice` | run Bambu Studio's CLI for the real time, grams and layers |
+| `--save NAME`, `--open`, `--no-stls`, `--name STEM` | add to Saved, open in Bambu Studio, skip the STLs, name the files |
+
+The output carries the project path, the design as built, a studio link to it, the stats (size, AMS changes,
+grams), the warnings and whether every part is watertight. `./t2p catalogue` prints everything a design can use as
+JSON (mix bands, chart bands, lids, pictures, the palette), which is what an agent reads first. `SKILL.md` is the
+same workflow written as a Claude Code skill; link the repo into `~/.claude/skills/text2print` to install it.
 
 ## Textures
 
@@ -156,7 +191,7 @@ on the wall, one colour per rod direction (one AMS change per course). It starts
 from the thin wall below at 45°, or on a solid floor if it is the bottom band, and ends on a cap that narrows back
 to the wall for the band above. Its layers print with four wall loops and woven bridge speeds. Preset: *Basket
 band* (plain foot, twill middle, plain neck). Kagome, Over-under and Tartan stay whole-piece only: they need a
-third colour or mix colours inside a course. Mixes work on cup, vase, bowl and goblet.
+third colour or mix colours inside a course. `./t2p list` shows which shapes take a mix.
 
 ```bash
 # mixes are easiest in the studio; every mix is a shareable link (/?shape=vase&texture=mix&mix=[...])
@@ -198,7 +233,7 @@ piece first; PETG droops and strings more than PLA.
 ## Custom pictures and patterns
 
 Every picture texture (halftone, wall lithophane, flat lithophane, CMYK tile, halftone mix bands) reads from one
-picture library: the built-ins, your uploads, **text** in ten fonts (centred, repeating around the piece, or
+picture library: the built-ins, your uploads, **text** in 11 fonts (centred, repeating around the piece, or
 stacked; rendered at the wall's real proportions so letters never stretch), and anything in
 `~/.text2print/pictures`. New pictures, weaves and stitches can also be written as small Python **plugins** in
 `~/.text2print/plugins` — that's what the Claude skill does when you ask for "a koi pond halftone" or "a
@@ -229,29 +264,32 @@ connection*, which logs in and reads the printer's status and AMS colours withou
 
 ## Shapes
 
-| Shape | Textures | Sizes |
-|---|---|---|
-| Tray | woven, fabric, droop, halftone, mix, vase mode, shell | width, height, dish, floor, corner, top edge |
-| Platter | woven, fabric, droop, halftone, mix, vase mode, shell | the low, wide tray |
-| Round dish | woven (incl. Rose window), fabric, droop, halftone, mix, vase mode, shell | diameter, height, dish, floor, top edge |
-| Coaster | woven, fabric, halftone, shell | width, height, seat, floor, corner |
-| Cup | woven, fabric, droop or halftone | diameter, height (+ wall and floor for rods) |
-| Lamp shade | woven | open cylinder: diameter, height, wall |
-| Bowl | woven, fabric, droop or halftone | diameter, height, base width |
-| Vase | woven, fabric, droop or halftone | belly, height, neck |
-| Goblet | woven, fabric, droop or halftone | a cup on a stem and foot |
-| Candle holder | droop | a solid bell with a socket for a taper candle |
-| Your shape | woven, fabric, droop, halftone, mix, vase mode, shell | widest, height, a 5-point drawn silhouette, and an optional straight neck and flared lip |
-| Cachepot | woven, fabric, halftone, vase mode, shell | sized to a 3–7 in nursery pot, with a foot ring that lifts it |
-| Liner sleeve | woven, fabric, vase mode, shell | slides over a glass liner (a cylinder vase or jar); set a taper for a cup that widens upward, and (woven) a closed bottom or a straight outside |
-| Tealight lantern | fabric, shell, halftone | plinth with a 41 × 17 mm tealight pocket |
-| Pendant shade | fabric, droop, shell | top plate with a 40 mm hole for an E27 socket ring |
-| Puck lamp | fabric, shell, halftone | collar pocket for a 59 × 18 mm LED puck, with a cable notch |
-| Amphora | woven, fabric, vase mode, shell | tall belly and neck that never lean past 45° |
-| Basket | woven, fabric, droop, halftone, mix, vase mode, shell | rounded box with two arched handle holes |
-| Catch-all | woven, fabric, droop, halftone, mix, vase mode, shell | low rounded tray |
-| Hex tile | woven, flat, fabric, halftone, shell | hexagon: lattice tile or backlit picture |
-| Tile | flat | rounded rectangle for lithophanes and CMYK |
+| Shape | `key` | Textures | Sizes (default, range) |
+|---|---|---|---|
+| Tray | `tray` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | width 117 (60–200), height 33 (12–60), dish 94 (0–184), floor 10.4 (2–20), corner 20 (0–50), pillow 6 (0–10) |
+| Platter | `platter` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | width 160 (100–200), height 24 (10–40), dish 130 (0–184), floor 5.6 (2–14), corner 28 (0–60), pillow 6 (0–10) |
+| Round dish | `dish` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | diameter 130 (60–200), height 28 (12–60), dish 104 (0–184), floor 6.4 (2–20), pillow 5 (0–10) |
+| Coaster | `coaster` | woven, fabric, halftone, colour-knit, shell | width 100 (70–140), height 8 (5–16), dish 76 (0–120), floor 5.6 (2–12), corner 16 (0–40), pillow 2 (0–4) |
+| Cup | `cup` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | diameter 90 (50–160), height 90 (30–160), wall 8 (4–16), floor 4 (2–10) |
+| Bowl | `bowl` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | diameter 180 (80–200), height 70 (30–120), base 62 (55–95), wall 6 (4–16), floor 4 (2–10) |
+| Vase | `vase` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | diameter 120 (70–180), height 180 (80–240), neck 70 (55–100), wall 6 (4–16), floor 4 (2–10) |
+| Goblet | `goblet` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | diameter 120 (80–150), height 140 (90–200), wall 6 (4–16), floor 4 (2–10) |
+| Candle holder | `candle` | droop | diameter 120 (80–160), height 130 (80–180), socket 23 (18–26) |
+| Your shape | `custom` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | diameter 120 (60–200), height 150 (40–220), c0 62 (20–100), c1 92 (20–100), c2 100 (20–100), c3 74 (20–100), c4 80 (20–100), neck 0 (0–60), lip 0 (0–3), wall 6 (4–16), floor 4 (2–10) |
+| Lamp shade | `shade` | woven | diameter 140 (80–200), height 120 (60–180), wall 6 (4–14) |
+| Cachepot | `cachepot` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | pot 6 (3–7), extra 8 (0–40), wall 6 (4–16), floor 4 (2–10) |
+| Glass sleeve | `sleeve` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | liner 70 (15–120), height 110 (30–240), taper 0 (0–15), closed 0 (0–1), straight 0 (0–1), wall 6 (4–16), floor 4 (2–10) |
+| Tealight lantern | `lantern` | fabric, droop, halftone, colour-knit, vase mode, shell, mix | diameter 84 (60–140), height 96 (50–160) |
+| Pendant shade | `pendant` | fabric, droop, halftone, colour-knit, vase mode, shell, mix | diameter 180 (120–200), height 150 (90–220) |
+| LED puck lamp | `puck` | fabric, droop, halftone, colour-knit, vase mode, shell, mix | diameter 130 (90–190), height 160 (90–220) |
+| Amphora | `amphora` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | diameter 120 (80–180), height 200 (110–240), neck 42 (30–70), wall 6 (4–16), floor 4 (2–10) |
+| Basket | `basket` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | width 180 (100–200), depth 120 (70–160), height 90 (40–140), wall 9 (6–16), floor 4 (2–10), corner 18 (4–40), handles 1 (0–1) |
+| Catch-all | `catchall` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | width 170 (100–200), depth 110 (60–150), height 28 (14–50), wall 9 (6–16), floor 4 (2–10), corner 20 (4–40) |
+| Hex tile | `hextile` | woven, fabric, halftone, colour-knit, shell, photo | width 120 (60–200), height 8 (4–20) |
+| Photo tile | `tile` | photo | width 150 (60–200), depth 100 (60–200) |
+| Lidded box | `box` | woven, fabric, halftone, colour-knit, vase mode, shell, mix | width 170 (60–250), depth 95 (50–200), height 50 (20–120), round 100 (0–100), wall 9 (6–16), floor 4 (2–10) |
+| Paneled gourd | `gourd` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | diameter 130 (70–190), height 220 (60–240), sides 8 (0–16), panel 3 (0–10), wall 6 (4–16), floor 4 (2–10) |
+| Paneled jar | `jar` | woven, fabric, droop, halftone, colour-knit, vase mode, shell, mix | diameter 110 (70–190), height 170 (60–240), sides 8 (0–16), panel 3 (0–10), wall 6 (4–16), floor 4 (2–10) |
 
 **Woven vessels.** Woven rods work on every round silhouette, not just the cup: bowl, vase, goblet, your drawn
 shape, cachepot, glass sleeve and amphora. The rod ring follows the silhouette course by course, and no course
@@ -289,7 +327,8 @@ nozzle) with every `inherits` link resolved, so projects don't depend on your Ba
 `data/build_profiles.py` regenerates them. Each texture family then sets what it needs: rods print as
 4 side-by-side loops with bridges and overhangs at full speed (the slicer calls every span an overhang;
 at its stock 10 mm/s the print takes twice as long for nothing); fabric prints as a 2-loop shell with
-0% infill and no top layers. Objects are capped at 200 mm so the prime tower always fits back-right.
+0% infill and no top layers. Most shapes stop at 200 mm so the prime tower fits back-right; a few go to 250 mm
+(tall vases, the lidded box), and a piece is always slid back onto the 256 mm bed, with a warning if it cannot fit.
 
 PETG (`material=petg`, or one material per colour) swaps in Bambu's `Generic PETG @BBL P2S` filament preset for
 each AMS slot and keeps the texture family's own cooling on top of it. Only loops on colour-knit were set up
@@ -310,7 +349,8 @@ around PETG; everything else was tuned on PLA Matte, and the app says so when yo
 - Purge per change comes from the colour pair (light after dark costs most), not a flat number.
 - The headless CLI ignores `gap_fill_target`, `filter_out_gap_fill`, `infill_wall_overlap`, `detect_thin_wall`,
   `flush_multiplier` and a hand-written `flush_volumes_matrix` (it recomputes purge from the colour pair). Per-part
-  `wall_loops` and `seam_position` are honoured. `--outputdir` worked on 2.08 and 2.09 (plate_1.gcode lands there).
+  `wall_loops` and `seam_position` are honoured. Run the CLI from the output folder with `--export-3mf <absolute path>`;
+  `--outputdir` is not relied on.
 - `ironing_type` "topmost" irons only the object's highest surface; an inlaid logo below a dome crown needs "top".
 - Support is flagged from the vertical: an outward flare or a 45° chamfer at the base draws support; a straight
   first few mm draws none. Support grams come from NET E deltas (retract/de-retract cancel) over G1 AND G2/G3 arcs —
@@ -366,7 +406,9 @@ text2print/   shapes.py · lattice.py (woven rods) · droop.py (strands, fur, lo
               spiral.py (vase mode) · shell.py (voronoi, litho, fuzzy) · flat.py (tiles) · fittings.py · meshops.py
               sampler.py (test plates) · verify.py · store.py (~/.text2print) · lan.py (send) · fabric.py + fabric_wall.py + fabric_presets.py (fabric)
               floors.py · build.py (pick -> project) · printer.py + data/ (P2S) · bambu.py (3MF + CLI slice)
+              design.py (a design as data: load, check, link, save) · __main__.py (the command line) · agent.py
 studio/       server.py + static/ (the picker)
+t2p           the command line from any folder
 tests/        python -m pytest          (fast)   ·   python -m pytest -m ""   (everything, incl. the real slicer)
 ```
 

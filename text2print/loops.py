@@ -59,10 +59,11 @@ def _rows(lh, row_mm, band, colours=2):
     return unit * max(1, int(round(row_mm / (unit * lh))))
 
 
-def _cols(rmax, lw, size):
+def _cols(rmax, lw, size, style="jacquard"):
+    """Stitches around and the row height, as colourwork.build computes them (bead rows are square, ribs 5 % short)."""
     col_mm = max(colourwork.SIZES.get(size, 3.2) * lw, 2.6 * lw)
     cols = max(24, int(round(2 * math.pi * rmax / col_mm)))
-    return cols, 0.95 * 2 * math.pi * rmax / cols
+    return cols, (1.0 if style == "beads" else 0.95) * 2 * math.pi * rmax / cols
 
 
 def dealer(weights):
@@ -115,12 +116,12 @@ def row_chart(S, v, nz, loops, n_colours=3, rim="none"):
 
 
 def salt_chart(S, v, nz, size="regular", band=2, share=0.16, rows=0.5, settle=0.6, neck_mm=None, line_mm=5.0,
-               top_motif=("X...", ".X.X", "..X."), seed=7, rim="none"):
+               top_motif=("X...", ".X.X", "..X."), seed=7, rim="none", style="jacquard"):
     """Salt on pepper: colour 0 with single colour-1 stitches scattered through it, a thin colour-1 line at the foot
     and under the rim, and a small motif round the neck. Salt sits in only `rows` of the stitch rows (a row of one
     colour costs no filament changes), denser there so the total stays `share`, and settles toward the foot."""
     lh, lw, prof, H, rmax, n_floor, n_wall = _wall(S, v, nz, rim)
-    cols, row_mm = _cols(rmax, lw, size); R = _rows(lh, row_mm, band)
+    cols, row_mm = _cols(rmax, lw, size, style); R = _rows(lh, row_mm, band)
     top = n_wall - 2 - int(round(line_mm / lh))
     motif = [(m * (cols // len(m) + 1))[:cols] for m in (top_motif or [])]
     body = top - len(motif) * R
@@ -146,10 +147,10 @@ def salt_chart(S, v, nz, size="regular", band=2, share=0.16, rows=0.5, settle=0.
     return bands + [{"plain": 1, "mm": 2 * lh}, {"plain": 0, "mm": H}]
 
 
-def petal_chart(S, v, nz, loops, size="regular", band=2, rim="none"):
+def petal_chart(S, v, nz, loops, size="regular", band=2, rim="none", style="jacquard"):
     """The knit under petal ruffles: every stitch takes its petal's colour (droop.petal_field / petal_slot)."""
     lh, lw, prof, H, rmax, n_floor, n_wall = _wall(S, v, nz, rim)
-    cols, row_mm = _cols(rmax, lw, size); R = _rows(lh, row_mm, band)
+    cols, row_mm = _cols(rmax, lw, size, style); R = _rows(lh, row_mm, band)
     n_rows = max(1, int((n_wall - float(loops.get("collar", 7.0)) / lh) / R))
     th = (np.arange(cols) + 0.5) / cols * 2 * math.pi
     art = []
@@ -162,13 +163,15 @@ def petal_chart(S, v, nz, loops, size="regular", band=2, rim="none"):
     return [{"art": art[::-1], "colours": [0, 1], "gap": 0}, {"plain": 0, "mm": H}]
 
 
-def resolve(look, options, S, v, nz, n_colours=3):
+def resolve(look, options, S, v, nz, n_colours=3, style="jacquard"):
     """A look name + the picker's options -> (chart or None, loops spec for droop.colourwork_loops).
     options: loop_size small|regular|large, loop_colour auto|rows|salt|petals|chart, stitch_size, band, rim."""
     if look not in LOOKS:
         raise ValueError(f"no loop look called {look!r} (have {', '.join(LOOKS)})")
     L = LOOKS[look]; k = SIZES.get(options.get("loop_size", "regular"), 1.0)
     spec = {key: (val * k if key in _SCALED else val) for key, val in L["loops"].items()}
+    kn = RECIPE[nz.size][1] / RECIPE[0.4][1]                     # strand and gap follow the nozzle's line, as the wall does
+    spec["line"] *= kn; spec["gap"] *= kn
     H = S.profile(v)[1]
     if look == "window":                                        # the window closes in an arch under the shoulder
         spec.update(arch_spring=0.6 * H, arch_top=0.85 * H, bed_reach=0.35 * spec["loop_l"])
@@ -180,7 +183,7 @@ def resolve(look, options, S, v, nz, n_colours=3):
     if plan == "rows":
         return row_chart(S, v, nz, spec, max(2, min(3, int(n_colours))), rim), dict(spec, colour="layer")
     if plan == "salt":
-        return salt_chart(S, v, nz, size, band, rim=rim), dict(spec, colour="chart")
+        return salt_chart(S, v, nz, size, band, rim=rim, style=style), dict(spec, colour="chart")
     if plan == "petals":
-        return petal_chart(S, v, nz, spec, size, band, rim), dict(spec, colour="petal")
+        return petal_chart(S, v, nz, spec, size, band, rim, style), dict(spec, colour="petal")
     return None, dict(spec, colour="chart")

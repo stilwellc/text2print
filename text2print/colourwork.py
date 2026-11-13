@@ -290,7 +290,7 @@ def build(shape, v, nz, style="jacquard", chart=None, size="regular", band=1, ri
         for j in range(rim_layers):
             L = n_floor + len(seq) + j; z0, z1 = L * lh, (L + 1) * lh; R = prof(min(z1, height))
             ph = (math.pi * ((j // 2) % 2)) if rim == "braid" else (2 * math.pi * j / 8)
-            mid = R - lw / 2 + a * np.cos(cols / 2 * tr + ph)
+            mid = R - lw / 2 + a * np.cos(max(1, round(cols / 2)) * tr + ph)      # whole waves: no step at the seam
             parts.setdefault(rs, []).append(_ring(tr, mid - w / 2, mid + w / 2, z0, z1))
             slots_seq.append(rs)
     swaps = sum(1 for a_, b_ in zip(slots_seq, slots_seq[1:]) if a_ != b_)

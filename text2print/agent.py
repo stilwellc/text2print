@@ -100,7 +100,8 @@ def check_design(design, preview=None, draft=False):
                    nozzle=float(design.get("nozzle", 0.4)), colours=design.get("colours") or None,
                    options=design.get("options") or {}, draft=draft)
     s = b.stats
-    out = dict(ok=None if draft else all(m.is_watertight for _, m, _, _ in b.parts),   # sketches aren't watertight size_mm=s["size"], colours=s["colours"],
+    out = dict(ok=None if draft else all(m.is_watertight for _, m, _, _ in b.parts),   # sketches aren't watertight
+               size_mm=s["size"], colours=s["colours"],
                colour_changes=s["swaps"], grams=s["grams_est"], purge_g=s.get("grams_purge", 0),
                print_minutes=s.get("minutes_est"), lid=s.get("lid"), params=b.params, warnings=b.warnings)
     if preview:
