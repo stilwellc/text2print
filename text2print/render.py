@@ -19,15 +19,16 @@ def _look_at(eye, target, up=(0.0, 0.0, 1.0)):
     return m
 
 
-def render(parts, path=None, size=640, view=(1.0, -0.95, 0.85), zoom=1.0, ground=GROUND, target=None, rake=False):
-    """parts: [(mesh, '#hex')]. Returns a PIL image (and saves it when path is given)."""
+def render(parts, path=None, size=640, view=(1.0, -0.95, 0.85), zoom=1.0, ground=GROUND, target=None, rake=False, radius=None):
+    """parts: [(mesh, '#hex')]. Returns a PIL image (and saves it when path is given). target/radius fix the
+    framing (centre, bounding radius) independent of the parts given, for animations whose geometry changes."""
     import pyrender
     import trimesh
     from PIL import Image
     scene = pyrender.Scene(bg_color=[*ground, 255], ambient_light=[0.42] * 3)
     allv = np.vstack([m.vertices for m, _ in parts])
     lo, hi = allv.min(0), allv.max(0); centre = (lo + hi) / 2 if target is None else np.asarray(target, float)
-    radius = float(np.linalg.norm(hi - lo)) / 2
+    radius = float(np.linalg.norm(hi - lo)) / 2 if radius is None else float(radius)
     for m, col in parts:
         rgb = [(int(col[k:k + 2], 16) / 255) ** 2.2 for k in (1, 3, 5)]
         mat = pyrender.MetallicRoughnessMaterial(baseColorFactor=rgb + [1.0], metallicFactor=0.0, roughnessFactor=0.85)
