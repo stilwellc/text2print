@@ -1,17 +1,78 @@
 <h1 align="center">text2print</h1>
 
-<p align="center"><strong>Textured, multicolour 3D prints for Bambu Lab, generated from a shape and a texture.</strong><br>
-Woven baskets, knit and loop vases, halftone pictures, vase-mode twists, droop fringe and lithophanes,
-handed over as a ready-to-print Bambu Studio 3MF with the AMS colours already mapped.</p>
+<p align="center"><strong>Textured, multicolour 3D prints for Bambu Lab, generated from a shape and a texture.</strong></p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8a7248" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/python-3.10–3.12-e8a33d" alt="Python 3.10–3.12">
   <img src="https://img.shields.io/badge/printer-Bambu%20Lab%20P2S-1c1915" alt="Bambu Lab P2S">
   <img src="https://img.shields.io/badge/output-3MF%20%C2%B7%20STL-3f6b5a" alt="3MF and STL output">
+  <img src="https://img.shields.io/badge/textures-43-2e4e7e" alt="43 textures">
+  <img src="https://img.shields.io/badge/shapes-25-8b3a2f" alt="25 shapes">
   <img src="https://img.shields.io/badge/Claude%20Code-skill-c96442" alt="Claude Code skill">
   <a href="https://github.com/stilwellc/text2print/stargazers"><img src="https://img.shields.io/github/stars/stilwellc/text2print?style=flat&color=8a7248" alt="GitHub stars"></a>
 </p>
+
+<p align="center"><img src="docs/media/hero.gif" width="100%" alt="Six text2print pieces at true relative size, spinning: a woven grid cup, a halftone flames cup, a colour-knit vase hung with loops, a twist vase in spiral vase mode, a fringe cup and a woven rose-window dish"></p>
+
+<p align="center">
+Woven baskets, knit and loop vases, halftone pictures, vase-mode twists, droop fringe and lithophanes.<br>
+Pick a shape and a texture, and get a <b>print-ready Bambu Studio 3MF</b> with the AMS colours already mapped.
+</p>
+
+<p align="center">
+  <a href="#quick-start"><b>Quick start</b></a> ·
+  <a href="#textures"><b>All 43 textures</b></a> ·
+  <a href="#use-it-as-a-claude-code-skill"><b>Claude Code skill</b></a> ·
+  <a href="#faq"><b>FAQ</b></a>
+</p>
+
+## Quick start
+
+```bash
+git clone https://github.com/stilwellc/text2print && cd text2print
+python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/python -m text2print studio        # opens the studio at http://127.0.0.1:7384
+```
+
+Or skip the studio and make one from the command line:
+
+```bash
+./t2p make dish polar --colours "#2E4E7E,#EDE3D1" --out ~/Downloads/dish --preview --slice
+```
+
+<p align="center"><img src="docs/media/studio-demo.gif" width="920" alt="Screen recording of the text2print studio: picking the round dish shape, the rose window woven texture and a marine blue colour, the live 3D preview rebuilding, a spin, and the print card with time, filament, AMS changes and Open in Bambu Studio"></p>
+<p align="center"><sub>The studio: pick a shape, a pattern and colours; the preview rebuilds live and the print card shows time, filament and AMS changes.</sub></p>
+
+## Why text2print
+
+Every texture is a **construction, not a surface effect**: woven rods stacked course by course into open
+basketry, printed fabric whose layers zigzag in mid-air, colour-knit walls hung with thousands of single-strand
+loops. text2print builds that geometry directly, so what you see in the preview is what the printer lays down.
+
+- **43 textures, 25 shapes.** Weaves, twills, kagome, knit, zigzag, fringe, fur, halftone, CMYK, voronoi,
+  lithophane, fuzzy skin and spiral vase mode, on cups, vases, bowls, trays, baskets, lamp shades, lidded boxes and more.
+- **Multicolour without the pain.** Colour plans are laid out to keep AMS filament changes and purge low, and
+  every texture card shows its colour-change cost before you pick it.
+- **Print-ready, checked in the slicer.** Bambu's own P2S presets are built in, with no supports needed;
+  *Get exact print time* slices with the Bambu Studio CLI for the real time, grams and colour changes.
+- **Lids, fittings and text.** Slip, screw or magnet lids; LED puck and tealight fittings; words debossed under
+  the base or inlaid in a second colour.
+- **Extendable by prompt.** Describe "a koi pond halftone" or "a fish-scale knit" and Claude writes a plugin
+  for it, checks the build and hands it back selected in the studio.
+
+## How it works
+
+<p align="center"><img src="docs/how-it-works.svg" width="100%" alt="How text2print works: 01 Pick a shape and texture, 02 Build real geometry with one part per AMS colour, 03 Check watertight parts, overhangs and colour changes, 04 Slice with the Bambu Studio CLI for exact time and grams, 05 Print the Bambu Studio 3MF"></p>
+
+<table>
+  <tr>
+    <td align="center" width="50%"><img src="docs/media/print-build.gif" width="400" alt="Time-lapse of a woven cup printing course by course, each course a row of parallel rods in alternating blue and cream"><br><sub><b>Woven rods, course by course.</b> Each course is a row of rods that bridges the gaps in the one below it. Colour follows direction, so the AMS changes once per course.</sub></td>
+    <td align="center" width="50%"><img src="docs/media/droop.gif" width="400" alt="Animation of a fringe cup: strands printed straight out into the air, then sagging under gravity into a hanging fringe"><br><sub><b>Droop, as printed and after.</b> Strands are laid flat into the air, fast and hot, then sag into a hanging fringe as they cool. The preview shows both.</sub></td>
+  </tr>
+</table>
+
+## Made with text2print
 
 <table align="center">
   <tr>
@@ -26,28 +87,8 @@ handed over as a ready-to-print Bambu Studio 3MF with the AMS colours already ma
   </tr>
 </table>
 
-<p align="center"><sub>Every frame above is the real build: the same geometry that goes into the Bambu Studio project, rendered by
-<a href="docs/make_media.py"><code>docs/make_media.py</code></a>.</sub></p>
-
-text2print is a Python generator for **textured 3D prints**. Every texture is a construction, not a surface
-effect: woven rods stacked course by course into open basketry, printed fabric whose layers zigzag in mid-air,
-colour-knit walls hung with thousands of single-strand loops. Pick a shape, a texture, sizes, colours and a
-nozzle in the web studio (or from the command line, or by asking Claude), and it builds the object live and
-writes a **Bambu Studio 3MF project**: one object, one part per AMS colour, the P2S profile for your nozzle,
-no supports.
-
-- **43 textures, 25 shapes.** Weaves, twills, kagome, knit, zigzag, fringe, fur, halftone, CMYK, voronoi,
-  lithophane, fuzzy skin, spiral vase mode, on cups, vases, bowls, trays, baskets, lamp shades, lidded boxes and more.
-- **Multicolour without the pain.** Colour plans are laid out to keep AMS filament changes and purge low, and
-  every texture card shows its colour-change cost before you pick it.
-- **Print-ready, verified in the slicer.** Bambu's own P2S presets are baked in; *Get exact print time* slices
-  with the Bambu Studio CLI for the real time, grams and colour changes.
-- **Lids, fittings and text.** Slip, screw or magnet lids; LED puck and tealight fittings; words debossed under
-  the base or inlaid in a second colour.
-- **Extendable by prompt.** Describe "a koi pond halftone" or "a fish-scale knit" and Claude writes a plugin
-  for it, checks the build and hands it back selected in the studio.
-
-<p align="center"><img src="docs/studio.png" alt="The text2print studio: shapes and patterns on the left, a live 3D preview on the print plate, and the print card with time, filament and an Open in Bambu Studio button" width="920"></p>
+<p align="center"><sub>Every animation here is the real build: the same geometry that goes into the Bambu Studio project, rendered by
+<a href="docs/make_media.py"><code>docs/make_media.py</code></a>, <a href="docs/make_motion.py"><code>make_motion.py</code></a> and <a href="docs/make_hero.py"><code>make_hero.py</code></a>.</sub></p>
 
 **Contents:** [Run it](#run-it) · [Command line](#without-the-studio) · [Claude Code skill](#use-it-as-a-claude-code-skill) ·
 [Textures](#textures) · [Loops](#loops-on-colour-knit) · [Plugins](#custom-pictures-and-patterns) · [Shapes](#shapes) ·
@@ -148,7 +189,81 @@ checks it first. The studio's **Design with Claude** box does the same thing fro
 
 ## Textures
 
-<p align="center"><img src="docs/textures.png" alt="Every texture in the studio, one card each" width="920"></p>
+<table>
+  <tr><td colspan="6"><b>Woven rods</b> · 17</td></tr>
+  <tr>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_grid.png" width="120" alt="Weave texture: The classic: rods cross at right angles, colour by direction"><br><sub>Weave</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_twill.png" width="120" alt="Twill texture: Every 4th rod skipped on alternate courses — a drifting diagonal"><br><sub>Twill</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_kagome.png" width="120" alt="Kagome texture: Three directions at 60° — triangles and hexagons"><br><sub>Kagome</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_polar.png" width="120" alt="Rose window texture: Rings and spokes that halve toward the centre"><br><sub>Rose window</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_ripple.png" width="120" alt="Ripple texture: Wavy rods against straight ones — reed and honeycomb"><br><sub>Ripple</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_selvedge.png" width="120" alt="Selvedge texture: Rod ends join in loops — a woven hem on every edge"><br><sub>Selvedge</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_beat.png" width="120" alt="Moiré texture: Two rod spacings that beat into large bands"><br><sub>Moiré</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_overunder.png" width="120" alt="Over-under texture: A true weave — rods pass over and under each other"><br><sub>Over-under</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_chevron.png" width="120" alt="Chevron texture: Parallel zigzag rods crossed by straight ones — stacked Vs"><br><sub>Chevron</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_herringbone.png" width="120" alt="Herringbone texture: Zigzag rods both ways, flipping in blocks — woven tweed"><br><sub>Herringbone</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_ogee.png" width="120" alt="Ogee texture: Wavy rods mirrored in pairs, pinching into onion-shaped lenses"><br><sub>Ogee</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_basket.png" width="120" alt="Basketweave texture: Checkerboard blocks where one direction drops away to show the other"><br><sub>Basketweave</sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_brick.png" width="120" alt="Brick bond texture: Rods broken into staggered bricks over a full cross course"><br><sub>Brick bond</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_trellis.png" width="120" alt="Trellis texture: Rods at ±45° — an open diamond trellis"><br><sub>Trellis</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_frame.png" width="120" alt="Picture frame texture: Rods follow the piece's own outline in concentric rings"><br><sub>Picture frame</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_tartan.png" width="120" alt="Tartan texture: Colour runs along both directions — plaid"><br><sub>Tartan</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_labyrinth.png" width="120" alt="Labyrinth texture: Raised rings that follow the outline, broken into a maze, over a two-colour weave — made for lids (3 colours)"><br><sub>Labyrinth</sub></td>
+  </tr>
+  <tr><td colspan="6"><b>Printed fabric and reliefs</b> · 6</td></tr>
+  <tr>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_zigzag.png" width="120" alt="Zigzag texture: Crisscrossing fins that open into diamonds — light and airy"><br><sub>Zigzag</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_domes.png" width="120" alt="Knit texture: Rounded stitch domes in offset rows, like stockinette"><br><sub>Knit</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_wave.png" width="120" alt="Wave texture: Mirrored sine strands that open eye-shaped windows"><br><sub>Wave</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_garland.png" width="120" alt="Garland texture: Rows of festoon scallops that hang across the wall"><br><sub>Garland</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_drips.png" width="120" alt="Drips texture: Teardrops running down the wall like glue-gun drips"><br><sub>Drips</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_melt.png" width="120" alt="Melt texture: Sagging coil beads with broken arcs, as if the wall softened"><br><sub>Melt</sub></td>
+  </tr>
+  <tr><td colspan="6"><b>Droop and fur</b> · 5</td></tr>
+  <tr>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_fringe.png" width="120" alt="Fringe texture: Dense narrow loops that fall into a long hanging fringe"><br><sub>Fringe</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_swag.png" width="120" alt="Swag texture: Wide, fat loops that sag into layered festoons"><br><sub>Swag</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_curls.png" width="120" alt="Curls texture: Small loops stacked in drifting columns — they settle into coils"><br><sub>Curls</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_unraveled.png" width="120" alt="Unraveled texture: A wild mix of short and long loops, as if the wall is coming apart"><br><sub>Unraveled</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_fur.png" width="120" alt="Fur texture: Hundreds of bridged hairs out to a cut-away shell — brush them into a mane"><br><sub>Fur</sub></td>
+  </tr>
+  <tr><td colspan="6"><b>Colour pictures and knit</b> · 3</td></tr>
+  <tr>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_halftone.png" width="120" alt="Halftone texture: Two colours alternate every layer; the one that ribs outward paints a picture"><br><sub>Halftone</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_jacquard.png" width="120" alt="Jacquard texture: A knitted chart in ribs — fair-isle bands, motifs, pictures, 2–3 colours"><br><sub>Jacquard</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_beads.png" width="120" alt="Bead knit texture: Every stitch a bead — beaded colourwork bands, 2–3 colours"><br><sub>Bead knit</sub></td>
+  </tr>
+  <tr><td colspan="6"><b>Vase mode</b> · 6</td></tr>
+  <tr>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_pleats.png" width="120" alt="Pleats texture: Sharp vertical folds — paper-lantern crisp"><br><sub>Pleats</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_flutes.png" width="120" alt="Flutes texture: Rounded scallops running up the wall, like a column"><br><sub>Flutes</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_twist.png" width="120" alt="Twist texture: Folds that turn as they rise"><br><sub>Twist</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_lowpoly.png" width="120" alt="Low-poly texture: A faceted polygon that twists up the piece"><br><sub>Low-poly</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_pinch.png" width="120" alt="Pinch texture: The round foot squeezes into a lens-shaped mouth"><br><sub>Pinch</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_ribs.png" width="120" alt="Rib slits texture: Hidden internal ribs: a thin glowing wall with lines in the light"><br><sub>Rib slits</sub></td>
+  </tr>
+  <tr><td colspan="6"><b>Shell</b> · 3</td></tr>
+  <tr>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_voronoi.png" width="120" alt="Voronoi texture: An organic lattice of cells cut through the wall"><br><sub>Voronoi</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_litho.png" width="120" alt="Lithophane texture: The picture appears when it's lit from inside"><br><sub>Lithophane</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_fuzzy.png" width="120" alt="Fuzzy skin texture: Slicer-made noise: orange peel, marble ridges or stone cells, in bands"><br><sub>Fuzzy skin</sub></td>
+  </tr>
+  <tr><td colspan="6"><b>Flat tiles</b> · 2</td></tr>
+  <tr>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_flatlitho.png" width="120" alt="Lithophane texture: One colour; the picture appears when it's backlit"><br><sub>Lithophane</sub></td>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_cmyk.png" width="120" alt="Colour lithophane texture: Cyan, magenta, yellow and white mix into a full-colour image"><br><sub>Colour lithophane</sub></td>
+  </tr>
+  <tr><td colspan="6"><b>Mix</b> · 1</td></tr>
+  <tr>
+    <td align="center" width="16%"><img src="studio/static/thumbs/texture_mix.png" width="120" alt="Mix texture: Stack textures in bands up the wall — woven, fabric, droop, halftone and plain"><br><sub>Mix</sub></td>
+  </tr>
+</table>
+
+<sub>Every card is rendered by the studio itself (`python -m text2print thumbs`).</sub>
 
 **Woven rods.** Each course is a row of parallel rounded beads; the next course runs another way, so every
 rod bridges a short gap across the ones below. No supports, no infill, no walls — the rods are the object.
@@ -503,3 +618,17 @@ tests/        python -m pytest          (fast)   ·   python -m pytest -m ""   (
 
 Adding a texture is one function in `lattice.py` (`PATTERNS`) or `fabric.py` (`STITCHES`); adding a shape is
 one entry in `shapes.py`. Run `python -m text2print thumbs` to render its card.
+
+## Contributing
+
+Issues and pull requests are welcome, especially print results. If you print something, open an issue with a
+photo, your nozzle, filament and the design link from the studio; every verified print moves a row in the tables
+above from *computed* to *print-verified*.
+
+- New textures, stitches, pictures and shapes can start as plugins (`plugin_examples/`); the best ones move into
+  the package.
+- `python -m pytest` runs the fast suite; `python -m pytest -m ""` adds the real-slicer tests.
+
+## License
+
+[MIT](LICENSE). If text2print made something you like, a ⭐ helps other makers find it.
