@@ -1,20 +1,57 @@
 <h1 align="center">text2print</h1>
 
-<p align="center"><em>Pick a shape. Pick a texture. Print it on your Bambu.</em></p>
+<p align="center"><strong>Textured, multicolour 3D prints for Bambu Lab, generated from a shape and a texture.</strong><br>
+Woven baskets, knit and loop vases, halftone pictures, vase-mode twists, droop fringe and lithophanes,
+handed over as a ready-to-print Bambu Studio 3MF with the AMS colours already mapped.</p>
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8a7248" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/python-3.10–3.12-e8a33d" alt="Python 3.10–3.12">
   <img src="https://img.shields.io/badge/printer-Bambu%20Lab%20P2S-1c1915" alt="Bambu Lab P2S">
+  <img src="https://img.shields.io/badge/output-3MF%20%C2%B7%20STL-3f6b5a" alt="3MF and STL output">
+  <img src="https://img.shields.io/badge/Claude%20Code-skill-c96442" alt="Claude Code skill">
+  <a href="https://github.com/stilwellc/text2print/stargazers"><img src="https://img.shields.io/github/stars/stilwellc/text2print?style=flat&color=8a7248" alt="GitHub stars"></a>
 </p>
+
+<table align="center">
+  <tr>
+    <td align="center"><img src="docs/media/woven-dish.gif" width="250" alt="Woven rose-window dish: two-colour rods in rings and spokes, 3D printed without supports"><br><sub><b>Woven rods</b> · rose window</sub></td>
+    <td align="center"><img src="docs/media/loop-vase.gif" width="250" alt="Colour-knit vase hung with thousands of single-strand teardrop loops fading blue to orange to yellow"><br><sub><b>Loops on colour-knit</b> · teardrop tiers</sub></td>
+    <td align="center"><img src="docs/media/halftone-cup.gif" width="250" alt="Two-colour halftone flames cup printed by alternating filament every layer"><br><sub><b>Halftone</b> · flames</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/media/twist-vase.gif" width="250" alt="Spiral vase mode twist vase with folds turning up the wall"><br><sub><b>Vase mode</b> · twist</sub></td>
+    <td align="center"><img src="docs/media/fringe-cup.gif" width="250" alt="Cup with drooping single-strand fringe that sags in mid-air as it prints"><br><sub><b>Droop</b> · fringe</sub></td>
+    <td align="center"><img src="docs/media/woven-cup.gif" width="250" alt="Open woven basketry cup in blue and cream rods"><br><sub><b>Woven rods</b> · grid cup</sub></td>
+  </tr>
+</table>
+
+<p align="center"><sub>Every frame above is the real build: the same geometry that goes into the Bambu Studio project, rendered by
+<a href="docs/make_media.py"><code>docs/make_media.py</code></a>.</sub></p>
+
+text2print is a Python generator for **textured 3D prints**. Every texture is a construction, not a surface
+effect: woven rods stacked course by course into open basketry, printed fabric whose layers zigzag in mid-air,
+colour-knit walls hung with thousands of single-strand loops. Pick a shape, a texture, sizes, colours and a
+nozzle in the web studio (or from the command line, or by asking Claude), and it builds the object live and
+writes a **Bambu Studio 3MF project**: one object, one part per AMS colour, the P2S profile for your nozzle,
+no supports.
+
+- **43 textures, 25 shapes.** Weaves, twills, kagome, knit, zigzag, fringe, fur, halftone, CMYK, voronoi,
+  lithophane, fuzzy skin, spiral vase mode, on cups, vases, bowls, trays, baskets, lamp shades, lidded boxes and more.
+- **Multicolour without the pain.** Colour plans are laid out to keep AMS filament changes and purge low, and
+  every texture card shows its colour-change cost before you pick it.
+- **Print-ready, verified in the slicer.** Bambu's own P2S presets are baked in; *Get exact print time* slices
+  with the Bambu Studio CLI for the real time, grams and colour changes.
+- **Lids, fittings and text.** Slip, screw or magnet lids; LED puck and tealight fittings; words debossed under
+  the base or inlaid in a second colour.
+- **Extendable by prompt.** Describe "a koi pond halftone" or "a fish-scale knit" and Claude writes a plugin
+  for it, checks the build and hands it back selected in the studio.
 
 <p align="center"><img src="docs/studio.png" alt="The text2print studio: shapes and patterns on the left, a live 3D preview on the print plate, and the print card with time, filament and an Open in Bambu Studio button" width="920"></p>
 
-text2print makes textured objects for 3D printing. Every texture is a construction, not a surface effect:
-woven rods stacked course by course into open basketry, printed fabric whose layers zigzag in mid-air, or
-colour-knit walls hung with thousands of single-strand loops.
-You pick a shape, a texture, sizes, colours and a nozzle; it builds the object live and hands you a
-Bambu Studio project with the right settings already in it.
+**Contents:** [Run it](#run-it) · [Command line](#without-the-studio) · [Claude Code skill](#use-it-as-a-claude-code-skill) ·
+[Textures](#textures) · [Loops](#loops-on-colour-knit) · [Plugins](#custom-pictures-and-patterns) · [Shapes](#shapes) ·
+[P2S settings](#made-for-the-bambu-lab-p2s) · [FAQ](#faq) · [Repo](#repo)
 
 ## Run it
 
@@ -93,6 +130,21 @@ The output carries the project path, the design as built, a studio link to it, t
 grams), the warnings and whether every part is watertight. `./t2p catalogue` prints everything a design can use as
 JSON (mix bands, chart bands, lids, pictures, the palette), which is what an agent reads first. `SKILL.md` is the
 same workflow written as a Claude Code skill; link the repo into `~/.claude/skills/text2print` to install it.
+
+## Use it as a Claude Code skill
+
+text2print ships as a [Claude Code](https://claude.com/claude-code) skill (`SKILL.md`). Link the repo into your
+skills folder and ask for a print in plain words:
+
+```bash
+ln -s "$PWD" ~/.claude/skills/text2print
+```
+
+> *"A low woven bowl that fades from brick to bone, our name under the base."*
+
+Claude reads the catalogue, composes the design, builds it, looks at the preview and hands you the Bambu
+project. When nothing in the catalogue fits, it writes a new weave, stitch, picture or shape as a plugin and
+checks it first. The studio's **Design with Claude** box does the same thing from the browser.
 
 ## Textures
 
@@ -339,6 +391,8 @@ around PETG; everything else was tuned on PLA Matte, and the app says so when yo
 
 ## What the slicer confirmed
 
+<details><summary>Show</summary>
+
 - Bambu Studio's CLI honours each part's AMS slot once every per-filament setting list is the right length, so
   the exact-time numbers include real colour changes. On three mixes the slicer's change count matched the app's
   estimate exactly.
@@ -377,7 +431,11 @@ around PETG; everything else was tuned on PLA Matte, and the app says so when yo
 - With the prime tower off, purge moves at the chute appear in the G-code as wall-type extrusions far from the
   piece; leave them out of any wall-continuity check.
 
+</details>
+
 ## Laws
+
+<details><summary>Show</summary>
 
 These are print-verified, and the tests enforce the geometric ones.
 
@@ -405,6 +463,29 @@ These are print-verified, and the tests enforce the geometric ones.
   (`.to_2D()` reframes); build revolved parts from axis-Z cylinder frustums (`Manifold.revolve` mis-orients).
 - Alternating colour bands: white = body ∩ (odd-band z-mask), black = body − mask — clean complements stay
   watertight. Each band is an AMS swap: purge and time scale with the count.
+
+</details>
+
+## FAQ
+
+**Which printers does it support?** The bundled profiles are Bambu Lab's own P2S presets for the 0.2, 0.4, 0.6
+and 0.8 mm nozzles. The geometry is plain STL/3MF, so other printers can slice the parts, but the process
+settings (bridge speeds, droop cooling, layer ranges) are tuned for the P2S and its AMS.
+
+**Do I need an AMS?** No. Every texture prints in one colour; the AMS is only needed for multicolour designs.
+Vase-mode textures are always one colour.
+
+**Does it need supports?** No. Woven rods bridge short gaps, reliefs keep every underside at 45° or less, and
+Voronoi holes are gable-roofed. Projects are written with supports off.
+
+**What files does it make?** A Bambu Studio `.3mf` project (parts, colours, AMS slots and process settings),
+plus STLs and a PNG preview if you ask for them.
+
+**Can I add my own pattern or shape?** Yes. A weave, stitch, picture or shape is a small Python plugin in
+`~/.text2print/plugins`; see `plugin_examples/`, or ask Claude to write one.
+
+**What has actually been printed?** The woven twill tray and platter at 0.4 mm are print-verified; the other
+nozzles and the loop looks are computed and sliced but not yet printed (marked in the tables below).
 
 ## Repo
 
