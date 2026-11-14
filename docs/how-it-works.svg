@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 196" width="960" height="196" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Helvetica, Arial, sans-serif">
+  <title>How text2print works: pick a shape and texture, build real geometry per AMS colour, check it, slice it with the Bambu Studio CLI, print the 3MF</title>
+  <style>
+    .card { fill: #fbf9f5; stroke: #d9d2c5; stroke-width: 1; }
+    .num  { fill: #8a7248; font-size: 11px; font-weight: 600; letter-spacing: .08em; }
+    .head { fill: #1c1915; font-size: 17px; font-weight: 500; }
+    .line { fill: #6e6455; font-size: 11.5px; }
+    .arrow { stroke: #b9ad97; stroke-width: 1.5; fill: none; }
+    .tip { fill: #b9ad97; }
+    .end { fill: #1c1915; stroke: #1c1915; }
+    .end-head { fill: #fbf9f5; font-size: 17px; font-weight: 500; }
+    .end-line { fill: #cfc6b6; font-size: 11.5px; }
+    .end-num { fill: #e8a33d; font-size: 11px; font-weight: 600; letter-spacing: .08em; }
+    @media (prefers-color-scheme: dark) {
+      .card { fill: #1f1c18; stroke: #3a352d; }
+      .num  { fill: #c9a96a; }
+      .head { fill: #f4f2ec; }
+      .line { fill: #a99f8e; }
+      .arrow { stroke: #5c5446; }
+      .tip { fill: #5c5446; }
+      .end { fill: #f4f2ec; stroke: #f4f2ec; }
+      .end-head { fill: #1c1915; }
+      .end-line { fill: #5c5446; }
+      .end-num { fill: #8a7248; }
+    }
+  </style>
+
+  <!-- 1 Pick -->
+  <rect class="card" x="4" y="20" width="168" height="156" rx="14"/>
+  <text class="num" x="22" y="48">01</text>
+  <text class="head" x="22" y="76">Pick</text>
+  <text class="line" x="22" y="104">25 shapes × 43 textures</text>
+  <text class="line" x="22" y="122">sizes, up to 4 colours,</text>
+  <text class="line" x="22" y="140">nozzle, PLA or PETG</text>
+  <text class="line" x="22" y="158">or describe it to Claude</text>
+
+  <path class="arrow" d="M176 98 H190"/><path class="tip" d="M190 93 L197 98 L190 103 Z"/>
+
+  <!-- 2 Build -->
+  <rect class="card" x="201" y="20" width="168" height="156" rx="14"/>
+  <text class="num" x="219" y="48">02</text>
+  <text class="head" x="219" y="76">Build</text>
+  <text class="line" x="219" y="104">rods, stitches, strands,</text>
+  <text class="line" x="219" y="122">ribs as real geometry;</text>
+  <text class="line" x="219" y="140">one part per AMS colour,</text>
+  <text class="line" x="219" y="158">cut on layer boundaries</text>
+
+  <path class="arrow" d="M373 98 H387"/><path class="tip" d="M387 93 L394 98 L387 103 Z"/>
+
+  <!-- 3 Check -->
+  <rect class="card" x="398" y="20" width="168" height="156" rx="14"/>
+  <text class="num" x="416" y="48">03</text>
+  <text class="head" x="416" y="76">Check</text>
+  <text class="line" x="416" y="104">watertight parts,</text>
+  <text class="line" x="416" y="122">overhangs within limits,</text>
+  <text class="line" x="416" y="140">AMS change count, and</text>
+  <text class="line" x="416" y="158">a preview, loops hung</text>
+
+  <path class="arrow" d="M570 98 H584"/><path class="tip" d="M584 93 L591 98 L584 103 Z"/>
+
+  <!-- 4 Slice -->
+  <rect class="card" x="595" y="20" width="168" height="156" rx="14"/>
+  <text class="num" x="613" y="48">04</text>
+  <text class="head" x="613" y="76">Slice</text>
+  <text class="line" x="613" y="104">Bambu Studio CLI in the</text>
+  <text class="line" x="613" y="122">background: exact time,</text>
+  <text class="line" x="613" y="140">grams, real AMS changes</text>
+  <text class="line" x="613" y="158">and purge</text>
+
+  <path class="arrow" d="M767 98 H781"/><path class="tip" d="M781 93 L788 98 L781 103 Z"/>
+
+  <!-- 5 Print -->
+  <rect class="end" x="792" y="20" width="164" height="156" rx="14"/>
+  <text class="end-num" x="810" y="48">05</text>
+  <text class="end-head" x="810" y="76">Print</text>
+  <text class="end-line" x="810" y="104">a Bambu Studio 3MF,</text>
+  <text class="end-line" x="810" y="122">P2S settings and AMS</text>
+  <text class="end-line" x="810" y="140">slots mapped. Open it</text>
+  <text class="end-line" x="810" y="158">or send it over LAN</text>
+</svg>
