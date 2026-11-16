@@ -465,6 +465,21 @@ PETG_FLAT_TOP_FACE = {
 # (rail back: 0.11 g, only under the two tongues). Check where support lands before trusting it.
 SUPPORT_CANTILEVERS_ONLY = {"enable_support": 1, "support_type": "tree(auto)", "support_on_build_plate_only": 1,
                             "support_threshold_angle": 30}
+# Perforated face printed ON THE BED (grilles, speaker fronts) with a 0.4 nozzle. Printed Nov 15 2026 (gateway holder):
+# 1,033 holes of 1.8 mm lost about 10 % on layer one; 396 holes of 3 mm still lost a couple at stock first-layer
+# settings. Geometry law: holes >= 3 mm with lands >= 2.5 mm, and as few as the design allows; a clean toolpath in
+# the sliced file does NOT prove hundreds of tiny first-layer loops will stick to textured PEI.
+# PERFORATED_WALLS: variable-width walls fill the lands exactly, small loops print slowly (the stock preset has the
+# small-loop slowdown OFF, so they run at outer-wall speed), holes open 0.1 mm to offset shrink.
+PERFORATED_WALLS = {"wall_generator": "arachne", "small_perimeter_threshold": ["6", "6", "6"],
+                    "small_perimeter_speed": ["30", "30", "30"], "xy_hole_compensation": "0.1"}
+# SMALL_LOOPS_FIRST_LAYER: slow, gentle, wide and hot for layer one only; bed returns to BED_DEFAULTS (60) from layer two.
+# Pass SMALL_LOOPS_FIRST_LAYER_FILAMENT as write_3mf(per_filament=...): nozzle 230 on layer one, fan off for 3 layers.
+# Also needed, outside the file: a plate washed with dish soap, and bed levelling left on.
+SMALL_LOOPS_FIRST_LAYER = {"initial_layer_speed": ["20", "20", "20"], "initial_layer_infill_speed": ["50", "50", "50"],
+                           "initial_layer_acceleration": ["300", "300", "300"], "initial_layer_line_width": "0.55",
+                           "reduce_crossing_wall": "1", "textured_plate_temp_initial_layer": ["65"]}
+SMALL_LOOPS_FIRST_LAYER_FILAMENT = {"nozzle_temperature_initial_layer": ["230"], "close_fan_the_first_x_layers": ["3"]}
 
 
 def apply_overrides(cfg, intents):
