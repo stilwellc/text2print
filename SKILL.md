@@ -192,6 +192,23 @@ above (none if top band), range wall_loops=rod_lines over the band, woven speeds
   Pieces past the picker's limits: `build.make(..., _raw=True)`; lay the plate out by hand (a 168 x 250 piece with
   32 mm flat loops fills the P2S bed; a 20 mm tower with brim fits in front of the window, a 30 mm one does not).
 
+## Perforated faces and enclosures (print feedback, Nov 15 2026: a wall-plug gateway holder)
+
+- Holes in a face that prints on the bed: **3 mm or larger, lands 2.5 mm or more, as few as the design allows.**
+  On the 0.4 nozzle 1,033 holes of 1.8 mm lost about 10 % on layer one; 396 holes of 3 mm lost a couple at stock
+  settings. A clean toolpath in the sliced file is not proof: check hole count against what layer one can hold.
+- Slice them with `bambu.PERFORATED_WALLS` (Arachne, small loops at 30 mm/s, +0.1 mm hole compensation) and
+  `bambu.SMALL_LOOPS_FIRST_LAYER` (20 mm/s, accel 300, 0.55 line, avoid crossing walls, bed 65 on layer one then 60),
+  plus `per_filament=bambu.SMALL_LOOPS_FIRST_LAYER_FILAMENT` (nozzle 230 on layer one, fan off 3 layers). Wash the
+  plate with dish soap first.
+- Blind holes need only a 0.4 mm floor (two layers bridge a 3 mm circle). Put the print seam on the hidden side by
+  turning the part so that side faces the back of the bed (`seam_position: back`).
+- Enclosure taste that held up: one piece, 2 mm walls (never thicken a wall to house a mechanism), 1.6 mm front,
+  straight sides with no step or recessed plinth, a grille that runs the full face, corners matched to the device
+  inside, and only one wall above whatever the piece hangs from. Click bumps on a thin flexing wall replace snap arms.
+- A USB plug cannot be pushed into a charger that is already inside a collar: slot the collar full length so the
+  charger slides in with its cord attached. Measure the real parts first (charger face, depth with cord, wall plate).
+
 ## Extending
 
 New woven texture: a function `p_name(region, nz, rods)` in `lattice.py` that walks `region.n` courses, uses
