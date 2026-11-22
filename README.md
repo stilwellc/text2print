@@ -284,7 +284,9 @@ candles carry their hardware fit (collar, foot ring, crush ribs) and LED-only sa
 The profiles in `text2print/data/` are Bambu's own P2S presets with every `inherits` link resolved, so projects
 don't depend on your Bambu Studio install. Each texture family then sets what it needs: rods bridge at full speed,
 fabric prints as a 2-loop shell with no infill, droop strands print with a low fan and a hotter nozzle. PETG uses Bambu's
-`Generic PETG @BBL P2S` preset per colour; everything except loops was tuned on PLA Matte, and the app says so.
+`Generic PETG @BBL P2S` preset per colour and its own process speeds (`printer.PETG_PROCESS`: walls 60/100 mm/s, bridges
+30, first layer 20 with gentle moves); PLA keeps the stock ones. Loops and strands keep their own speeds on either material.
+The shapes and textures were tuned on PLA Matte, and the app says so.
 
 ## What the slicer confirmed
 
