@@ -178,10 +178,10 @@ def material_settings(size, materials):
     ("_preset" lets the writer flag only what a texture family changes on top, e.g. the droop fan)."""
     n = nozzle(size); base = base_config(size)
     out = {"filament_settings_id": [], "filament_ids": [], "filament_type": []}
-    chains = []
+    chains, stock = [], []                                    # stock: slots left on the base PLA preset
     for m in materials:
         if str(m).strip().lower() in ("pla", ""):               # this slot stays on the base PLA Matte preset
-            chains.append(dict(base, filament_id=(base.get("filament_ids") or ["GFA00"])[0]))
+            chains.append(dict(base, filament_id=(base.get("filament_ids") or ["GFA00"])[0])); stock.append(len(chains) - 1)
             out["filament_settings_id"].append((base.get("filament_settings_id") or [""])[0])
             out["filament_ids"].append((base.get("filament_ids") or ["GFA00"])[0]); out["filament_type"].append("PLA")
             continue
@@ -192,7 +192,10 @@ def material_settings(size, materials):
         c = _filament_chain(name); chains.append(c)
         out["filament_settings_id"].append(name); out["filament_ids"].append(c.get("filament_id", "GFG99"))
         out["filament_type"].append((c.get("filament_type") or ["PETG"])[0])
-    for key in sorted(set().union(*chains)):
+    # only what a FILAMENT preset sets. A PLA slot's chain is the whole project config: taking its keys too wrote the
+    # process speeds as per-filament lists (wrong length, and they overrode the project's own speeds)
+    presets = [c for i, c in enumerate(chains) if i not in stock]
+    for key in sorted(set().union(*presets)) if presets else []:
         if key in out or key not in base or not isinstance(base[key], list) or key.startswith(_KEEP_BED) \
                 or key in ("compatible_printers", "filament_extruder_variant", "filament_self_index"):
             continue
@@ -202,4 +205,44 @@ def material_settings(size, materials):
             vals.append(str(v[0] if isinstance(v, list) and v else v))
         out[key] = vals
     out["_preset"] = {k: list(v) for k, v in out.items()}
+    return out
+
+
+# ── process speeds per material ───────────────────────────────────────────────────────────────────────────────────
+# The process preset (and each family's speed overrides) is Bambu's for PLA. A PETG filament preset changes
+# temperature, fan and the flow limit, not the speeds — so PETG ran at PLA speeds pinned at its flow limit: rough walls,
+# leathery tops, and a first layer of fine rods laid at 35 mm/s between 600 mm/s travels (two prints, Nov 21-22 2026).
+# These are CEILINGS: a family that already runs slower keeps its own number.
+PETG_PROCESS = {
+    "outer_wall_speed": 60, "inner_wall_speed": 100, "sparse_infill_speed": 100, "internal_solid_infill_speed": 100,
+    "top_surface_speed": 60, "gap_infill_speed": 50, "support_speed": 80, "support_interface_speed": 50,
+    "bridge_speed": 30, "overhang_2_4_speed": 40, "overhang_3_4_speed": 30, "overhang_4_4_speed": 30,
+    "overhang_totally_speed": 30,
+    "default_acceleration": 4000, "outer_wall_acceleration": 2000, "top_surface_acceleration": 1000,
+    "initial_layer_speed": 20, "initial_layer_infill_speed": 30, "initial_layer_acceleration": 300,
+    "initial_layer_travel_acceleration": 1000,
+}
+PROCESS = {"petg": PETG_PROCESS}                      # by filament type, lower case; PLA is the stock preset
+
+
+def process_for(size, filament_types, over=None, skip=()):
+    """Process settings for the materials on the plate, as an update for `over` (the project's overrides so far).
+    The process is one for the whole plate, so with PLA and PETG together the slower material sets the pace.
+    Each value is min(what the project has, the material's ceiling), in the config's own list shape; settings that
+    are not plain numbers (percentages), and keys in `skip`, are left alone. PLA alone returns {}."""
+    caps = {}
+    for t in filament_types:
+        for k, v in PROCESS.get(str(t).strip().lower().split("-")[0], {}).items():
+            caps[k] = min(v, caps.get(k, v))
+    base = base_config(size); over = over or {}; out = {}
+    for k, cap in caps.items():
+        if k in skip or k not in base:
+            continue
+        cur = over.get(k, base[k]); vals = list(cur) if isinstance(cur, list) else [cur]
+        try:
+            new = [f"{min(float(v), cap):g}" for v in vals]
+        except (TypeError, ValueError):
+            continue
+        shape = base[k]
+        out[k] = (new if len(new) == len(shape) else [new[0]] * len(shape)) if isinstance(shape, list) else new[0]
     return out

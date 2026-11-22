@@ -315,3 +315,30 @@ def test_jar_lid_fluted_grip_is_one_clean_solid():
     assert cfg.count("<object ") == 2 and cfg.count("<part ") == 4
     r, cx, _ = _pour(b.params)
     assert abs(2 * r - 30) < 1e-6 and 86 / 2 + MASON["clear"] - (cx + r + POUR["boss"]) >= POUR["jar"] - 1e-6
+
+
+def test_petg_runs_at_petg_speeds_and_pla_keeps_its_own(tmp_path):
+    """PETG at PLA process speeds printed rough and laid its first layer far too fast (Nov 2026)."""
+    first = lambda v: float(v[0] if isinstance(v, list) else v)
+    pla, _ = _cfg(build.make("tray", "grid", {}, colours=C4[:2], draft=True), tmp_path / "pla.3mf")
+    petg, _ = _cfg(build.make("tray", "grid", {}, colours=C4[:2], options={"material": "petg"}, draft=True), tmp_path / "petg.3mf")
+    assert first(pla["initial_layer_speed"]) == 35 and first(pla["inner_wall_speed"]) == 150       # the printed PLA tray
+    for key, cap in printer.PETG_PROCESS.items():
+        assert first(petg[key]) <= cap, key
+        assert len(petg[key]) == len(pla[key]) if isinstance(pla[key], list) else isinstance(petg[key], str), key
+    assert first(petg["overhang_4_4_speed"]) == 30 and first(petg["initial_layer_speed"]) == 20
+    mixed, _ = _cfg(build.make("cup", "zigzag", {}, colours=C4, options={"zones": 2, "material": ["pla", "petg"]}, draft=True), tmp_path / "m.3mf")
+    assert first(mixed["outer_wall_speed"]) <= 60                 # one process a plate: the slower material sets it
+    assert len(mixed["outer_wall_speed"]) == len(pla["outer_wall_speed"])   # a process list, not one per filament
+
+
+def test_petg_ceilings_never_speed_anything_up_and_leave_falling_strands_alone(tmp_path):
+    first = lambda v: float(v[0] if isinstance(v, list) else v)
+    assert printer.process_for(0.4, ["PLA"]) == {} and printer.process_for(0.4, ["pla", ""]) == {}
+    slow = printer.process_for(0.4, ["PETG"], {"outer_wall_speed": ["25", "25", "25"], "bridge_speed": "12"})
+    assert slow["outer_wall_speed"] == ["25", "25", "25"] and set(slow["bridge_speed"]) == {"12"}
+    pla = build.make("cup", "swag", {}, colours=C4[:1], draft=True).overrides
+    petg = build.make("cup", "swag", {}, colours=C4[:1], options={"material": "petg"}, draft=True).overrides
+    assert petg == pla                                            # droop: strands only fall if they are laid fast
+    loops = make("shag", material="petg").overrides
+    assert loops == make("shag").overrides
