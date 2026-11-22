@@ -1,17 +1,22 @@
 ---
 name: text2print
-description: Textured 3D prints for a Bambu Lab P2S, picked from a catalogue. Use when someone wants a woven, basket, lattice, crosshatch, knit, fabric, zigzag, wave, drooping, fringe, loop, curl, fur, two-colour halftone-picture, vase-mode pleat/flute/twist, voronoi, lithophane, fuzzy-skin or CMYK-picture tray, platter, dish, coaster, cup, lamp shade, bowl, vase, cachepot, liner sleeve, tealight lantern, pendant shade, LED puck lamp, amphora, basket, catch-all or tile; asks to "pick a pattern / pick a shape"; or wants to open or extend the text2print studio. Produces a Bambu Studio project (one object, one part per AMS colour, P2S settings for the chosen nozzle).
+description: 3D prints for a Bambu Lab P2S: textured pieces picked from a catalogue, and functional one-off parts (a bracket, sleeve, stand, clip, holder, a handed-over STL) delivered as a Bambu Studio project with the right PLA or PETG settings, a dimension drawing and a slice report. Use when someone wants a woven, basket, lattice, crosshatch, knit, fabric, zigzag, wave, drooping, fringe, loop, curl, fur, two-colour halftone-picture, vase-mode pleat/flute/twist, voronoi, lithophane, fuzzy-skin or CMYK-picture tray, platter, dish, coaster, cup, lamp shade, bowl, vase, cachepot, liner sleeve, tealight lantern, pendant shade, LED puck lamp, amphora, basket, catch-all or tile; asks to "pick a pattern / pick a shape"; or wants to open or extend the text2print studio. Produces a Bambu Studio project (one object, one part per AMS colour, P2S settings for the chosen nozzle).
 ---
 
 # text2print — pick a shape, pick a texture
 
-Everything here is a TEXTURE ON A SHAPE. Don't model from scratch: pick from the catalogue, set sizes,
-build, and hand over the Bambu project. Repo: ~/Dev/text2print (python package `text2print`, studio in `studio/`).
+Two kinds of job, two paths. Repo: ~/Dev/text2print (python package `text2print`, studio in `studio/`).
+
+- **A textured vessel or tile** (woven, knit, droop, halftone, vase-mode, litho...): a TEXTURE ON A SHAPE. Don't model
+  it from scratch: pick from the catalogue, set sizes, build, hand over the project. -> "Use it from the command line".
+- **Anything else** (a bracket, sleeve, stand, clip, holder, a handed-over STL, a weave on your own outline): model the
+  mesh yourself and hand it to `part.deliver`. -> "Parts that are not in the catalogue". Most real requests are these.
 
 ## Use it from the command line
 
 Everything the studio does is available without it. `t2p` (in the repo root) runs from any folder; it is
-`.venv/bin/python -m text2print` with the path set. Every command prints JSON; a bad request exits 2 with
+`.venv/bin/python -m text2print` with the path set. Commands print JSON (`list`, `options` and `pictures` print text;
+`options --json` for JSON); a bad request exits 2 with
 `{"error": "..."}` that says what to fix; a failed slice exits 1.
 
 ```bash
@@ -43,7 +48,7 @@ on the command line: `--option 'bands=[{"texture":"plain","share":1},{"texture":
 `--option 'chart=[{"motif":"hearts","colours":[0,1]},{"plain":0,"mm":6}]'`.
 
 **`make` flags:** `--out DIR` · `--name STEM` · `--draft` · `--preview` (`STEM_preview.png`: loops and strands hung as
-they fall, lid on) · `--render` (`STEM.png`: as printed) · `--slice` (Bambu Studio CLI: real time, grams, layers) · `--no-stls` · `--save NAME` (adds it to the
+they fall, lid on) · `--render` (`STEM.png`: as printed) · `--slice` (Bambu Studio CLI: real time, grams, layers) · `--no-stls` · `--material pla|petg` (or one per colour: `pla,petg`) · `--save NAME` (adds it to the
 studio's Saved list) · `--open` (opens the project in Bambu Studio) · `--image PHOTO` (halftone, litho, flat).
 **Output:** `project`, `design` (as built), `link` (opens the same design in the studio), `params`, `stats` (size,
 swaps = AMS changes, grams_est, strands...), `warnings` (read them: they include options whose value is not a known
@@ -60,6 +65,8 @@ choice), `watertight`, and `render` / `slice` / `saved` when asked.
 | `plugin list` / `new KIND NAME` / `check FILE` | user-written textures, pictures, charts and shapes |
 | `sampler --nozzle 0.4 [--slice]` | test plates |
 | `verify TEXTURE NOZZLE ok\|fail --note "..."` | record a real print; drives the Printed badges and warnings |
+| `check SLICED.3mf` | what a sliced file will really do: first-layer and print speeds by feature, fastest move, accelerations, filament changes, grams per filament |
+| `part FILE.stl [...] --material petg --slice` | a handed-over STL (one per colour) as a project: placed, never reshaped |
 | `printer status` / `printer test` | is a LAN printer set up; connection check (never prints) |
 | `send SPEC --confirm` | slices and STARTS A PRINT. Only when the person has said to print it |
 | `ask "WORDS" [--design SPEC] [--ideas N] [--photo P] [--hours H --changes N --grams G]` | Design with Claude without the studio: starts a Claude run, prints its steps, returns the designs as JSON |
@@ -67,7 +74,7 @@ choice), `watertight`, and `render` / `slice` / `saved` when asked.
 | `taste like\|dislike SPEC --note "..."` | teach it what they like (read before every design) |
 | `studio [--port N] [--no-browser]` | the picker, when they want to look and drag |
 
-Options worth knowing: zones 1-4 + zone_style bands|stripes (fabric, droop; lattice with colour_by=height),
+Options worth knowing: zones 1-4 + zone_style bands|stripes|courses|fade (fabric, droop; lattice with colour_by=height),
 lid=slip|gift|thread|magnets + lid_fit=snug|slip|loose (+ lid_colour, lid_texture, lid_knob), purge=lean, tower=off,
 picture/--image for halftone, litho and flat; halftone band=1|2|3, area=full|half|third, silk=silk,
 purge_piece=coaster; spiral folds/turn; shell cell (voronoi), noise + fuzzy_bands (fuzzy); droop rows=even,
@@ -77,6 +84,47 @@ In Python: `from text2print import design; d, b = design.build_design({...}); b.
 
 Deliver to ~/Downloads/<project>/ (Collin's rule): the .3mf, the per-colour STLs, a render, and the numbers
 from `--slice` plus the AMS change estimate in `stats`.
+
+## Parts that are not in the catalogue
+
+A sleeve, a bracket, a stand, a clip, a can with a label, a band with holes, an STL someone hands over. Write a short
+script; model the mesh with whatever suits it, then let `part.deliver` do everything after the mesh.
+
+```python
+from text2print import part, extras, meshops
+
+body = meshops.manifold_to_trimesh(extras.revolve([(8.5, 0), (22.5, 0), (22.5, 0.6), (9.7, 29), (9.7, 30), (8.5, 30)]))
+r = part.deliver("pipe_sleeve", [("Sleeve", body, 1)], colours=["#FFFFFF"], material="petg", slice=True,
+                 check={"length": (30.0, "z"), "bell": (45.0, "x")},          # HIS numbers: it raises if the build misses
+                 dims=[("front", (-8.5, 15), (8.5, 15), "17.0 bore")])       # extra sizes for the drawing
+print(r["slice"], r["report"]["first_layer"], r["warnings"])
+```
+
+`deliver` writes `~/Downloads/<name>/` with the project, an STL per colour, a render and a **dimension drawing**, and
+with `slice=True` the slicer's time, grams per filament, filament changes, its warnings and a `report` of the real speeds.
+
+- **Modelling.** `extras.revolve(profile)` (r, z outline -> Manifold), `extras.helix_ridge` (screw thread, true lead),
+  `extras.prism`, `extras.text_polygons`, manifold3d booleans, `meshops.manifold_to_trimesh` / `to_manifold`,
+  `meshops.cq_to_trimesh(workplane)` for CadQuery, `meshops.seat(mesh)`. A handed-over STL: `part.from_stl(path, ...)`
+  or `t2p part FILE.stl`; the STL is the model, it is placed and never reshaped.
+- **Colours.** One mesh per colour, all passed in ONE `deliver` call (one object, one part per colour). A two-colour
+  face printed on the plate: `first_layer_order=(2, 1)` puts filament 2 down first.
+- **Material.** `material="petg"` sets the filament preset and the speeds. Never write a speed table by hand.
+  Small or fine features on the plate: `first_layer=15` (mm/s; it also tames the moves between pieces).
+- **Settings.** Default is `printer.solid_part`: 3 walls, 20 % gyroid, seam at the back, no support. Pass `overrides={...}`
+  (plain numbers are fine) or one of the `bambu.` presets below; for rods pass
+  `base_overrides=printer.overrides(0.4, "lattice", slots=2, material="petg")`.
+- **A weave on your own outline.** `rods = lattice.weave_region(sdf, courses, nz, "chevron", extent=..., min_rod=2.0)`
+  with `sdf(x, y) <= 0` where rods may be and `nz = printer.nozzle(0.4)` or `printer.fine_rod(0.4)` (half-size rods, for
+  pieces with only 10-20 mm between openings; not print-verified). Frame the outline and every hole with your own rods
+  (`rods.line`, `rods.path`), then `lattice.support_audit(rods, frame=[...])` must report `loose_ends: 0` — a pattern
+  clipped to a new outline can leave rod ends in mid-air (Selvedge did, 57 of them). Render every candidate pattern on
+  the real outline and let him pick; large-repeat weaves turn to noise in narrow lands.
+- **Before saying it is ready.** (1) The drawing: show it whenever a size is his, and say which numbers are his and
+  which are yours. A measurement that sounds odd for the object is worth one question before building, not six
+  rebuilds after. (2) `r["warnings"]` and `r["slice"]["warnings"]`. (3) `r["report"]`: first-layer speed, the fastest
+  move, the changes. (4) Anything that has to fit: state the clearance and that it is untested until printed.
+- **Keep the script** in the repo root (untracked) and note it in memory; overwrite the files in Downloads on each change.
 
 ## Catalogue
 
@@ -137,7 +185,7 @@ above (none if top band), range wall_loops=rod_lines over the band, woven speeds
 - Boolean safety: fabric zigzag walls have coplanar overlapping step faces; a manifold union shreds them. Add
   solids as a separate same-colour part; `meshops.manifold_to_trimesh` (merge vectors, never merge_vertices).
 - Lids/knobs/coasters on a shared plate get per-object SOLID settings (walls 3, 20 % infill, 4 top/bottom,
-  spiral off) or they inherit the piece's 0 % infill. Thread: 2-start, 3 mm pitch, 1.2 deep, 0.2 clear.
+  spiral off) or they inherit the piece's 0 % infill. Thread: 2-start, 3 mm pitch (6 mm of travel a turn, about one turn to close), 1.2 deep, 0.2 clear; `extras.helix_ridge` keeps that lead at any height.
   Magnets 6x2, pocket +0.15 dia / +0.2 deep. Fits snug 0.15 / slip 0.25 / loose 0.40 a side.
 - Droop (UNRAVEL, print-verified July 2026): a strand is a flat ribbon anchored INTO the wall at both ends,
   never an r(theta) displacement. One extrusion wide (swag: 2), <= 4 layers tall, rows a strand + a layer
@@ -156,12 +204,12 @@ above (none if top band), range wall_loops=rod_lines over the band, woven speeds
   knob press-fits (6.0 hole / 5.85 peg).
 - Reliefs (garland, drips, melt) ramp every underside at <= 45 deg; test enforces it.
 - Only the 0.4 nozzle is print-verified. 0.2/0.6/0.8 are computed from it — say so.
-- PLA or PETG (`material=petg`, or a list per colour): the filament preset AND the process speeds follow the material.
-  `printer.process_for(size, filament_types, over)` holds walls, infill, bridges and the first layer to `printer.PETG_PROCESS`
-  (ceilings: a slower family keeps its own; droop and loops are exempt, they must be laid fast). A one-off script that writes
-  its own project must call it too: `over.update(printer.process_for(0.4, ["petg"], over))`. Before this (Nov 22 2026) PETG
-  ran PLA speeds: rough walls, and fine rods laid at 35 mm/s on layer one.
-
+- PLA or PETG (`--material petg`, or a list per colour): the filament preset AND the process speeds follow the material
+  (`printer.PETG_PROCESS`, applied by `build.make`, `part.deliver`, `printer.overrides(material=)` and
+  `printer.solid_part(material=)`). They are ceilings: a slower family keeps its own; droop and loops are exempt, they
+  must be laid fast. A print in PLA says nothing about PETG: `t2p verify TEXTURE 0.4 ok --material petg` records it.
+- Slicing reports `changes` (real filament changes), `grams_by_filament` and the slicer's `warnings`: quote those, not
+  the estimate in `stats`. `t2p check` / `bambu.print_report` reads the first layer out of the G-code.
 - 2-colour fine detail (a logo inlaid in a cap): rough tops are speed, not geometry — use `bambu.SHOWROOM_PETG_DETAIL`
   (slow feeds, 30 s minimum layer, layer 0.12, top line 0.3, no ironing, 1 outline wall on the logo via `bambu.LOGO_PART`,
   random seam on the body) and prove it with `bambu.check_detail`. The full write-up is in README "Laws" and the
@@ -242,7 +290,7 @@ mix -> top band's texture. Woven caps stripe the graft per course. Plate-wide ch
 _geom_transitions when Build.lid_shares_plate(). Lid objects are multi-part (write_3mf groups extras by name);
 a separate -lid.3mf with 2+ colours parks the tower front-right. Woven round openings come from the region
 (extras.opening), vase mode from prof - line_w. Slicer-verified: 6 lid projects incl. 2-colour, counts equal.
-Lid section options: lid (none|slip|thread|magnets), lid_texture (match|plain|texture key from build.lid_textures()),
+Lid section options: lid (none|slip|gift|thread|magnets), lid_texture (match|plain|texture key from build.lid_textures()),
 lid_colours [hex, hex?], lid_height (5-40 mm, else auto 8-14), lid_knob (knob|button|none), lid_fit. Writer law:
 every object carries an object-level extruder = its first part's (a one-part object otherwise prints filament 1).
 
@@ -264,7 +312,7 @@ make it — then hand back a studio link. Four routes, cheapest first:
    u 0..1 around the wall, v 0..1 up, aspect = width/height in mm — work in `x = u * aspect, y = v` so shapes
    aren't stretched; wrap x at the seam (`(dx + aspect/2) % aspect - aspect/2`). Return darkness 0..1 (1 = front
    colour), or RGB (..., 3) with `colour=True` for CMYK tiles. Build pictures from signed distances (ellipses,
-   polygons, smooth unions), hash-seeded placement (deterministic), and keep features >= ~2 mm at print size:
+   polygons, smooth unions), hash-seeded placement (deterministic), and keep features >= ~3 mm at print size:
    halftone resolves ~1 rib (~3 mm) across and 2 layers (0.56 mm) up. Example: plugin_examples/koi.py.
 4. **A weave or stitch from a prompt** ("herringbone", "basket-weave diamonds", "fish-scale knit"):
    - `WOVEN = dict(name, blurb, slots=2, swaps="course", round_only=False)` + `pattern(region, nz, rods)` using
@@ -287,7 +335,7 @@ Always: `python -m text2print plugin check ~/.text2print/plugins/<name>.py` -> b
 checks watertight + overhang against the built-in stitches (verdict "ok"), renders a preview PNG — LOOK at the
 preview and iterate before handing over. Then `plugin list` (shows load errors) and give the studio link
 (`/?shape=vase&texture=x_<name>` or `/?shape=cup&texture=halftone&picture=lib:<name>`). The studio picks plugins
-up on the next load — no restart. `python -m text2print plugin new picture|woven|stitch|shape NAME` writes a starter. The studio's "Make a new
+up on the next load — no restart. `python -m text2print plugin new picture|woven|stitch|shape|chart NAME` writes a starter. The studio's "Make a new
 one" box runs exactly this flow through a headless `claude -p` (studio/ask.py).
 
 ## Designing with Claude (the studio's "Design with Claude" box; also any chat request for a whole piece)

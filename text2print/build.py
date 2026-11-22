@@ -932,6 +932,10 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
         warnings.append(f"Uses {vnote}; not yet printed on your P2S")
     elif vstat == "untested":
         warnings.append(f"Not printed yet on a {nz.size} mm nozzle — the test plate checks it")
+    _mat = (options or {}).get("material"); _mat = [_mat] if isinstance(_mat, str) else list(_mat or [])
+    _other = next((str(m_).strip().lower() for m_ in _mat if str(m_).strip().lower() not in ("pla", "")), None)
+    if _other and vstat == "printed" and verify.status(texture, nz.size, _other)[0] != "printed":
+        warnings.append(f"Printed in PLA; not yet in {_other.upper()}")
     ranges, per_filament, kinds = [], None, None
     flush_mult = 0.6 if options.get("purge") == "lean" else 1.0
     transitions = []                   # (from colour, to colour) for every AMS change, for the purge estimate
