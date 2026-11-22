@@ -170,14 +170,24 @@ def repair_3mf(path):
 
 
 def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), overrides=DEFAULT_OVERRIDES, base=None,
-              per_filament=None):
+              per_filament=None, plate=None):
     """objects: [{name, position, parts: [(name, mesh, slot) | (name, mesh, slot, opts)], ranges?: [(z0, z1, {opt: value})]}].
     opts (optional): {"seam_paint": per-face array (1 enforcer / -1 blocker)} paints seams like Bambu Studio's seam tool;
     {"modifier": True} makes the part a modifier volume (it prints nothing; its "settings"
     apply to whatever it overlaps — e.g. fuzzy skin on one surface); {"settings": {key: value}} sets per-part options.
-    per_filament: {key: [value per filament]} for filament-level settings (fan, temperature)."""
+    per_filament: {key: [value per filament]} for filament-level settings (fan, temperature).
+    plate: {key: value} extra plate metadata, e.g. {"first_layer_print_sequence": "2 1"} = on layer one print
+      filament 2 before filament 1 (Bambu Studio: Plate settings -> First layer filament sequence -> Customize);
+      a tuple or list is joined with spaces.
+    A scalar override for a setting the config holds as a list (speeds are one value per extruder) is written in that
+    list's shape; a list of the wrong length is the "no geometry" bug, a bare scalar is ignored by the GUI."""
     n_fil = max(p[2] for ob in objects for p in ob["parts"])
     overrides = {**BED_DEFAULTS, **dict(overrides or {})}
+    _shape = base if base is not None else json.loads(BASE_SETTINGS.read_text())
+    overrides = {k: ([str(v)] * len(_shape[k]) if isinstance(_shape.get(k), list) and _shape[k]
+                     and not isinstance(v, (list, tuple)) else v) for k, v in overrides.items()}
+    plate_meta = "".join(f'    <metadata key="{_x(k)}" value="{_x(" ".join(map(str, v)) if isinstance(v, (list, tuple)) else v)}"/>\n'
+                         for k, v in (plate or {}).items())
     ident = "1 0 0 0 1 0 0 0 1 0 0 0"
     next_id = 1
     object_files, root_objects, build_items, settings_objects, plate_instances, rels, cut_objs = {}, "", "", "", "", "", ""
@@ -227,7 +237,7 @@ def write_3mf(path, objects, title="model", colours=("#1C1C1C", "#F2F2F2"), over
                   f' <build p:UUID="{uuid.uuid4()}">\n{build_items} </build>\n</model>\n')
     settings = (f'<?xml version="1.0" encoding="UTF-8"?>\n<config>\n{settings_objects}'
                 f'  <plate>\n    <metadata key="plater_id" value="1"/>\n    <metadata key="plater_name" value=""/>\n'
-                f'    <metadata key="locked" value="false"/>\n    <metadata key="filament_map_mode" value="Auto For Flush"/>\n'
+                f'    <metadata key="locked" value="false"/>\n{plate_meta}    <metadata key="filament_map_mode" value="Auto For Flush"/>\n'
                 f'    <metadata key="gcode_file" value=""/>\n    <metadata key="thumbnail_file" value="Metadata/plate_1.png"/>\n'
                 f'    <metadata key="thumbnail_no_light_file" value="Metadata/plate_no_light_1.png"/>\n'
                 f'    <metadata key="top_file" value="Metadata/top_1.png"/>\n    <metadata key="pick_file" value="Metadata/pick_1.png"/>\n'
@@ -314,9 +324,11 @@ def slicer_available():
 
 
 def slice_project(p3mf, workdir):
-    """Slice a project 3MF with the Bambu Studio CLI -> {'time','minutes','grams','layers'} or {'error'}.
-    The CLI ignores part->filament assignment, so these are single-colour numbers (add the AMS swaps).
-    Run from the output dir with absolute paths; --outputdir breaks the export (Bambu Studio 2.8)."""
+    """Slice a project 3MF with the Bambu Studio CLI -> {'time', 'minutes', 'grams', 'layers', 'grams_by_filament',
+    'changes', 'warnings', 'sliced'} or {'error'}. grams is the whole print, purge included; changes counts the
+    filament changes in the G-code (the first load is not one); warnings are the slicer's own messages for a slice that
+    succeeded (they used to be dropped). Run from the output dir with absolute paths; --outputdir breaks the export
+    (Bambu Studio 2.8)."""
     import re, subprocess
     workdir = pathlib.Path(workdir); workdir.mkdir(parents=True, exist_ok=True)
     out = (workdir / "sliced.3mf").resolve()
@@ -335,10 +347,18 @@ def slice_project(p3mf, workdir):
     g = zipfile.ZipFile(out).read("Metadata/plate_1.gcode").decode(errors="ignore")
     t = re.search(r"; model printing time: ([^;]+);", g).group(1).strip()
     mins = sum(int(n) * {"d": 1440, "h": 60, "m": 1, "s": 1 / 60}[u] for n, u in re.findall(r"(\d+)([dhms])", t))
+    by_fil = [round(float(x), 2) for x in re.search(r"; total filament weight \[g\] : ([\d.,]+)", g).group(1).split(",") if x]
+    lines = g.splitlines()
+    warns = []
+    for pl in res.get("sliced_plates") or []:
+        w = pl.get("warning_message")
+        for item in (w if isinstance(w, list) else [w]):
+            if item and str(item).strip():
+                warns.append(str(item).strip()[:300])
     return {"time": t, "minutes": round(mins, 1),
-            "grams": round(sum(float(x) for x in re.search(r"; total filament weight \[g\] : ([\d.,]+)", g).group(1)
-                                .split(",") if x), 2),      # one number per filament: the total is their sum
-            "layers": int(re.search(r"; total layer number: (\d+)", g).group(1))}
+            "grams": round(sum(by_fil), 2),                 # one number per filament: the total is their sum
+            "layers": int(re.search(r"; total layer number: (\d+)", g).group(1)),
+            "grams_by_filament": by_fil, "changes": filament_changes(lines), "warnings": warns, "sliced": str(out)}
 
 
 def gcode_preview(sliced_3mf, out_png, colours=None, size=900):
@@ -471,14 +491,16 @@ SUPPORT_CANTILEVERS_ONLY = {"enable_support": 1, "support_type": "tree(auto)", "
 # the sliced file does NOT prove hundreds of tiny first-layer loops will stick to textured PEI.
 # PERFORATED_WALLS: variable-width walls fill the lands exactly, small loops print slowly (the stock preset has the
 # small-loop slowdown OFF, so they run at outer-wall speed), holes open 0.1 mm to offset shrink.
-PERFORATED_WALLS = {"wall_generator": "arachne", "small_perimeter_threshold": ["6", "6", "6"],
-                    "small_perimeter_speed": ["30", "30", "30"], "xy_hole_compensation": "0.1"}
+PERFORATED_WALLS = {"wall_generator": "arachne", "small_perimeter_threshold": "6",
+                    "small_perimeter_speed": "30", "xy_hole_compensation": "0.1"}
 # SMALL_LOOPS_FIRST_LAYER: slow, gentle, wide and hot for layer one only; bed returns to BED_DEFAULTS (60) from layer two.
 # Pass SMALL_LOOPS_FIRST_LAYER_FILAMENT as write_3mf(per_filament=...): nozzle 230 on layer one, fan off for 3 layers.
 # Also needed, outside the file: a plate washed with dish soap, and bed levelling left on.
-SMALL_LOOPS_FIRST_LAYER = {"initial_layer_speed": ["20", "20", "20"], "initial_layer_infill_speed": ["50", "50", "50"],
-                           "initial_layer_acceleration": ["300", "300", "300"], "initial_layer_line_width": "0.55",
-                           "reduce_crossing_wall": "1", "textured_plate_temp_initial_layer": ["65"]}
+SMALL_LOOPS_FIRST_LAYER = {"initial_layer_speed": "20", "initial_layer_infill_speed": "50",
+                           "initial_layer_acceleration": "300", "initial_layer_line_width": "0.55",
+                           "reduce_crossing_wall": "1", "textured_plate_temp_initial_layer": "65"}
+# (scalars: write_3mf gives each the config's own list length — the 0.2 and 0.8 nozzle profiles hold two values where
+# the 0.4 holds three, so the old hard-coded 3-item lists were the wrong length there)
 SMALL_LOOPS_FIRST_LAYER_FILAMENT = {"nozzle_temperature_initial_layer": ["230"], "close_fan_the_first_x_layers": ["3"]}
 
 
@@ -582,6 +604,66 @@ def tool_changes(lines):
         mt = re.match(_TOOL_RE, l)
         if mt: out.append((z, mt.group(1)))
     return out
+
+
+def filament_changes(lines):
+    """Filament changes in a sliced file. On the P2S the first filament is loaded by the start G-code without a T
+    command, so every T0-T15 after the first layer starts is a change (T255 and the like are unloads). A T command
+    before the first layer is the first load, not a change."""
+    import re
+    n, prev, started = 0, None, False
+    for l in lines:
+        if l.startswith("; CHANGE_LAYER"):
+            started = True; continue
+        m = re.match(r"^T(\d+)\b", l)
+        if not m or int(m.group(1)) > 15:
+            continue
+        t = int(m.group(1))
+        if started and t != prev:
+            n += 1
+        prev = t
+    return n
+
+
+def print_report(path, layer1_tol=0.02):
+    """What a sliced project will really do, from its G-code: for the first layer and for the rest, each feature's
+    length and the speed most of it runs at, the fastest travel, the accelerations commanded, which filament goes
+    down first on layer one, the filament changes, time and grams. Use it before saying a print is ready; compare the
+    first-layer numbers with what the material wants (PETG: about 20 mm/s)."""
+    import re, collections
+    g = load_gcode(path)
+    first_z = None; order = []
+    stats = {"first_layer": collections.defaultdict(lambda: collections.Counter()), "rest": collections.defaultdict(lambda: collections.Counter())}
+    travel = {"first_layer": 0.0, "rest": 0.0}
+    for tool, z, feat, x, y, ext, F, prev in _walk(g):
+        if z is None or prev is None or F is None:
+            continue
+        L = math.hypot(x - prev[0], y - prev[1])
+        if ext and feat and first_z is None and L > 0.2 and "tower" not in feat.lower() and feat != "Custom":
+            first_z = z
+        where = "first_layer" if first_z is None or z <= first_z + layer1_tol else "rest"
+        if ext and feat:
+            stats[where][feat][round(F)] += L
+            if where == "first_layer" and feat != "Custom" and "tower" not in feat.lower() and tool not in order:
+                order.append(tool)
+        elif not ext and L > 2.0:
+            travel[where] = max(travel[where], F)
+    def table(d):
+        out = {}
+        for feat, c in d.items():
+            tot = sum(c.values())
+            if tot < 1.0 or feat == "Custom":
+                continue
+            out[feat] = {"mm": round(tot), "speed": c.most_common(1)[0][0], "fastest": max(c)}
+        return out
+    acc = sorted({int(float(m.group(1))) for l in g for m in [re.match(r"M204 S([\d.]+)", l)] if m})
+    w = re.search(r"; total filament weight \[g\] : ([\d.,]+)", "\n".join(g[:400] + g[-400:]))
+    return {"first_layer": table(stats["first_layer"]), "rest": table(stats["rest"]),
+            "fastest_travel": {k: round(v) for k, v in travel.items()}, "accelerations": acc,
+            "first_layer_order": order, "changes": filament_changes(g),
+            "time": (gcode_setting(g, "model printing time") or next((l.split("model printing time:")[1].split(";")[0].strip()
+                     for l in g if "model printing time:" in l), "")),
+            "grams_by_filament": [round(float(x), 2) for x in w.group(1).split(",") if x] if w else []}
 
 
 def support_grams(lines, density=1.27, d=1.75):

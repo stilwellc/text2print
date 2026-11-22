@@ -46,3 +46,7 @@ hull_meta.json
 *_meta.json
 map_*_report.txt
 *_check.txt
+
+# One-off part scripts kept beside the package (see SKILL.md, "Parts that are not in the catalogue")
+/*.py
+_skipped.*

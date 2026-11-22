@@ -53,7 +53,7 @@ what the printer lays down.
   texture card shows its AMS change cost before you pick it.
 - **Print-ready.** Bambu's own P2S presets are built in, no supports needed. Each project is one object with
   one part per AMS colour.
-- **Lids.** Slip-on, a two-start screw (half a turn) or six 6 × 2 mm magnets, at a snug, slip or loose fit
+- **Lids.** Slip-on, a two-start screw (about one turn) or six 6 × 2 mm magnets, at a snug, slip or loose fit
   (0.15 / 0.25 / 0.40 mm a side; the *Fit* test plate prints all three). By default the lid wears the piece's
   own texture, with a knob, a button or neither.
 - **Extendable by prompt.** Ask for "a koi pond halftone" or "a fish-scale knit" and Claude writes it as a plugin.
@@ -101,6 +101,25 @@ A design is one JSON object:
 
 `./t2p link`, `designs`, `taste` and `catalogue` cover links, the Saved list, taste notes and the full catalogue
 as JSON (what an agent reads first).
+
+### Parts that are not in the catalogue
+
+A bracket, a sleeve, a stand, an STL you were handed: model the mesh however you like and let `part.deliver` write the
+project with the right settings for the material, an STL per colour, a render, a dimensioned drawing and the slice.
+
+```python
+from text2print import part
+r = part.deliver("pipe_sleeve", [("Sleeve", mesh, 1)], colours=["#FFFFFF"], material="petg", slice=True,
+                 check={"length": (30.0, "z")})          # raises if the part is not the size you asked for
+```
+
+```bash
+./t2p part bracket.stl --material petg --slice     # a ready-made STL as a project
+./t2p check _slice/sliced.3mf                      # real first-layer and print speeds, changes, grams per filament
+```
+
+`lattice.weave_region` puts any woven pattern on your own outline (holes included) and `lattice.support_audit` checks
+that no rod end is left in mid-air.
 
 ## Use it as a Claude Code skill
 

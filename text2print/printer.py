@@ -46,11 +46,24 @@ _N = {
 }
 
 
-def nozzle(size=DEFAULT_NOZZLE) -> Nozzle:
+def nozzle(size=DEFAULT_NOZZLE, rod_lines=None, rod_layers=None, gap=None) -> Nozzle:
+    """The nozzle's standard rod, or with rod_lines / rod_layers / gap a custom one on the same nozzle (never marked
+    verified). fine_rod(size) is the half-size rod for small pieces."""
     size = round(float(size), 1)
     if size not in _N:
         raise ValueError(f"no P2S profile for a {size} mm nozzle (have {sorted(_N)})")
-    return _N[size]
+    n = _N[size]
+    if rod_lines is None and rod_layers is None and gap is None:
+        return n
+    return Nozzle(n.size, n.layer_h, n.line_w, int(rod_lines or n.rod_lines), int(rod_layers or n.rod_layers),
+                  float(n.gap if gap is None else gap), False)
+
+
+def fine_rod(size=DEFAULT_NOZZLE) -> Nozzle:
+    """Half the standard rod in every direction (0.4 nozzle: 0.84 x 0.4 mm on a 1.8 pitch): a weave that still reads on
+    a piece with only 10-20 mm between its openings. Two lines by two layers; not print-verified."""
+    n = nozzle(size)
+    return nozzle(size, rod_lines=max(1, n.rod_lines // 2), rod_layers=max(1, n.rod_layers // 2), gap=round(n.gap / 2, 3))
 
 
 def base_config(size) -> dict:
@@ -62,8 +75,20 @@ def _per_extruder(base, key, value):
     return [value] * len(cur) if isinstance(cur, list) else value
 
 
-def overrides(size, family, slots=1, floor_layers=0, wall_speed=None, solid=False, layer_h=None, line_w=None) -> dict:
-    """Slicer settings for a texture family on this nozzle. family = 'lattice' | 'fabric'."""
+def overrides(size, family, slots=1, floor_layers=0, wall_speed=None, solid=False, layer_h=None, line_w=None,
+              material=None) -> dict:
+    """Slicer settings for a texture family on this nozzle. family = 'lattice' | 'fabric' | 'litho' | 'spiral' |
+    'halftone' | 'droop'. The speeds here are PLA's; pass material ("petg", or a list, one per colour) and they are
+    held to that material's pace (process_for). build.make does this itself; a script that builds its own project
+    passes it here."""
+    o = _family_overrides(size, family, slots, floor_layers, wall_speed, solid, layer_h, line_w)
+    mats = [material] if isinstance(material, str) else list(material or [])
+    if any(str(m).strip().lower() not in ("pla", "") for m in mats) and family != "droop":
+        o.update(process_for(size, mats, o))
+    return o
+
+
+def _family_overrides(size, family, slots, floor_layers, wall_speed, solid, layer_h, line_w) -> dict:
     n = nozzle(size); base = base_config(size)
     lw = f"{n.line_w:.2f}"
     o = {
@@ -223,6 +248,42 @@ PETG_PROCESS = {
     "initial_layer_travel_acceleration": 1000,
 }
 PROCESS = {"petg": PETG_PROCESS}                      # by filament type, lower case; PLA is the stock preset
+
+
+def solid_part(size=DEFAULT_NOZZLE, layer_h=None, walls=3, infill="20%", colours=1, material=None, first_layer=None, **more) -> dict:
+    """Overrides for a plain functional part (a bracket, a sleeve, a stand): 3 walls and 20 % gyroid, never a hollow
+    shell (a shadowbox printed at 5 % lightning broke); variable-width walls, seam at the back, no brim, no support,
+    a prime tower only with two or more colours. material holds the speeds to that material's pace. first_layer
+    (mm/s) slows layer one further for small or fine features. Anything in `more` is set on top."""
+    n = nozzle(size); base = base_config(size)
+    lh = float(layer_h or n.layer_h)
+    o = {"layer_height": f"{lh:g}", "initial_layer_print_height": f"{max(lh, 0.2 if n.size <= 0.4 else n.layer_h):g}",
+         "wall_generator": "arachne", "wall_loops": str(int(walls)), "sparse_infill_density": str(infill),
+         "sparse_infill_pattern": "gyroid", "top_shell_layers": str(max(5, math.ceil(1.0 / lh))),
+         "bottom_shell_layers": str(max(4, math.ceil(0.8 / lh))), "seam_position": "back",
+         "elefant_foot_compensation": "0.15", "enable_support": "0", "brim_type": "no_brim", "timelapse_type": "0",
+         "enable_prime_tower": "1" if colours > 1 else "0"}
+    if colours > 1:                                   # parked front-right, clear of a piece placed left of centre
+        o.update({"wipe_tower_x": [f"{BED - 50:g}"], "wipe_tower_y": ["20"], "prime_tower_width": f"{TOWER[2]:g}"})
+    o.update({k: (str(v) if not isinstance(v, (list, tuple, dict)) else v) for k, v in more.items()})
+    mats = [material] if isinstance(material, str) else list(material or [])
+    if any(str(m).strip().lower() not in ("pla", "") for m in mats):
+        o.update(process_for(size, mats, o))
+    if first_layer:
+        o.update(slow_first_layer(size, first_layer, o))
+    return o
+
+
+def slow_first_layer(size, mm_s, over=None) -> dict:
+    """Layer one at mm_s (fill at 1.5 x), acceleration 300, moves between pieces at acceleration 1000 and at most
+    300 mm/s — for small or fine features on the textured plate. Never raises a value the project already has lower.
+    (Bambu Studio has no first-layer travel speed, so the 300 mm/s ceiling on moves holds for the whole print.)"""
+    base = base_config(size); over = over or {}; out = {}
+    for k, v in {"initial_layer_speed": mm_s, "initial_layer_infill_speed": round(mm_s * 1.5), "initial_layer_acceleration": 300,
+                 "initial_layer_travel_acceleration": 1000, "travel_speed": 300}.items():
+        cur = over.get(k, base.get(k)); cur0 = float(cur[0] if isinstance(cur, list) else cur)
+        out[k] = _per_extruder(base, k, f"{min(cur0, v):g}")
+    return out
 
 
 def process_for(size, filament_types, over=None, skip=()):

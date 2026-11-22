@@ -895,3 +895,61 @@ def regroup(rods, group, n_slots):
             paths.setdefault(s, []).append(pts)
             layers.setdefault(s, []).append((pts[:, 2].min() - h / 2, pts[:, 2].max() + h / 2))
     rods.lines, rods.paths, rods.layers = lines, paths, layers
+
+
+# ── a weave on your own outline ───────────────────────────────────────────────────────────────────────────────────
+def weave_region(sdf, courses, nz, pattern="grid", extent=None, min_rod=None, **kw):
+    """A catalogue weave on any flat outline: sdf(x, y) <= 0 where rods may be (holes are just where it is > 0),
+    `courses` rod courses tall, with nozzle nz (printer.nozzle or printer.fine_rod). extent = half the outline's
+    longest side. min_rod drops fragments shorter than that (specks beside a hole). -> Rods; rods.meshes() gives one
+    mesh per colour slot. Frame the outline and each hole with your own rods (rods.line / rods.path) so no rod end is
+    left loose, then check with support_audit."""
+    if extent is None:
+        raise ValueError("extent: half the outline's longest side, in mm")
+    from .shapes import Region
+    rods = weave(Region(int(courses), nz.rod_h, lambda z: sdf, float(extent), False, int(courses)), nz, pattern, **kw)
+    if min_rod:
+        for slot in list(rods.lines):
+            rods.lines[slot] = [(a, b) for a, b in rods.lines[slot] if math.dist(a[:2], b[:2]) >= min_rod]
+        for slot in list(rods.paths):
+            rods.paths[slot] = [p for p in rods.paths[slot] if np.linalg.norm(np.diff(p[:, :2], axis=0), axis=1).sum() >= min_rod]
+    return rods
+
+
+def support_audit(rods, frame=(), max_free_end=2.0):
+    """Does every rod above the first course have something under it? rods: a Rods (its lines and paths, course =
+    z // rod height). frame: extra rods as (course, [(x, y), ...], width) — rims and rings laid by hand; an end that
+    reaches one of its own course's frame rods counts as held. -> {"rods", "longest_span", "loose_ends",
+    "longest_loose_end"}: longest_span is the longest stretch bridged between supports (compare with what the rod can
+    bridge: about 1.5 x its pitch); loose_ends are ends hanging more than max_free_end with nothing under or beside
+    them. A catalogue pattern on a catalogue shape passes; a pattern clipped to your own outline may not."""
+    from shapely.geometry import LineString
+    from shapely.ops import unary_union
+    nz = rods.nz; rh = nz.rod_h; plan = {}
+    for ls in rods.lines.values():
+        for a, b in ls:
+            plan.setdefault(int(a[2] / rh), []).append((np.array([a[:2], b[:2]], float), nz.rod_w, False))
+    for ps in rods.paths.values():
+        for p in ps:
+            plan.setdefault(int(p[0, 2] / rh), []).append((np.asarray(p)[:, :2], nz.rod_w, False))
+    for course, pts, width in frame:
+        plan.setdefault(int(course), []).append((np.asarray(pts, float), float(width), True))
+    worst = worst_end = 0.0; loose = n = 0
+    for i in sorted(plan):
+        if i == 0 or i - 1 not in plan:
+            continue
+        below = unary_union([LineString(p).buffer(w / 2) for p, w, _ in plan[i - 1]])
+        held = unary_union([LineString(p).buffer(w / 2) for p, w, f in plan[i] if f]) if any(f for _, _, f in plan[i]) else None
+        for p, w, is_frame in plan[i]:
+            if is_frame:
+                continue
+            n += 1; L = LineString(p); free = L.difference(below)
+            for g in getattr(free, "geoms", [free]):
+                if g.is_empty or (held is not None and g.difference(held).length < 0.3):
+                    continue
+                tips = [e for e in L.boundary.geoms if g.distance(e) < 1e-6]
+                if tips and all(held is None or e.distance(held) > 0.5 for e in tips):
+                    loose += g.length > max_free_end; worst_end = max(worst_end, g.length)
+                else:
+                    worst = max(worst, g.length)
+    return {"rods": n, "longest_span": round(worst, 2), "loose_ends": int(loose), "longest_loose_end": round(worst_end, 2)}

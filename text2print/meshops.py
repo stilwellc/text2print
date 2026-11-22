@@ -60,3 +60,28 @@ def watertight(mesh):
     ok = bool(len(f)) and bool((counts == 2).all())
     mesh.metadata["_wt_key"] = key; mesh.metadata["_wt"] = ok
     return ok
+
+
+def to_manifold(mesh):
+    """trimesh -> Manifold (the mesh must be watertight)."""
+    import numpy as np
+    import manifold3d as m3d
+    return m3d.Manifold(m3d.Mesh(vert_properties=np.asarray(mesh.vertices, np.float32), tri_verts=np.asarray(mesh.faces, np.uint32)))
+
+
+def cq_to_trimesh(shape, tol=0.02, ang=0.1):
+    """A CadQuery Workplane or Shape -> trimesh, tessellated in memory (no STL round trip)."""
+    import numpy as np
+    import trimesh
+    solid = shape.val() if hasattr(shape, "val") else shape
+    verts, tris = solid.tessellate(tol, ang)
+    m = trimesh.Trimesh(np.array([(v.x, v.y, v.z) for v in verts]), np.array(tris), process=True)
+    m.merge_vertices(); trimesh.repair.fix_normals(m)
+    return m
+
+
+def seat(mesh):
+    """Centre a mesh on XY and drop it onto z = 0, in place (the project writer places a part by its centre)."""
+    lo, hi = mesh.bounds
+    mesh.apply_translation([-(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2, -lo[2]])
+    return mesh

@@ -29,6 +29,7 @@ def main(argv=None):
     mk.add_argument("--set", action="append", default=[], metavar="KEY=MM", help="shape size, e.g. width=117")
     mk.add_argument("--nozzle", type=float, default=None)
     mk.add_argument("--colours", default="", help="comma-separated hex colours, one per slot")
+    mk.add_argument("--material", default=None, help="pla (default) or petg, or one per colour: pla,petg")
     mk.add_argument("--rim-loops", action="store_true"); mk.add_argument("--floor", default="solid")
     mk.add_argument("--option", action="append", default=[], metavar="KEY=VALUE",
                     help="texture option, e.g. picture=dots, band=2, density=dense, length=long")
@@ -59,6 +60,15 @@ def main(argv=None):
     sp.add_argument("--out", default="~/Downloads/text2print/test-plates"); sp.add_argument("--slice", action="store_true")
     vf = sub.add_parser("verify"); vf.add_argument("texture"); vf.add_argument("nozzle", type=float)
     vf.add_argument("result", choices=["ok", "fail"]); vf.add_argument("--note", default="")
+    vf.add_argument("--material", default="pla", help="what it was printed in (a PLA print says nothing about PETG)")
+    ck = sub.add_parser("check", help="check SLICED.3mf|FILE.gcode: real first-layer and print speeds, changes, grams")
+    ck.add_argument("file")
+    pp = sub.add_parser("part", help="part FILE.stl [FILE2.stl ...]: a handed-over STL (one per colour) as a project")
+    pp.add_argument("files", nargs="+"); pp.add_argument("--name"); pp.add_argument("--out", default=None)
+    pp.add_argument("--colours", default="#FFFFFF"); pp.add_argument("--material", default="pla")
+    pp.add_argument("--layer", type=float, default=None); pp.add_argument("--walls", type=int, default=3)
+    pp.add_argument("--infill", default="20%"); pp.add_argument("--first-layer", type=float, default=None, metavar="MM_S")
+    pp.add_argument("--slice", action="store_true")
     pc = sub.add_parser("pictures", help="list built-in, text and library pictures, and fonts")
     sub.add_parser("catalogue", help="everything a design can use, as JSON (for Claude)")
     pm = sub.add_parser("palette", help="palette match PHOTO: the photo's main colours as filaments")
@@ -170,6 +180,24 @@ def main(argv=None):
     if a.cmd == "sampler":
         from .sampler import write_all
         print(json.dumps(write_all(a.out, a.nozzle, slice_=a.slice), indent=1)); return 0
+    if a.cmd == "check":
+        from . import bambu
+        f = pathlib.Path(a.file).expanduser()
+        if not f.exists():
+            print(json.dumps({"error": f"no such file: {f}"})); return 2
+        try:
+            print(json.dumps(bambu.print_report(f), indent=1)); return 0
+        except KeyError:
+            print(json.dumps({"error": "no G-code in that file: slice it first (make --slice writes _slice/sliced.3mf)"})); return 2
+    if a.cmd == "part":
+        from . import part
+        try:
+            r = part.from_stl(a.files, name=a.name, colours=[c.strip() for c in a.colours.split(",") if c.strip()],
+                              material=a.material.split(",") if "," in a.material else a.material, out=a.out,
+                              layer_h=a.layer, walls=a.walls, infill=a.infill, first_layer=a.first_layer, slice=a.slice)
+        except (ValueError, FileNotFoundError) as e:
+            print(json.dumps({"error": str(e)})); return 2
+        print(json.dumps(r, indent=1, default=str)); return 1 if "error" in (r.get("slice") or {}) else 0
     if a.cmd == "verify":
         from . import verify
         from .build import TEXTURES
@@ -179,7 +207,7 @@ def main(argv=None):
             print(f"unknown texture {a.texture!r}", file=sys.stderr); return 2
         if round(a.nozzle, 1) not in printer.NOZZLES:
             print(f"no {a.nozzle:g} mm nozzle (have {', '.join(f'{n:g}' for n in printer.NOZZLES)})", file=sys.stderr); return 2
-        verify.record(a.texture, a.nozzle, a.result, a.note); print(f"recorded {a.texture} @ {a.nozzle:g} mm: {a.result}")
+        verify.record(a.texture, a.nozzle, a.result, a.note, a.material); print(f"recorded {a.texture} @ {a.nozzle:g} mm ({a.material}): {a.result}")
         return 0
     if a.cmd == "thumbs":
         from .thumbs import render_all
@@ -342,6 +370,8 @@ def _design_commands(a, build, dz):
         if not sep:
             raise dz.DesignError(f"--option wants KEY=VALUE, got {kv!r}")
         d["options"][k.strip()] = _value(v)
+    if a.material:
+        d["options"]["material"] = a.material.split(",") if "," in a.material else a.material
     if a.rim_loops:
         d["options"]["rim_loops"] = True
     if a.floor != "solid":

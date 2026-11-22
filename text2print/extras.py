@@ -120,10 +120,24 @@ def opening(build_, shape, v):
     return outer, best
 
 
-def _helix_ridge(r_base, depth, pitch, starts, z0, height, outward, n_per_turn=96, embed=0.3):
-    """Triangular (45 deg flank) helical ridges on a cylinder of radius r_base, pointing out (+1) or in (-1)."""
+def revolve(profile, seg=256):
+    """Revolve a closed (r, z) outline about the z axis -> Manifold. Points anticlockwise, r >= 0."""
     import manifold3d as m3d
-    lead = pitch * starts; turns = height / lead + 0.25
+    return m3d.CrossSection([np.asarray(profile, float)]).revolve(int(seg))
+
+
+def helix_ridge(r_base, depth, pitch, starts, z0, height, outward, n_per_turn=96, embed=0.3):
+    """A thread's ridges for your own part (see _helix_ridge): true lead, 45 deg flanks, prints without support."""
+    return _helix_ridge(r_base, depth, pitch, starts, z0, height, outward, n_per_turn, embed)
+
+
+def _helix_ridge(r_base, depth, pitch, starts, z0, height, outward, n_per_turn=96, embed=0.3):
+    """Triangular (45 deg flank) helical ridges on a cylinder of radius r_base, pointing out (+1) or in (-1).
+    The helix keeps its TRUE lead (pitch x starts) whatever the height: the ridge centre climbs height - 2 * depth, so
+    it makes (height - 2 * depth) / lead turns. (Until Nov 2026 it made height / lead + 0.25 turns over that same
+    climb: a 6 mm lead printed as 3.5 mm, neighbouring ridges merged, and a seated lid overlapped its ring.)"""
+    import manifold3d as m3d
+    lead = pitch * starts; turns = max(height - 2 * depth, 0.0) / lead
     n = max(8, int(n_per_turn * turns)); w = depth                     # half-base = depth -> 45 deg flanks
     ridges = []
     for st in range(starts):
@@ -189,7 +203,7 @@ def lid_set(style, rim_r, open_r, top_z, fit="slip", square=None, corner=0.0):
         # the plug's ridges sit half a pitch from the ring's: rotate by 180/starts so they interleave
         plug = plug.rotate([0, 0, 180.0 / T["starts"]]).translate([0, 0, LID_T - 0.01])
         body = _plate(rim_r, LID_T, square, corner, n) + plug
-        notes.append(f"Two-start thread, {T['pitch']} mm pitch: half a turn closes it.")
+        notes.append(f"Two-start thread, {T['pitch']} mm pitch: about one turn closes it.")
         plug_d = 2 * r_p
     elif style == "magnets" and open_r > 14:
         M = MAGNET; land_in = open_r - M["land"]; t_plate = 3.6
