@@ -1533,9 +1533,20 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
                     cur = mat.get(key) or [stock(key)] * len(vals)
                     mat[key] = [str(v_) if str(v_) != stock(key) else m_ for v_, m_ in zip(vals, cur)]
         per_filament = mat
-        if T["family"] != "colourwork" or not options.get("loops"):
-            warnings.append("PETG: filament settings come from Bambu's Generic PETG preset for the P2S. Only loops on "
-                            "colour-knit have been set up around it; everything else was tuned on PLA Matte.")
+        # strands and loops only fall if they are laid fast: their families keep their own speeds on any material
+        off = over.get("enable_overhang_speed")                 # the droop families switch the overhang slow-down off
+        fast = T["family"] == "droop" or (T["family"] == "colourwork" and options.get("loops")) \
+            or (off is not None and set(off if isinstance(off, list) else [off]) == {"0"})
+        if not fast:
+            over.update(printer.process_for(nz.size, mat["filament_type"], over))
+            for _, _, opts in ranges:                           # a band with its own speeds obeys the same ceilings
+                opts.update({k_: v_ if not isinstance(v_, list) else v_[0]
+                             for k_, v_ in printer.process_for(nz.size, mat["filament_type"], opts).items() if k_ in opts})
+            warnings.append("PETG: Bambu's Generic PETG preset for the P2S, with wall, infill, bridge and first-layer "
+                            "speeds held to PETG's pace. The shapes and textures were tuned on PLA Matte.")
+        else:
+            warnings.append("PETG: filament settings come from Bambu's Generic PETG preset for the P2S. Loops and "
+                            "strands keep their own speeds (they only fall if laid fast).")
     prime_block = None
     inlay = options.get("floor_inlay")
     if options.get("tower") == "inlay" and (lid_parts or not (T["family"] == "colourwork" and inlay)):

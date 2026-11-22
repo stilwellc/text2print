@@ -156,6 +156,11 @@ above (none if top band), range wall_loops=rod_lines over the band, woven speeds
   knob press-fits (6.0 hole / 5.85 peg).
 - Reliefs (garland, drips, melt) ramp every underside at <= 45 deg; test enforces it.
 - Only the 0.4 nozzle is print-verified. 0.2/0.6/0.8 are computed from it — say so.
+- PLA or PETG (`material=petg`, or a list per colour): the filament preset AND the process speeds follow the material.
+  `printer.process_for(size, filament_types, over)` holds walls, infill, bridges and the first layer to `printer.PETG_PROCESS`
+  (ceilings: a slower family keeps its own; droop and loops are exempt, they must be laid fast). A one-off script that writes
+  its own project must call it too: `over.update(printer.process_for(0.4, ["petg"], over))`. Before this (Nov 22 2026) PETG
+  ran PLA speeds: rough walls, and fine rods laid at 35 mm/s on layer one.
 
 - 2-colour fine detail (a logo inlaid in a cap): rough tops are speed, not geometry — use `bambu.SHOWROOM_PETG_DETAIL`
   (slow feeds, 30 s minimum layer, layer 0.12, top line 0.3, no ironing, 1 outline wall on the logo via `bambu.LOGO_PART`,
