@@ -96,11 +96,16 @@ A design is one JSON object:
 | `make` flag | |
 |---|---|
 | `--set key=mm`, `--option key=value`, `--colours`, `--nozzle` | sizes, options, colours, nozzle (JSON values work, e.g. `bands=[...]`) |
-| `--draft` · `--preview` · `--slice` | quick sketch · PNG with loops hung · real time, grams and layers from Bambu Studio's CLI |
-| `--save NAME` · `--open` · `--no-stls` · `--name STEM` | add to Saved · open in Bambu Studio · skip STLs · name the files |
+| `--material pla\|petg` | filament and its print speeds; one per colour as `pla,petg` |
+| `--design SPEC` · `--image PHOTO` | a design file, `-` for stdin, a studio link or a saved name · your own picture for halftone, litho and flat |
+| `--draft` · `--preview` · `--render` | quick sketch · PNG with loops hung as they fall · PNG as printed |
+| `--slice` | Bambu Studio's CLI: time, layers, grams per filament, filament changes and its warnings |
+| `--out DIR` · `--name STEM` · `--no-stls` · `--save NAME` · `--open` | where the files go · their name · skip STLs · add to Saved · open in Bambu Studio |
 
 `./t2p link`, `designs`, `taste` and `catalogue` cover links, the Saved list, taste notes and the full catalogue
-as JSON (what an agent reads first).
+as JSON (what an agent reads first). `sampler` writes test plates, `verify TEXTURE NOZZLE ok|fail --material` records a
+real print, `design check|slice` builds a design file without writing a project, `picture` and `pictures` prepare and
+list pictures, `palette match` reads a photo's colours, and `plugin` manages your own textures and shapes.
 
 ### Parts that are not in the catalogue
 
