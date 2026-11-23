@@ -87,6 +87,9 @@ h2 { font-size: 15px; margin-bottom: 12px; }
 .popover button { width: 32px; height: 32px; border-radius: 50%; border: 1px solid rgba(0,0,0,.12); padding: 0; }
 .popover button[aria-checked="true"] { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--ink); }
 .popover .pname { grid-column: 1 / -1; color: var(--muted); font-size: 12.5px; min-height: 16px; }
+.swatches { display: flex; flex-wrap: wrap; gap: 8px; }
+.swatches button { width: 32px; height: 32px; border-radius: 50%; border: 1px solid rgba(0,0,0,.12); padding: 0; }
+.swatches button[aria-checked="true"] { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--ink); }
 
 .toggle { display: flex; align-items: center; gap: 10px; font-size: 13.5px; }
 .toggle input { accent-color: var(--ink); width: 16px; height: 16px; }
@@ -126,6 +129,8 @@ h2 { font-size: 15px; margin-bottom: 12px; }
 .slice:empty { display: none; }
 .slice .big { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; display: block; }
 .slice .sub { color: var(--muted); }
+.slice .notes { margin-top: 10px; } .slice .links { justify-content: flex-start; margin-top: 10px; }
+.sheet-card .stats { margin-top: 4px; }
 .actions { display: grid; gap: 8px; margin-top: 20px; }
 .primary, .secondary { padding: 11px 14px; border-radius: 999px; font-weight: 550; border: 1px solid transparent; }
 .primary { background: var(--ink); color: #fff; }
