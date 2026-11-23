@@ -50,4 +50,4 @@ Issues = "https://github.com/stilwellc/text2print/issues"
 packages = ["text2print"]
 
 [tool.setuptools.package-data]
-text2print = ["data/*.json", "data/*.py"]
+text2print = ["data/*.json", "data/*.py", "data/filament/*.json"]

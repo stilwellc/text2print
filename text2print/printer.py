@@ -179,7 +179,8 @@ MATERIALS = {   # short name -> Bambu Studio system filament preset (the 0.4 nam
     "petg-clear": "Bambu PETG Translucent", "petg-translucent": "Bambu PETG Translucent",
 }
 _FIL_DIRS = (pathlib.Path.home() / "Library/Application Support/BambuStudio/system/BBL/filament",
-             pathlib.Path("/Applications/BambuStudio.app/Contents/Resources/profiles/BBL/filament"))
+             pathlib.Path("/Applications/BambuStudio.app/Contents/Resources/profiles/BBL/filament"),
+             DATA / "filament")      # last: the presets as shipped with Bambu Studio 2.9, flattened, for a machine without it
 _KEEP_BED = ("textured_plate_temp", "hot_plate_temp", "eng_plate_temp")      # the P2S textured plate runs 60 C, always
 
 
