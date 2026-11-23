@@ -1,6 +1,9 @@
-<p align="center"><img src="docs/logo.svg" width="88" alt="text2print logo: three brick rods woven through three black rods"></p>
-
-<h1 align="center">text2print</h1>
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/logo-dark.svg">
+    <img src="docs/logo.svg" height="56" alt="text2print">
+  </picture>
+</h1>
 
 <p align="center"><strong>Print-ready Bambu Studio projects for the Bambu Lab P2S: textured pieces from a catalogue, and functional parts with the right settings.</strong></p>
 
