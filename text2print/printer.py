@@ -257,7 +257,7 @@ def solid_part(size=DEFAULT_NOZZLE, layer_h=None, walls=3, infill="20%", colours
     (mm/s) slows layer one further for small or fine features. Anything in `more` is set on top."""
     n = nozzle(size); base = base_config(size)
     lh = float(layer_h or n.layer_h)
-    o = {"layer_height": f"{lh:g}", "initial_layer_print_height": f"{max(lh, 0.2 if n.size <= 0.4 else n.layer_h):g}",
+    o = {"layer_height": f"{lh:g}", "initial_layer_print_height": f"{max(lh, float(base['initial_layer_print_height'])):g}",
          "wall_generator": "arachne", "wall_loops": str(int(walls)), "sparse_infill_density": str(infill),
          "sparse_infill_pattern": "gyroid", "top_shell_layers": str(max(5, math.ceil(1.0 / lh))),
          "bottom_shell_layers": str(max(4, math.ceil(0.8 / lh))), "seam_position": "back",

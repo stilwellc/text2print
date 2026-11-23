@@ -334,6 +334,8 @@ def slice_project(p3mf, workdir):
     out = (workdir / "sliced.3mf").resolve()
     if not slicer_available():
         return {"error": "Bambu Studio not found in /Applications"}
+    for old in (workdir / "result.json", out):          # a failed run must never read back the last run's answer
+        old.unlink(missing_ok=True)
     with open(workdir / "cli.log", "w") as log:
         subprocess.run([str(BAMBU_APP), "--slice", "0", "--export-3mf", str(out), str(pathlib.Path(p3mf).resolve())],
                        cwd=workdir, stdout=log, stderr=subprocess.STDOUT, timeout=1800)
@@ -344,6 +346,8 @@ def slice_project(p3mf, workdir):
     if res.get("return_code") != 0:
         warn = str((res.get("sliced_plates") or [{}])[0].get("warning_message", ""))
         return {"error": res.get("error_string", "slice failed"), "detail": warn[:300]}
+    if not out.exists():
+        return {"error": "slicer reported success but wrote no file"}
     g = zipfile.ZipFile(out).read("Metadata/plate_1.gcode").decode(errors="ignore")
     t = re.search(r"; model printing time: ([^;]+);", g).group(1).strip()
     mins = sum(int(n) * {"d": 1440, "h": 60, "m": 1, "s": 1 / 60}[u] for n, u in re.findall(r"(\d+)([dhms])", t))
@@ -533,12 +537,16 @@ def gcode_setting(lines, key):
     return m.group(1) if m else None
 
 
-def _walk(lines):
-    """Yield (tool, z, feature, x, y, extruding, feed_mm_s, prev_xy) for every XY move. The filament printed before
-    the first explicit T command is reported as tool 'T?' — label it, never sort on it."""
+def _walk(lines, length=False):
+    """Yield (tool, z, feature, x, y, extruding, feed_mm_s, prev_xy) for every XY move; with length=True a ninth
+    value, the move's path length (an arc's true length, not its chord). The P2S loads the first filament without a
+    T command: it is read from the start G-code's ";VT<n>" line, and is 'T?' only in a file without one."""
     import re
     tool, z, feat, F, prev = "T?", None, None, None, None
     for l in lines:
+        if tool == "T?" and l.startswith(";VT"):
+            mv = re.match(r";VT(\d+)", l)
+            if mv: tool = f"T{mv.group(1)}"
         mt = re.match(_TOOL_RE, l)
         if mt: tool = mt.group(1)
         mz = re.match(_Z_RE, l)
@@ -551,8 +559,32 @@ def _walk(lines):
         if not m: continue
         x, y = float(m.group(1)), float(m.group(2))
         ext = "E" in l and not re.search(r"E-", l)
-        yield tool, z, feat, x, y, ext, F, prev
+        if length:
+            yield tool, z, feat, x, y, ext, F, prev, _move_length(l, prev, x, y)
+        else:
+            yield tool, z, feat, x, y, ext, F, prev
         prev = (x, y)
+
+
+def _move_length(line, prev, x, y):
+    """Path length of one G0-G3 move from prev to (x, y): the arc for G2 (clockwise) / G3 with I, J, else the chord."""
+    import re
+    if prev is None:
+        return 0.0
+    chord = math.hypot(x - prev[0], y - prev[1])
+    if line[:2] not in ("G2", "G3"):
+        return chord
+    mi, mj = re.search(r"\bI([-\d.]+)", line), re.search(r"\bJ([-\d.]+)", line)
+    if not (mi or mj):
+        return chord
+    i, j = float(mi.group(1)) if mi else 0.0, float(mj.group(1)) if mj else 0.0
+    r = math.hypot(i, j); cx, cy = prev[0] + i, prev[1] + j
+    a0, a1 = math.atan2(prev[1] - cy, prev[0] - cx), math.atan2(y - cy, x - cx)
+    sweep = (a0 - a1) if line[:2] == "G2" else (a1 - a0)
+    sweep %= 2 * math.pi
+    if sweep < 1e-9 and chord < 1e-6:
+        sweep = 2 * math.pi                                # a full circle ends where it began
+    return r * sweep
 
 
 def top_surface_angles(lines, z, tool="T1", where=lambda x, y: True, tol=0.005):
@@ -627,18 +659,17 @@ def filament_changes(lines):
 
 def print_report(path, layer1_tol=0.02):
     """What a sliced project will really do, from its G-code: for the first layer and for the rest, each feature's
-    length and the speed most of it runs at, the fastest travel, the accelerations commanded, which filament goes
-    down first on layer one, the filament changes, time and grams. Use it before saying a print is ready; compare the
+    length and the speed most of it runs at, the fastest travel, the accelerations commanded, which filaments go
+    down on layer one in order (1 = the first colour), the filament changes, time and grams. Use it before saying a print is ready; compare the
     first-layer numbers with what the material wants (PETG: about 20 mm/s)."""
     import re, collections
     g = load_gcode(path)
     first_z = None; order = []
     stats = {"first_layer": collections.defaultdict(lambda: collections.Counter()), "rest": collections.defaultdict(lambda: collections.Counter())}
     travel = {"first_layer": 0.0, "rest": 0.0}
-    for tool, z, feat, x, y, ext, F, prev in _walk(g):
+    for tool, z, feat, x, y, ext, F, prev, L in _walk(g, length=True):
         if z is None or prev is None or F is None:
             continue
-        L = math.hypot(x - prev[0], y - prev[1])
         if ext and feat and first_z is None and L > 0.2 and "tower" not in feat.lower() and feat != "Custom":
             first_z = z
         where = "first_layer" if first_z is None or z <= first_z + layer1_tol else "rest"
@@ -660,7 +691,8 @@ def print_report(path, layer1_tol=0.02):
     w = re.search(r"; total filament weight \[g\] : ([\d.,]+)", "\n".join(g[:400] + g[-400:]))
     return {"first_layer": table(stats["first_layer"]), "rest": table(stats["rest"]),
             "fastest_travel": {k: round(v) for k, v in travel.items()}, "accelerations": acc,
-            "first_layer_order": order, "changes": filament_changes(g),
+            "first_layer_order": [int(t[1:]) + 1 if t[1:].isdigit() else t for t in order],   # filament numbers, 1 = first slot
+            "changes": filament_changes(g),
             "time": (gcode_setting(g, "model printing time") or next((l.split("model printing time:")[1].split(";")[0].strip()
                      for l in g if "model printing time:" in l), "")),
             "grams_by_filament": [round(float(x), 2) for x in w.group(1).split(",") if x] if w else []}

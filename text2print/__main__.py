@@ -68,7 +68,17 @@ def main(argv=None):
     pp.add_argument("--colours", default="#FFFFFF"); pp.add_argument("--material", default="pla")
     pp.add_argument("--layer", type=float, default=None); pp.add_argument("--walls", type=int, default=3)
     pp.add_argument("--infill", default="20%"); pp.add_argument("--first-layer", type=float, default=None, metavar="MM_S")
-    pp.add_argument("--slice", action="store_true")
+    pp.add_argument("--slice", action="store_true"); pp.add_argument("--copies", type=int, default=1)
+    bs = sub.add_parser("basic", help="basic can|box|plaque --set k=mm ...: a plain lidded can or box, or a plaque with inlaid words / a traced picture")
+    bs.add_argument("kind", choices=["can", "box", "plaque"]); bs.add_argument("--set", action="append", default=[], metavar="K=MM")
+    bs.add_argument("--lid", default=None, help="can: thread | slip | none; box: slip | none")
+    bs.add_argument("--fit", default="slip", choices=["snug", "slip", "loose"]); bs.add_argument("--text", default=None)
+    bs.add_argument("--image", default=None); bs.add_argument("--face", default="bottom", choices=["bottom", "top"])
+    cp = sub.add_parser("coupon", help="coupon hole|slot|dovetail [MM]: a small print that tests a fit before the real part")
+    cp.add_argument("kind", choices=["hole", "slot", "dovetail"]); cp.add_argument("nominal", type=float, nargs="?", default=0.0)
+    for q in (bs, cp):
+        q.add_argument("--name"); q.add_argument("--out", default=None); q.add_argument("--colours", default=None)
+        q.add_argument("--material", default="pla"); q.add_argument("--slice", action="store_true")
     pc = sub.add_parser("pictures", help="list built-in, text and library pictures, and fonts")
     sub.add_parser("catalogue", help="everything a design can use, as JSON (for Claude)")
     pm = sub.add_parser("palette", help="palette match PHOTO: the photo's main colours as filaments")
@@ -90,6 +100,8 @@ def main(argv=None):
     pg = sub.add_parser("plugin", help="plugins: list | check FILE | new picture|woven|stitch|chart|shape NAME")
     pg.add_argument("action", choices=["list", "check", "new"]); pg.add_argument("args", nargs="*")
     pg.add_argument("--out", default=None)
+    pg.add_argument("--image", default=None, help="new shape NAME --image OUTLINE.png: trace the shape from a picture")
+    pg.add_argument("--width", type=float, default=120.0)
     tt = sub.add_parser("thumb-texture"); tt.add_argument("key"); tt.add_argument("out")   # studio helper
     ts = sub.add_parser("thumb-shape"); ts.add_argument("key"); ts.add_argument("out")
     a = ap.parse_args(argv)
@@ -172,7 +184,11 @@ def main(argv=None):
             return 0
         if a.action == "new":
             kind, name = (a.args + ["", ""])[:2]
-            path = plugins.new(kind, name or "my_" + kind); print(path); return 0
+            try:
+                path = plugins.new(kind, name or "my_" + kind, image=a.image, width=a.width)
+            except (ValueError, FileExistsError, FileNotFoundError) as e:
+                print(json.dumps({"error": f"{type(e).__name__}: {e}"})); return 2
+            print(path); return 0
 
     if a.cmd == "studio":
         from studio.server import run
@@ -194,8 +210,41 @@ def main(argv=None):
         try:
             r = part.from_stl(a.files, name=a.name, colours=[c.strip() for c in a.colours.split(",") if c.strip()],
                               material=a.material.split(",") if "," in a.material else a.material, out=a.out,
-                              layer_h=a.layer, walls=a.walls, infill=a.infill, first_layer=a.first_layer, slice=a.slice)
+                              layer_h=a.layer, walls=a.walls, infill=a.infill, first_layer=a.first_layer, slice=a.slice,
+                              copies=a.copies)
         except (ValueError, FileNotFoundError) as e:
+            print(json.dumps({"error": str(e)})); return 2
+        print(json.dumps(r, indent=1, default=str)); return 1 if "error" in (r.get("slice") or {}) else 0
+    if a.cmd in ("basic", "coupon"):
+        from . import basics, fits, part
+        mat = a.material.split(",") if "," in a.material else a.material
+        cols = [c.strip() for c in (a.colours or "").split(",") if c.strip()]
+        try:
+            if a.cmd == "coupon":
+                c = fits.coupon(a.kind, a.nominal)
+                r = part.deliver(a.name or f"coupon_{a.kind}", {n.title(): [(n, m, 1)] for n, m in c["parts"]}, cols or ["#FFFFFF"],
+                                 material=mat, out=a.out, slice=a.slice, drawing=False)
+                r["steps"] = list(c["steps"]); r["read"] = "clearance a side, tightest first; notches (or the cut corner) mark the tight end"
+            else:
+                kv = {k: float(v) for k, v in (x.split("=", 1) for x in a.set)}
+                if a.kind == "plaque":
+                    spec = basics.plaque(kv.pop("width", 90.0), kv.pop("height", 40.0), text=a.text, image=a.image, face=a.face, **kv)
+                    cols = cols or ["#FFFFFF", "#111111"]
+                else:
+                    lid = a.lid or ("thread" if a.kind == "can" else "slip")
+                    spec = (basics.can(kv.pop("diameter", 70.0), kv.pop("height", 40.0), lid=lid, fit=a.fit, **kv) if a.kind == "can"
+                            else basics.box(kv.pop("width", 90.0), kv.pop("depth", 60.0), kv.pop("height", 35.0), lid=lid, fit=a.fit, **kv))
+                    cols = cols or ["#FFFFFF"]
+                r = part.deliver(a.name or a.kind, spec["parts"], cols, material=mat, out=a.out, slice=a.slice, check=spec["check"],
+                                 first_layer=20 if a.kind == "plaque" else None,
+                                 first_layer_order=(2, 1) if a.kind == "plaque" and a.face == "bottom" else None)
+                r["notes"] = spec["notes"]
+                if a.kind == "plaque" and "sliced" in (r.get("slice") or {}):
+                    _, cx, cy = r["centres"][0]
+                    r["artwork"] = fits.artwork_check(r["slice"]["sliced"], {2: spec["art"]}, (cx, cy), mirror=spec["mirror"],
+                                                      z=None if a.face == "bottom" else r["size"][2],
+                                                      out_png=str(pathlib.Path(r["project"]).with_name(pathlib.Path(r["project"]).stem + "_artwork.png")))
+        except (ValueError, TypeError, FileNotFoundError) as e:
             print(json.dumps({"error": str(e)})); return 2
         print(json.dumps(r, indent=1, default=str)); return 1 if "error" in (r.get("slice") or {}) else 0
     if a.cmd == "verify":

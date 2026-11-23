@@ -6,10 +6,11 @@ import numpy as np
 INK, RED, PAPER = "#1A1A1A", "#C0392B", "#FAF9F5"
 
 
-def dimension_sheet(parts, path, dims=(), title=None, dpi=110):
+def dimension_sheet(parts, path, dims=(), title=None, dpi=110, notes=()):
     """parts: [(mesh, '#hex')] in the pose they print. Draws a top view (x right, y up) and a front view (x right,
     z up) with the overall length, width and height. dims adds your own: (view, (a0, b0), (a1, b1), label) with
     view "top" (a, b = x, y) or "front" (a, b = x, z), e.g. ("top", (-25, 0), (25, 0), "50.0 hole").
+    notes: lines printed under the drawing (numbers that were assumed rather than measured belong here).
     -> the three overall sizes (x, y, z) in mm."""
     import matplotlib
     matplotlib.use("Agg")
@@ -43,6 +44,8 @@ def dimension_sheet(parts, path, dims=(), title=None, dpi=110):
     dim(front, (hi[0] + pad, lo[2]), (hi[0] + pad, hi[2]), f"{H:.1f}")
     for view, p, q, label in dims:
         dim(top if view == "top" else front, tuple(p), tuple(q), label)
+    if notes:
+        front.text(lo[0] - 2 * pad, lo[2] - 1.6 * pad, "\n".join(notes), color=RED, fontsize=11, ha="left", va="top")
     fig.tight_layout(); fig.savefig(path, dpi=dpi, facecolor=PAPER); plt.close(fig)
     return float(L), float(W), float(H)
 
