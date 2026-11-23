@@ -7,9 +7,11 @@ Builds run in a worker process: a newer request (e.g. while dragging a slider) c
 import base64
 import io
 import json
+import math
 import multiprocessing as mp
 import pathlib
 import platform
+import re
 import shutil
 import subprocess
 import sys
@@ -23,6 +25,7 @@ from collections import OrderedDict
 
 import numpy as np
 from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory
+from werkzeug.exceptions import HTTPException
 
 from text2print import bambu, build, compose, halftone, lan, printer, sampler, store, verify
 from text2print.shapes import SHAPES
@@ -34,13 +37,115 @@ THUMBS = pathlib.Path(__file__).resolve().parent / "static" / "thumbs"
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = 12 * 1024 * 1024
 JOBS = OrderedDict()
+PARTS = OrderedDict()                           # id -> an uploaded STL made into a project
 KEEP = 8
+STL_MAX = 64 * 1024 * 1024
 _CTX = mp.get_context("fork")
 _RUNNING = {"proc": None, "gen": 0}
 _RUN_LOCK = threading.Lock()
 
 
+# ── errors: every /api answer that is not a success is JSON {"error": "..."} the page can show ────────────────────
+class ApiError(Exception):
+    def __init__(self, message, code=400):
+        super().__init__(message); self.message = message; self.code = code
+
+
+_HTTP = {403: "Only the studio's own page may call this.", 404: "Not found.", 405: "That address does not take this kind of request.",
+         413: "That file is too large for the studio."}
+
+
+@app.errorhandler(ApiError)
+def _api_error(e):
+    return jsonify(error=e.message), e.code
+
+
+@app.errorhandler(HTTPException)
+def _http_error(e):
+    if not request.path.startswith("/api/"):
+        return e
+    return jsonify(error=_HTTP.get(e.code) or e.description or e.name), e.code
+
+
+@app.errorhandler(Exception)
+def _crash(e):
+    if not request.path.startswith("/api/"):
+        raise e
+    return jsonify(error=f"{type(e).__name__}: {e}"), 500
+
+
+def _body():
+    """The request's JSON object. Anything else (no body, broken JSON, a list) is a 400 that says so."""
+    d = request.get_json(force=True, silent=True)
+    if not isinstance(d, dict):
+        raise ApiError("The request body must be a JSON object, e.g. {\"shape\": \"tray\", \"texture\": \"twill\"}.")
+    return d
+
+
+_HEX = re.compile(r"#[0-9a-fA-F]{6}")
+
+
+def _colours(value, what="colours"):
+    if value is None:
+        return []
+    if not isinstance(value, (list, tuple)):
+        raise ApiError(f"{what} must be a list of hex colours like [\"#8B3A2F\", \"#EDE3D1\"].")
+    for c in value:
+        if not isinstance(c, str) or not _HEX.fullmatch(c):
+            raise ApiError(f"{c!r} is not a colour: use six-digit hex like #8B3A2F.")
+    return list(value)
+
+
+def _number(value, what):
+    """A finite number (a numeric string is taken as one), or a 400 naming the field."""
+    try:
+        if isinstance(value, bool) or value is None:
+            raise ValueError
+        n = float(value)
+        if not math.isfinite(n):
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ApiError(f"{what} must be a number (got {value!r}).") from None
+    return n
+
+
+def _nozzle(value):
+    n = _number(value, "nozzle")
+    if not any(abs(n - k) < 1e-6 for k in printer.NOZZLES):
+        raise ApiError(f"nozzle must be one of {', '.join(f'{k:g}' for k in printer.NOZZLES)} mm (got {value!r}).")
+    return round(n, 1)
+
+
+def _design(req):
+    """A build request checked before any work starts -> the same request with clean values. A bad colour used to
+    build fine and only fail when the project was written; a bad size or nozzle came back as a Python message."""
+    from text2print import plugins
+    plugins.load_all()
+    shape, texture = req.get("shape"), req.get("texture")
+    if not isinstance(shape, str) or shape not in SHAPES:
+        raise ApiError(f"Unknown shape {shape!r}. Shapes: {', '.join(SHAPES)}.")
+    if not isinstance(texture, str) or texture not in build.TEXTURES:
+        raise ApiError(f"Unknown texture {texture!r}. Textures: {', '.join(build.TEXTURES)}.")
+    params, options = req.get("params") or {}, req.get("options") or {}
+    if not isinstance(params, dict):
+        raise ApiError("params must be an object of sizes in mm, e.g. {\"width\": 117}.")
+    if not isinstance(options, dict):
+        raise ApiError("options must be an object, e.g. {\"material\": \"petg\"}.")
+    if options.get("lid_colours") is not None:
+        _colours(options["lid_colours"], "lid_colours")
+    return dict(req, shape=shape, texture=texture, nozzle=_nozzle(req.get("nozzle", printer.DEFAULT_NOZZLE)),
+                params={str(k): _number(v, f"size {k!r}") for k, v in params.items()}, options=options,
+                colours=_colours(req.get("colours")), draft=bool(req.get("draft")))
+
+
 # ── catalogue ─────────────────────────────────────────────────────────────────
+def _materials():
+    """Materials a badge can be asked for: PLA, the Filament choices, and any material a print was recorded in."""
+    out = ["pla"] + [k for k, _ in build.MATERIAL[3]]
+    out += [k.split("@")[2] for k in verify.load() if k.count("@") == 2]
+    return list(dict.fromkeys(out))
+
+
 def _catalogue():
     from text2print import extras, pictures, plugins
     plugins.load_all()                                         # plugin textures appear without a restart
@@ -51,11 +156,12 @@ def _catalogue():
                           else f"/api/thumb/shape/{s.key}"),
                    thumbs={f: f"/static/thumbs/shape_{s.key}__{f}.png" for f in s.families
                            if (THUMBS / f"shape_{s.key}__{f}.png").exists()}) for s in SHAPES.values()]
-    textures = []
+    textures = []; mats = _materials()
     for k, t in build.TEXTURES.items():
-        st = {n: verify.status(k, n)[0] for n in printer.NOZZLES}
+        # a print in PLA says nothing about PETG: one status table per material ("status" is the PLA one)
+        by_mat = {m: {n: verify.status(k, n, m)[0] for n in printer.NOZZLES} for m in mats}
         textures.append(dict(key=k, name=t["name"], blurb=t["blurb"], family=t["family"], slots=t["slots"],
-                             swaps=t["swaps"], round_only=bool(t.get("round_only")), status=st,
+                             swaps=t["swaps"], round_only=bool(t.get("round_only")), status=by_mat["pla"], status_by_material=by_mat,
                              thumb=(f"/static/thumbs/texture_{k}.png" if (THUMBS / f"texture_{k}.png").exists()
                                     else f"/api/thumb/texture/{k}"), custom=bool(t.get("custom")), params=t.get("params") or {},
                              fits=[s.key for s in SHAPES.values() if build.compatible(s.key, k)]))
@@ -83,6 +189,7 @@ def _catalogue():
                 pictures=dict(choices=pictures.choices(), fonts=[list(f) for f in pictures.fonts()],
                               layouts=[list(l) for l in pictures.LAYOUTS], errors=dict(plugins.ERRORS)),
                 defaults=dict(shape="tray", texture="twill", nozzle=printer.DEFAULT_NOZZLE),
+                materials=[list(c) for c in build.MATERIAL[3]],
                 slicer=bambu.slicer_available(), mac=platform.system() == "Darwin",
                 lan=dict(configured=bool(cfg.get("ip") and cfg.get("serial") and cfg.get("access_code")),
                          name=cfg.get("name") or "", ip=cfg.get("ip", "")),
@@ -220,9 +327,26 @@ def _run_build(req, export=False):
     return ("cancelled", None, 0) if _RUNNING["gen"] != gen else ("err", "the build worker stopped unexpectedly", 0)
 
 
+def _filaments(b):
+    """The filament preset each project colour prints with, in filament order: Bambu's PLA Matte unless the design's
+    material says otherwise (one material for all, or one per colour)."""
+    cols = b.project_colours()
+    stock = (printer.base_config(b.nozzle).get("filament_settings_id") or ["Bambu PLA Matte"])[0]
+    ids = list((b.per_filament or {}).get("filament_settings_id") or [])[:len(cols)]
+    if len(ids) < len(cols):                                   # a lid's own colour: the first material, as written
+        pad = stock
+        if ids and b.material:
+            try:
+                pad = printer.material_settings(b.nozzle, [b.material[0]])["filament_settings_id"][0]
+            except Exception:
+                pad = ids[0]
+        ids += [pad] * (len(cols) - len(ids))
+    return [dict(colour=c, preset=(i or stock).split(" @")[0]) for c, i in zip(cols, ids)]
+
+
 @app.post("/api/build")
 def api_build():
-    req = request.get_json(force=True) or {}
+    req = _design(_body())
     ck = _cache_key(req)
     if ck in BUILD_CACHE:
         BUILD_CACHE.move_to_end(ck); status, b, secs = BUILD_CACHE[ck]; secs = 0.0
@@ -248,7 +372,7 @@ def api_build():
     if cached:
         JOBS[jid]["slice"] = dict({k: v for k, v in cached.items() if k != "preview"}, state="done")
     return jsonify(id=jid, title=b.title(), params=b.params, stats=b.stats, warnings=b.warnings, seconds=round(secs, 2),
-                   draft=b.draft, slice=JOBS[jid]["slice"],
+                   draft=b.draft, slice=JOBS[jid]["slice"], filaments=_filaments(b),
                    parts=[dict(n=i, name=n, slot=s, colour=c, triangles=int(len(m.faces)), url=f"/api/job/{jid}/mesh/{i}")
                           for i, (n, m, s, c) in enumerate(b.parts)],
                    preview=[dict(n=i, colour=c, url=f"/api/job/{jid}/mesh/{i}?view=draped")
@@ -260,7 +384,7 @@ def api_build():
 def _job(jid):
     j = JOBS.get(jid)
     if not j:
-        abort(404)
+        raise ApiError("That build is no longer in memory (the studio keeps the newest few). Change anything to rebuild it.", 404)
     return j
 
 
@@ -271,9 +395,12 @@ def api_ask():
     from . import ask
     if not ask.available():
         return jsonify(error="The Claude CLI isn't installed on this machine."), 400
-    body = request.get_json(force=True) or {}
-    words = (body.get("request") or "").strip()
+    body = _body()
+    words = str(body.get("request") or "").strip()
     mode = body.get("mode", "design")
+    if not isinstance(body.get("current") or {}, dict):
+        return jsonify(error="current must be the design as an object."), 400
+    variations = int(_number(body.get("variations") or 0, "variations"))
     if len(words) < 3 and mode != "review":
         return jsonify(error="Describe what you want."), 400
     cur = body.get("current") or {}
@@ -285,7 +412,7 @@ def api_ask():
     if mode == "review" and not photo:
         return jsonify(error="Add a photo of the print to review it."), 400
     tid, err = ask.start(words[:2000] or "Here's how it printed.", cur, sys.executable, plugins.DIR, photo=photo,
-                         thread=body.get("thread"), mode=mode, variations=int(body.get("variations") or 0),
+                         thread=body.get("thread"), mode=mode, variations=variations,
                          budget=body.get("budget"))
     if err:
         return jsonify(error=err), 409
@@ -317,7 +444,7 @@ def api_ask_file(tid, name):
 @app.post("/api/taste")
 def api_taste():
     from . import ask
-    b = request.get_json(force=True) or {}
+    b = _body()
     if b.get("verdict") not in ("like", "dislike"):
         return jsonify(error="like or dislike"), 400
     d = b.get("design") if isinstance(b.get("design"), dict) else {}
@@ -373,7 +500,10 @@ def mesh(jid, n):
     """Indexed mesh as raw bytes: uint32 vertex count, uint32 face count, float32 xyz..., uint32 abc..."""
     b = _job(jid)["build"]
     view = request.args.get("view")
-    m = (b.assembled if view == "lid" else b.preview if view == "draped" and b.preview else b.parts)[n][1]
+    group = b.assembled if view == "lid" else b.preview if view == "draped" and b.preview else b.parts
+    if n >= len(group):
+        raise ApiError(f"This build has no mesh {n}.", 404)
+    m = group[n][1]
     v = np.ascontiguousarray(m.vertices, dtype=np.float32); f = np.ascontiguousarray(m.faces, dtype=np.uint32)
     head = np.array([len(v), len(f)], dtype=np.uint32).tobytes()
     return Response(head + v.tobytes() + f.tobytes(), mimetype="application/octet-stream",
@@ -389,7 +519,7 @@ def _full(j):
     if j["build"].draft:
         status, b, _ = _run_build(dict(j["design"], draft=False), export=True)
         if status != "ok":
-            abort(409 if status == "cancelled" else 500)
+            raise ApiError(b or "The full build was cancelled; try again.", {"bad": 400, "cancelled": 409}.get(status, 500))
         j["build"] = b
     return j["build"]
 
@@ -435,10 +565,6 @@ def _slice_job(j):
     if "error" not in res:
         sl = j["dir"] / "slice" / "sliced.3mf"
         try:                                                    # what actually prints: the sliced paths, front view
-            import re
-            import zipfile
-            g = zipfile.ZipFile(sl).read("Metadata/plate_1.gcode").decode(errors="ignore")
-            res["changes"] = len(re.findall(r"^M620 S\dA", g, re.M))
             b = j["build"]
             bambu.gcode_preview(sl, j["dir"] / "sliced.png", list(b.colours) + [c for *_, c in b.extras])
             res["preview"] = True
@@ -478,6 +604,110 @@ def sliced_png(jid):
     return Response(p.read_bytes(), mimetype="image/png", headers={"Cache-Control": "no-store"})
 
 
+@app.get("/api/job/<jid>/report")
+def slice_report(jid):
+    """Check the sliced file: what its G-code will really do (bambu.print_report) — the first layer's speed per
+    feature, the fastest travel, filament changes, time and grams. Read once per slice, then kept with it."""
+    j = _job(jid); sl = j["slice"] or {}
+    if sl.get("state") != "done":
+        raise ApiError("Slice the design first (Get exact print time), then check the sliced file.", 409)
+    if not sl.get("report"):
+        f = j["dir"] / "slice" / "sliced.3mf"
+        if not f.exists():                                      # a slice remembered from an earlier session: its
+            j["slice"] = None                                   # numbers were kept, the file was not
+            raise ApiError("The sliced file from an earlier session is gone. Slice again, then check it.", 409)
+        sl["report"] = bambu.print_report(f)
+        store.put_slice(j["key"], {k: v for k, v in sl.items() if k != "state"})
+    return jsonify(sl["report"])
+
+
+# ── a handed-over STL as a project ────────────────────────────────────────────
+def _part(pid):
+    r = PARTS.get(pid)
+    if not r:
+        raise ApiError("That part is no longer in memory. Upload the STL again.", 404)
+    return r
+
+
+@app.post("/api/part")
+def part_from_stl():
+    """An STL (or one per colour) -> a Bambu project with the material's own settings and a dimension drawing.
+    The STL is the model: part.from_stl places it on the plate and never reshapes it."""
+    import trimesh
+    from text2print import part
+    try:
+        request.max_content_length = STL_MAX                    # meshes outgrow the picture limit (Flask 3.1+)
+    except AttributeError:
+        pass
+    files = [f for f in request.files.getlist("stl") if f and f.filename]
+    if not files:
+        raise ApiError("Choose an STL file (or one per colour).")
+    if len(files) > 4:
+        raise ApiError("At most four STLs: one per AMS colour.")
+    material = (request.form.get("material") or "pla").strip().lower()
+    if material not in ("pla", *printer.MATERIALS):
+        raise ApiError(f"Unknown material {material!r}. Materials: pla, {', '.join(printer.MATERIALS)}.")
+    colours = _colours([c for c in (request.form.get("colours") or "").split(",") if c]) or ["#FFFFFF"]
+    nozzle = _nozzle(request.form.get("nozzle") or printer.DEFAULT_NOZZLE)
+    pid = uuid.uuid4().hex[:10]; d = WORK / f"part-{pid}"; (d / "stl").mkdir(parents=True, exist_ok=True)
+    try:
+        paths = []
+        for i, f in enumerate(files):
+            if not f.filename.lower().endswith(".stl"):
+                raise ApiError(f"{f.filename!r} is not an STL file.")
+            stem = re.sub(r"[^A-Za-z0-9_-]+", "_", pathlib.Path(f.filename).stem).strip("_")[:40] or f"part{i + 1}"
+            path = d / "stl" / f"{stem}.stl"
+            if path.exists():
+                path = d / "stl" / f"{stem}_{i + 1}.stl"
+            f.save(path); paths.append(path)
+            try:
+                ok = len(trimesh.load(path, force="mesh").faces) > 0
+            except Exception:
+                ok = False
+            if not ok:
+                raise ApiError(f"Couldn't read {f.filename!r} as an STL mesh. Export it again as a binary or ASCII STL.")
+        try:
+            r = part.from_stl(paths, name=paths[0].stem, colours=colours, material=material, nozzle=nozzle, out=d,
+                              slice=False, render=False, drawing=True, stls=False)
+        except FileNotFoundError as e:
+            raise ApiError(f"{e}. PETG takes its filament preset from Bambu Studio: install it, or pick PLA.") from None
+        except ValueError as e:
+            raise ApiError(str(e)) from None
+    except ApiError:
+        shutil.rmtree(d, ignore_errors=True)
+        raise
+    warnings = list(r.get("warnings") or [])
+    if max(r["size"]) > printer.BED:
+        warnings.append(f"It is {max(r['size']):g} mm on its longest side — larger than the {printer.BED:g} mm plate.")
+    n = len(paths); cols = (colours + ["#111111"] * n)[:n]
+    stock = (printer.base_config(nozzle).get("filament_settings_id") or ["Bambu PLA Matte"])[0]
+    preset = stock if material == "pla" else printer.MATERIALS[material]
+    PARTS[pid] = dict(dir=d, project=pathlib.Path(r["project"]), drawing=pathlib.Path(r["drawing"]))
+    while len(PARTS) > KEEP:
+        _, old = PARTS.popitem(last=False); shutil.rmtree(old["dir"], ignore_errors=True)
+    return jsonify(id=pid, name=paths[0].stem, size=r["size"], warnings=warnings, material=material,
+                   filaments=[dict(colour=c, preset=preset.split(" @")[0]) for c in cols],
+                   drawing=f"/api/part/{pid}/drawing.png", download=f"/api/part/{pid}/download")
+
+
+@app.get("/api/part/<pid>/drawing.png")
+def part_drawing(pid):
+    return Response(_part(pid)["drawing"].read_bytes(), mimetype="image/png", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/part/<pid>/download")
+def part_download(pid):
+    p = _part(pid)["project"]
+    return send_file(p, as_attachment=True, download_name=p.name)
+
+
+@app.post("/api/part/<pid>/open")
+def part_open(pid):
+    p = _part(pid)["project"]; DOWNLOADS.mkdir(parents=True, exist_ok=True)
+    dest = DOWNLOADS / p.name; shutil.copy(p, dest); _open(dest)
+    return jsonify(saved=str(dest))
+
+
 # ── uploads, saved designs, test plates ───────────────────────────────────────
 @app.post("/api/upload")
 def upload():
@@ -506,11 +736,14 @@ def designs():
 
 @app.post("/api/designs")
 def save_design():
-    d = request.get_json(force=True) or {}
+    d = _body()
     thumb = d.pop("thumb", None)
     entry = store.save_design({k: d.get(k) for k in ("id", "name", "link", "design", "stats")})
-    if thumb and thumb.startswith("data:image/png;base64,"):
-        store.save_thumb(entry["id"], base64.b64decode(thumb.split(",", 1)[1]))
+    if isinstance(thumb, str) and thumb.startswith("data:image/png;base64,"):
+        try:
+            store.save_thumb(entry["id"], base64.b64decode(thumb.split(",", 1)[1]))
+        except ValueError:
+            pass                                                # a broken thumbnail never loses the design
     return jsonify(entry)
 
 
@@ -530,8 +763,10 @@ def design_thumb(did):
 
 @app.post("/api/plates")
 def plates():
-    req = request.get_json(force=True) or {}
-    nozzle = float(req.get("nozzle", 0.4)); key = req.get("plate")
+    req = _body()
+    nozzle = _nozzle(req.get("nozzle", printer.DEFAULT_NOZZLE)); key = req.get("plate")
+    if key is not None and key not in sampler.PLATES:
+        raise ApiError(f"Unknown test plate {key!r}. Plates: {', '.join(sampler.PLATES)}.")
     out = DOWNLOADS / "test-plates"; out.mkdir(parents=True, exist_ok=True)
     keys = [key] if key in sampler.PLATES else list(sampler.PLATES)
     made = []
@@ -556,7 +791,7 @@ def printer_get():
 
 @app.post("/api/printer")
 def printer_set():
-    c = store.save_printer_config(request.get_json(force=True) or {})
+    c = store.save_printer_config(_body())
     return jsonify(configured=bool(c["ip"] and c["serial"] and c["access_code"]), name=c["name"], ip=c["ip"])
 
 
@@ -571,7 +806,7 @@ def printer_test():
 
 @app.post("/api/job/<jid>/send")
 def send(jid):
-    req = request.get_json(force=True) or {}
+    req = _body()
     if req.get("confirm") is not True:
         return jsonify(error="sending starts a print — confirm first"), 400
     j = _job(jid); cfg = store.printer_config()

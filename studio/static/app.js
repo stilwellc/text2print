@@ -13,6 +13,23 @@ const el = (tag, attrs = {}, ...kids) => {
 };
 const fmt = (n, d = 0) => Number(n).toLocaleString(undefined, { maximumFractionDigits: d, minimumFractionDigits: d });
 const minutes = (m) => { const h = Math.floor(m / 60), r = Math.round(m % 60); return `${h ? h + " h " : ""}${r} min`; };
+// every API answer that is not a success carries { error }: show that message, never a broken page
+async function api(url, opts) {
+  let r, d = null;
+  try { r = await fetch(url, opts); } catch (e) { throw new Error("The studio isn't answering — is it still running?"); }
+  try { d = await r.json(); } catch (e) { /* not JSON: the status says enough */ }
+  if (!r.ok) throw Object.assign(new Error(d?.error || `The studio answered ${r.status}`), { status: r.status });
+  return d;
+}
+const json = (body) => ({ method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+// a download through fetch, so a failure shows its message instead of replacing the page
+async function saveFile(url) {
+  const r = await fetch(url);
+  if (!r.ok) { let d = null; try { d = await r.json(); } catch (e) { /* not JSON */ } throw new Error(d?.error || `The studio answered ${r.status}`); }
+  const name = /filename="?([^";]+)"?/.exec(r.headers.get("Content-Disposition") || "")?.[1] || "text2print.3mf";
+  const a = el("a", { href: URL.createObjectURL(await r.blob()), download: name });
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+}
 const MAX_SLOTS = 4;
 const FAMILY_NAMES = { lattice: "Woven", fabric: "Fabric", droop: "Droop", halftone: "Halftone", colourwork: "Colourwork", spiral: "Vase mode",
   shell: "Shell", flat: "Flat", mix: "Mix" };
@@ -116,8 +133,11 @@ function seg(container, items, current, onPick) {
     role: "radio", "aria-checked": String(value === current), title, onclick: () => onPick(value),
   }, label)));
 }
+// the material the Printed badges are read for: the first one that is not PLA, as the builder's own warning does
+const materialKey = () => [].concat(state.options.material || []).map((m) => String(m).trim().toLowerCase()).find((m) => m && m !== "pla") || "pla";
 function badge(t) {
-  const st = t.status?.[state.nozzle];
+  const m = materialKey();
+  const st = (t.status_by_material ? t.status_by_material[m] : m === "pla" ? t.status : null)?.[state.nozzle];
   if (st === "printed") return el("span", { class: "badge" }, "Printed");
   if (st === "published") return el("span", { class: "badge pub" }, "Published");
   if (st === "failed") return el("span", { class: "badge fail" }, "Failed");
@@ -304,7 +324,7 @@ function optionControl(o, onChange) {
     return [el("label", { class: "toggle" }, input, el("span", {}, o.label))];
   }
   const box = el("div", { class: "seg small", role: "radiogroup", "aria-label": o.label });
-  seg(box, o.choices.map(([v, l]) => [v, l]), val, (v) => { state.options[o.key] = v; onChange(); });
+  seg(box, o.choices.map(([v, l]) => [v, l]), val, (v) => { state.options[o.key] = v; onChange(); if (o.key === "material") renderTextures(); });
   return [el("div", { class: "field-label" }, o.label), box];
 }
 function renderFinish() {
@@ -564,7 +584,7 @@ function renderAsk() {
   const vote = async (verdict) => {
     if (verdict === "dislike" && noteIn.hidden) { noteIn.hidden = false; noteIn.focus(); return; }
     const note = verdict === "dislike" ? noteIn.value.trim() : ""; noteIn.hidden = true; noteIn.value = "";
-    await fetch("/api/taste", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ verdict, design: currentDesign(), note }) });
+    try { await api("/api/taste", json({ verdict, design: currentDesign(), note })); } catch (e) { toast(e.message); return; }
     toast(verdict === "like" ? "Noted — Claude will lean this way" : "Noted — Claude will steer away");
   };
   after.replaceChildren(
@@ -796,9 +816,8 @@ async function requestBuild(draft, quiet = false) {
 }
 
 // ── print panel ────────────────────────────────────────────────────────────────
-function renderPrint(d) {
-  const tex = textureOf(state.texture), s = d.stats;
-  $("title").textContent = d.title; $("blurb").textContent = `${shapeOf(state.shape).blurb}. ${tex.blurb}.`;
+function renderStats(d) {
+  const s = d.stats, sl = d.slice?.state === "done" ? d.slice : null;
   const rows = [["Size", `${fmt(s.size[0])} × ${fmt(s.size[1])} × ${fmt(s.size[2], 1)} mm`]];
   if (s.rods) rows.push(["Rods", `${fmt(s.rods)} · ${s.courses} courses`]);
   if (s.stitches) rows.push(["Stitches around", fmt(s.stitches)]);
@@ -809,10 +828,16 @@ function renderPrint(d) {
     + (s.lid.style === "gift" ? ` · closed ${s.lid.closed_h} mm, seam ${s.lid.seam} mm${s.lid.mode ? `, over a ${s.lid.over[0]} × ${s.lid.over[1]} insert, ceiling ${s.lid.ceiling} mm` : ""}` : "")
     + (s.lid.plate === "own" ? ` · own plate${s.lid.swaps ? `, ${fmt(s.lid.swaps)} changes` : ""}` : "")]);
   rows.push(["Colours", String(s.colours)]);
-  if (s.swaps) rows.push(["AMS changes", `${fmt(s.swaps)} · ≈ ${fmt(s.swap_minutes)} min`]);
+  if (sl && sl.changes !== undefined) rows.push(["AMS changes", `${fmt(sl.changes)} · as sliced`]);
+  else if (s.swaps) rows.push(["AMS changes", `≈ ${fmt(s.swaps)} · ≈ ${fmt(s.swap_minutes)} min · estimate`]);
   if (s.minutes_est) rows.push(["Print time", `≈ ${s.minutes_est >= 60 ? `${Math.floor(s.minutes_est / 60)} h ${Math.round(s.minutes_est % 60)} min` : `${Math.round(s.minutes_est)} min`}`]);
   rows.push(["Filament", s.grams_purge ? `≈ ${fmt(s.grams_part)} g + ${fmt(s.grams_purge)} g purge` : `≈ ${fmt(s.grams_est)} g`]);
   $("stats").replaceChildren(...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
+}
+function renderPrint(d) {
+  const tex = textureOf(state.texture), s = d.stats;
+  $("title").textContent = d.title; $("blurb").textContent = `${shapeOf(state.shape).blurb}. ${tex.blurb}.`;
+  renderStats(d);
   $("dims").replaceChildren(`${fmt(s.size[0])} × ${fmt(s.size[1])} × ${fmt(s.size[2], 1)} mm`,
     el("span", { class: "tris" }, d.draft ? " · sketch" : ` · ${fmt(s.triangles / 1e6, 2)} M triangles`));
   renderSlice(d.slice);
@@ -850,8 +875,33 @@ function renderPrint(d) {
           halftone: [["Line width", `${s.line} mm, 1 wall`], ["Infill", "0%"], ["Colour changes", "every layer"]],
           colourwork: [["Line width", `${s.line} mm, 1 wall`], ["Infill", "0%"], ["Colour changes", "every layer in 2–3 colour bands"]],
           droop: [["Walls", "2 loops, strands 1 line"], ["Overhang slow-down", "off"], ["Fan", "≤ 20%"], ["Nozzle", "+5 °C"]] }[tex.family]),
-    ["Supports", "none"], ["Filament", "Bambu PLA Matte"]];
+    ["Supports", "none"], ...filamentRows(d.filaments)];
   $("settings").replaceChildren(...set.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)]));
+}
+// one row when every colour prints with the same preset, else one per colour
+function filamentRows(fils) {
+  if (!fils || !fils.length) return [];
+  if (new Set(fils.map((f) => f.preset)).size === 1) return [["Filament", fils[0].preset]];
+  return fils.map((f, i) => [`Filament ${i + 1}`, `${f.preset} · ${nameOfColour(f.colour)}`]);
+}
+async function checkSliced(e) {
+  if (!job) return;
+  const btn = e.currentTarget, id = job.id; btn.disabled = true; btn.textContent = "Reading the sliced file…";
+  try {
+    const r = await api(`/api/job/${id}/report`), by = r.grams_by_filament || [], ft = r.fastest_travel || {};
+    const rows = Object.entries(r.first_layer || {}).map(([feat, v]) => [`First layer · ${feat.toLowerCase()}`, `${fmt(v.speed)} mm/s${v.fastest > v.speed ? ` · up to ${fmt(v.fastest)}` : ""}`]);
+    rows.push(["Fastest travel", `first layer ${fmt(ft.first_layer || 0)} mm/s · after ${fmt(ft.rest || 0)} mm/s`], ["Filament changes", fmt(r.changes)]);
+    if (r.time) rows.push(["Time", r.time]);
+    if (by.length) rows.push(["Filament", `${fmt(by.reduce((a, b) => a + b, 0), 1)} g${by.length > 1 ? ` (${by.map((g) => fmt(g, 1)).join(" + ")})` : ""}`]);
+    sheet(el("h3", {}, "The sliced file"),
+      el("p", {}, "Read from the G-code Bambu Studio wrote: the speed most of each first-layer feature runs at, and what the whole print adds up to. PETG wants a first layer near 20 mm/s."),
+      el("dl", { class: "stats" }, ...rows.flatMap(([k, v]) => [el("dt", {}, k), el("dd", {}, v)])),
+      el("div", { class: "row" }, el("button", { class: "secondary", onclick: closeSheet }, "Close")));
+  } catch (err) {
+    toast(err.message);
+    if (err.status === 409 && job && job.id === id) { job.slice = null; renderStats(job); renderSlice(null); return; }   // the file is gone: slice again
+  }
+  btn.disabled = false; btn.textContent = "Check the sliced file";
 }
 function renderSlice(sl) {
   const btn = $("sliceBtn");
@@ -860,9 +910,13 @@ function renderSlice(sl) {
   if (sl.state === "running") { btn.disabled = true; btn.textContent = "Slicing in Bambu Studio…"; $("slice").replaceChildren(el("span", { class: "sub" }, "Slicing on the real P2S profile, colour changes included.")); return; }
   if (sl.state === "error") { $("slice").replaceChildren(el("span", { class: "sub" }, `Slicer: ${sl.error}${sl.detail ? " — " + sl.detail : ""}`)); return; }
   btn.disabled = true; btn.textContent = "Sliced";
+  const by = sl.grams_by_filament || [], fils = job?.filaments || [], warns = sl.warnings || [];
   $("slice").replaceChildren(el("span", { class: "big" }, minutes(sl.minutes)),
     el("span", { class: "sub" }, `${fmt(sl.grams, 0)} g · ${fmt(sl.layers)} layers${sl.changes !== undefined ? ` · ${fmt(sl.changes)} colour changes` : ""}`), el("br"),
+    by.length > 1 ? el("span", { class: "sub" }, by.map((g, i) => `${fils[i] ? nameOfColour(fils[i].colour) : `Filament ${i + 1}`} ${fmt(g, 1)} g`).join(" · ")) : "", by.length > 1 ? el("br") : "",
     el("span", { class: "sub" }, `Bambu Studio's own numbers for the P2S, AMS changes and purge included.`),
+    warns.length ? el("ul", { class: "notes" }, ...warns.map((w) => el("li", {}, `Slicer: ${w}`))) : "",
+    el("div", { class: "links" }, el("button", { class: "linkbtn", onclick: checkSliced }, "Check the sliced file")),
     sl.preview && job ? el("figure", { class: "sliced" }, el("img", { src: `/api/job/${job.id}/sliced.png?${Date.now()}`, alt: "The sliced print paths, seen from the front" }),
       el("figcaption", {}, "As sliced — the paths the printer lays, from the front")) : "");
 }
@@ -871,22 +925,32 @@ $("sliceBtn").addEventListener("click", async () => {
   if (!job) return;
   const id = job.id;
   renderSlice({ state: "running" });
-  await fetch(`/api/job/${id}/slice`, { method: "POST" });
-  for (;;) {
-    await new Promise((r) => setTimeout(r, 1500));
-    if (!job || job.id !== id) return;
-    const s = await (await fetch(`/api/job/${id}/slice`)).json();
-    if (s.state === "running") continue;
-    job.slice = s; renderSlice(s); return;
+  try {
+    await api(`/api/job/${id}/slice`, { method: "POST" });
+    for (;;) {
+      await new Promise((r) => setTimeout(r, 1500));
+      if (!job || job.id !== id) return;
+      const s = await api(`/api/job/${id}/slice`);
+      if (s.state === "running") continue;
+      job.slice = s; renderStats(job); renderSlice(s); return;
+    }
+  } catch (e) {
+    if (job && job.id === id) renderSlice({ state: "error", error: e.message });
   }
+});
+for (const a of [$("dl3mf"), $("dlStl")]) a.addEventListener("click", async (e) => {
+  e.preventDefault();
+  if (!job) return;
+  toast("Preparing the download…");
+  try { await saveFile(a.href); } catch (err) { toast(err.message); }
 });
 $("openBtn").addEventListener("click", async () => {
   if (!job) return;
   $("openBtn").disabled = true;
   try {
-    const r = await (await fetch(`/api/job/${job.id}/open`, { method: "POST" })).json();
+    const r = await api(`/api/job/${job.id}/open`, { method: "POST" });
     toast(`Saved to ${r.saved.replace(/^\/Users\/[^/]+/, "~")}${CAT.slicer ? " — opening Bambu Studio" : ""}`);
-  } finally { $("openBtn").disabled = false; }
+  } catch (e) { toast(e.message); } finally { $("openBtn").disabled = false; }
 });
 
 // ── dialogs ────────────────────────────────────────────────────────────────────
@@ -908,9 +972,9 @@ $("sendBtn").addEventListener("click", () => {
     el("div", { class: "row" }, el("button", { class: "secondary", onclick: closeSheet }, "Cancel"),
       el("button", { class: "primary", onclick: async (e) => {
         e.target.disabled = true; e.target.textContent = "Slicing and sending…";
-        const r = await fetch(`/api/job/${job.id}/send`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ confirm: true }) });
-        const d = await r.json(); closeSheet();
-        toast(r.ok ? `Sent “${d.sent}” to the printer` : `Couldn't send: ${d.error}`);
+        try { const d = await api(`/api/job/${job.id}/send`, json({ confirm: true })); toast(`Sent “${d.sent}” to the printer`); }
+        catch (err) { toast(`Couldn't send: ${err.message}`); }
+        closeSheet();
       } }, "Start print")));
 });
 
@@ -937,7 +1001,8 @@ $("printerBtn").addEventListener("click", async () => {
     e.preventDefault();
     const body = Object.fromEntries(new FormData(form));
     if (!body.access_code && cur.configured) delete body.access_code;
-    const r = await (await fetch("/api/printer", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...cur, ...body }) })).json();
+    let r;
+    try { r = await api("/api/printer", json({ ...cur, ...body })); } catch (err) { toast(err.message); return; }
     CAT.lan = { configured: r.configured, name: r.name, ip: r.ip }; renderPrinter(); closeSheet();
     if (job) renderPrint(job);
     toast(r.configured ? "Printer saved on this Mac" : "Saved — fill in all fields to enable sending");
@@ -956,15 +1021,67 @@ function renderPrinter() {
 $("platesBtn").addEventListener("click", () => {
   const go = async (key, btn) => {
     btn.disabled = true; btn.textContent = "Building…";
-    const r = await (await fetch("/api/plates", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plate: key, nozzle: state.nozzle }) })).json();
+    try {
+      const r = await api("/api/plates", json({ plate: key, nozzle: state.nozzle }));
+      toast(`Saved ${r.saved.length} plate${r.saved.length > 1 ? "s" : ""} to ~/Downloads/text2print/test-plates`);
+    } catch (e) { toast(e.message); }
     btn.disabled = false; btn.textContent = "Open";
-    toast(`Saved ${r.saved.length} plate${r.saved.length > 1 ? "s" : ""} to ~/Downloads/text2print/test-plates`);
   };
   sheet(el("h3", {}, "Test plates"),
-    el("p", {}, `A small coupon of every texture on the ${state.nozzle} mm nozzle, one family per plate. Print one, then record what you saw: python -m text2print verify <texture> ${state.nozzle} ok — the Printed badges come from that.`),
+    el("p", {}, `A small coupon of every texture on the ${state.nozzle} mm nozzle, one family per plate. Print one, then record what you saw: python -m text2print verify <texture> ${state.nozzle} ok${materialKey() === "pla" ? "" : ` --material ${materialKey()}`} — the Printed badges come from that, per filament.`),
     ...CAT.plates.map((p) => { const b = el("button", { class: "secondary" }, "Open"); b.addEventListener("click", () => go(p.key, b));
       return el("div", { class: "plate" }, el("strong", {}, p.name), b, el("small", {}, p.coupons.join(" · "))); }),
     el("div", { class: "row" }, el("button", { class: "secondary", onclick: closeSheet }, "Close")));
+});
+
+// your own STL: placed on the plate as it is, with the material's settings and a dimension drawing
+$("stlBtn").addEventListener("click", () => {
+  const pick = { files: [], material: "pla", colours: [] };
+  const input = el("input", { type: "file", accept: ".stl", multiple: true, hidden: true });
+  const body = el("div", {});
+  const draw = () => {
+    const mat = el("div", { class: "seg small", role: "radiogroup", "aria-label": "Filament" });
+    seg(mat, CAT.materials.map(([v, l]) => [v, l]), pick.material, (v) => { pick.material = v; draw(); });
+    const go = el("button", { class: "primary", disabled: !pick.files.length, onclick: make }, "Make the project");
+    body.replaceChildren(
+      el("div", { class: "upload" }, input, el("button", { class: "ghost", onclick: () => input.click() }, pick.files.length ? "Change STL" : "Choose STL…"),
+        el("span", { class: "label" }, pick.files.length ? `${pick.files.length} file${pick.files.length > 1 ? "s" : ""}` : "One file, or one per colour")),
+      ...pick.files.flatMap((f, i) => [el("div", { class: "field-label" }, `${f.name} · AMS ${i + 1} · ${nameOfColour(pick.colours[i])}`),
+        el("div", { class: "swatches" }, ...Object.entries(CAT.palette).map(([n, hex]) => el("button", { style: `background:${hex}`, title: n, "aria-label": n,
+          "aria-checked": String(hex.toLowerCase() === pick.colours[i].toLowerCase()), onclick: () => { pick.colours[i] = hex; draw(); } })))]),
+      el("div", { class: "field-label" }, "Filament"), mat,
+      el("div", { class: "row" }, el("button", { class: "secondary", onclick: closeSheet }, "Cancel"), go));
+  };
+  input.addEventListener("change", () => {
+    pick.files = [...input.files].slice(0, MAX_SLOTS);
+    pick.colours = pick.files.map((_, i) => pick.colours[i] || state.colours[i] || CAT.colours[i % CAT.colours.length]);
+    draw();
+  });
+  async function make(e) {
+    const btn = e.currentTarget; btn.disabled = true; btn.textContent = "Making the project…";
+    const fd = new FormData();
+    for (const f of pick.files) fd.append("stl", f);
+    fd.append("material", pick.material); fd.append("colours", pick.colours.join(",")); fd.append("nozzle", state.nozzle);
+    let d;
+    try { d = await api("/api/part", { method: "POST", body: fd }); }
+    catch (err) { toast(err.message); btn.disabled = false; btn.textContent = "Make the project"; return; }
+    const open = el("button", { class: "primary", onclick: async () => {
+      open.disabled = true;
+      try { const r = await api(`/api/part/${d.id}/open`, { method: "POST" }); toast(`Saved to ${r.saved.replace(/^\/Users\/[^/]+/, "~")}${CAT.slicer ? " — opening Bambu Studio" : ""}`); }
+      catch (err) { toast(err.message); }
+      open.disabled = false;
+    } }, CAT.slicer ? "Open in Bambu Studio" : "Save to Downloads");
+    sheet(el("h3", {}, d.name),
+      el("p", {}, `${fmt(d.size[0], 1)} × ${fmt(d.size[1], 1)} × ${fmt(d.size[2], 1)} mm as it prints · ${filamentRows(d.filaments).map(([, v]) => v).join(", ")} · ${state.nozzle} mm nozzle. The shape is untouched: check these numbers against what it has to fit.`),
+      el("figure", { class: "sliced" }, el("img", { src: d.drawing, alt: "Top and front views with the overall sizes" }), el("figcaption", {}, "Measured off the mesh that goes in the project")),
+      d.warnings.length ? el("ul", { class: "notes" }, ...d.warnings.map((w) => el("li", {}, w))) : "",
+      el("div", { class: "row" }, el("button", { class: "secondary", onclick: closeSheet }, "Close"),
+        el("button", { class: "secondary", onclick: async () => { try { await saveFile(d.download); } catch (err) { toast(err.message); } } }, "Download .3mf"), open));
+  }
+  draw();
+  sheet(el("h3", {}, "Your own STL"),
+    el("p", {}, `A finished model becomes a Bambu project for the ${state.nozzle} mm nozzle: 3 walls, 20% gyroid, the filament's own speeds, and a drawing of its sizes. The STL is the model — it is placed on the plate, never reshaped.`),
+    body);
 });
 
 // saved designs
@@ -977,9 +1094,10 @@ $("saveBtn").addEventListener("click", () => {
     e.preventDefault();
     renderer.render(scene, camera);
     const thumb = squareThumb();
-    await fetch("/api/designs", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: input.value || job.title, link: linkFor(), design: currentDesign(), stats: { ...job.stats, slice: job.slice }, thumb }) });
-    closeSheet(); toast("Saved");
+    try {
+      await api("/api/designs", json({ name: input.value || job.title, link: linkFor(), design: currentDesign(), stats: { ...job.stats, slice: job.slice }, thumb }));
+      closeSheet(); toast("Saved");
+    } catch (err) { toast(err.message); }
   });
   sheet(el("h3", {}, "Save design"), form);
 });

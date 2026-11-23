@@ -6,8 +6,8 @@
 <title>text2print</title>
 <link rel="stylesheet" href="/static/app.css">
 <script type="importmap">
-{"imports": {"three": "https://cdn.jsdelivr.net/npm/three@0.164.1/build/three.module.js",
-             "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.164.1/examples/jsm/"}}
+{"imports": {"three": "/static/vendor/three/three.module.js",
+             "three/addons/": "/static/vendor/three/addons/"}}
 </script>
 </head>
 <body>
@@ -33,6 +33,7 @@
     <section>
       <h2>Shape</h2>
       <div class="cards" id="shapes"></div>
+      <button class="ghost add" id="stlBtn" aria-haspopup="dialog">Use your own STL…</button>
     </section>
     <section>
       <h2>Pattern</h2>
