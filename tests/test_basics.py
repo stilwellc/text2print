@@ -74,3 +74,10 @@ def test_a_shape_traced_from_a_picture_joins_the_catalogue(tmp_path, monkeypatch
         shapes.SHAPES.pop("s_my_pebble", None); extras.LID_SHAPES.discard("s_my_pebble")
     f = shapes.polygon_sdf([(-10, -5), (10, -5), (10, 5), (-10, 5)])
     assert abs(float(f(0, 0)) + 5) < 0.2 and abs(float(f(13, 0)) - 3) < 0.2
+
+
+def test_the_catalogue_takes_fine_rods_and_says_they_are_unprinted():
+    from text2print import build
+    fine, std = build.make("coaster", "twill", options={"rod": "fine"}), build.make("coaster", "twill")
+    assert fine.stats["rods"] > 2 * std.stats["rods"] and any("Fine rods" in w for w in fine.warnings)
+    assert not any("Fine rods" in w for w in std.warnings)

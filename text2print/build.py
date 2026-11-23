@@ -912,6 +912,9 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     if not compatible(shape, texture):
         raise ValueError(f"{TEXTURES[texture]['name']} doesn't fit a {SHAPES[shape].name.lower()}")
     S = SHAPES[shape]; T = TEXTURES[texture]; nz = printer.nozzle(nozzle); options = dict(options or {})
+    fine = T["family"] == "lattice" and str(options.get("rod", "")).lower() == "fine"
+    if fine:                                                    # half-size rods: a weave that reads on a small piece
+        nz = printer.fine_rod(nozzle)
     from . import store
     if options.get("image") and not pathlib.Path(str(options["image"])).exists():
         options["image"] = store.image_path(options["image"])           # an uploaded picture's id
@@ -936,6 +939,8 @@ def make(shape, texture, params=None, nozzle=printer.DEFAULT_NOZZLE, colours=Non
     _other = next((str(m_).strip().lower() for m_ in _mat if str(m_).strip().lower() not in ("pla", "")), None)
     if _other and vstat == "printed" and verify.status(texture, nz.size, _other)[0] != "printed":
         warnings.append(f"Printed in PLA; not yet in {_other.upper()}")
+    if fine:
+        warnings.append(f"Fine rods ({nz.rod_w:.2f} x {nz.rod_h:.2f} mm) have not been printed yet")
     ranges, per_filament, kinds = [], None, None
     flush_mult = 0.6 if options.get("purge") == "lean" else 1.0
     transitions = []                   # (from colour, to colour) for every AMS change, for the purge estimate
