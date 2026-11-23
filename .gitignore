@@ -3,6 +3,11 @@
 __pycache__/
 *.pyc
 
+# Packaging (pip install . / python -m build)
+build/
+dist/
+*.egg-info/
+
 # Model outputs and session renders (docs images are tracked)
 *.stl
 *.3mf
@@ -50,3 +55,11 @@ map_*_report.txt
 # One-off part scripts kept beside the package (see SKILL.md, "Parts that are not in the catalogue")
 /*.py
 _skipped.*
+
+# Turntables from docs/make_media.py: only the animations the README shows are tracked
+docs/media/*.gif
+docs/media/*.first.png
+!docs/media/hero.gif
+!docs/media/studio-demo.gif
+!docs/media/print-build.gif
+!docs/media/droop.gif

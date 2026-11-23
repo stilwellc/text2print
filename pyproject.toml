@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "text2print"
+version = "0.1.0"
+description = "3D prints for a Bambu Lab P2S: catalogue textures on shapes, and functional parts with PLA or PETG settings, a dimension drawing and a slice report."
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Collin Stilwell" }]
+keywords = ["3d-printing", "bambu-lab", "3mf", "stl", "generative-design", "parametric"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Graphics :: 3D Modeling",
+]
+# keep in step with requirements.txt (which adds flask for the studio and pytest for the tests)
+dependencies = [
+    "trimesh>=4.0,<5",
+    "numpy>=1.24,<3",
+    "manifold3d>=2.4,<4",
+    "shapely>=2.0,<3",
+    "mapbox_earcut>=1.0,<3",
+    "rtree>=1.0,<2",
+    "scikit-image>=0.21,<1",
+    "scipy>=1.10,<2",
+    "pyrender>=0.1.45,<0.2",
+    "Pillow>=10,<13",
+    "matplotlib>=3.7,<4",
+    "paho-mqtt>=2.0,<3",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "flask>=3.0,<4"]
+
+[project.scripts]
+t2p = "text2print.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/stilwellc/text2print"
+Issues = "https://github.com/stilwellc/text2print/issues"
+
+# The studio (studio/, 15 MB of cards, run from the repo root) is not packaged: clone the repo for it.
+[tool.setuptools]
+packages = ["text2print"]
+
+[tool.setuptools.package-data]
+text2print = ["data/*.json", "data/*.py", "data/filament/*.json"]

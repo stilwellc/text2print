@@ -5,6 +5,7 @@ numpy>=1.24,<3
 manifold3d>=2.4,<4
 shapely>=2.0,<3
 mapbox_earcut>=1.0,<3
+rtree>=1.0,<2                  # trimesh ray casts and contains()
 scikit-image>=0.21,<1          # outlines from pictures, non-round shapes, lids
 scipy>=1.10,<2                 # voronoi cells, picture prep
 # rendering (thumbnails, previews, 3MF plate image)

@@ -91,7 +91,8 @@ class Outline:
         g = np.linspace(-extent - 3, extent + 3, 700); X, Y = np.meshgrid(g, g, indexing="ij")
         c = max(skm.find_contours(sdf(X, Y), 0.0), key=len)
         P = np.column_stack([np.interp(c[:, 0], np.arange(len(g)), g), np.interp(c[:, 1], np.arange(len(g)), g)])
-        if np.cross(P[1] - P[0], P[2] - P[0]) < 0 or _signed_area(P) < 0:
+        a_, b_ = P[1] - P[0], P[2] - P[0]
+        if a_[0] * b_[1] - a_[1] * b_[0] < 0 or _signed_area(P) < 0:
             P = P[::-1]
         if _signed_area(P) < 0:
             P = P[::-1]

@@ -1,11 +1,12 @@
 ---
 name: text2print
-description: 3D prints for a Bambu Lab P2S: textured pieces picked from a catalogue, and functional one-off parts (a bracket, sleeve, stand, clip, holder, a handed-over STL) delivered as a Bambu Studio project with the right PLA or PETG settings, a dimension drawing and a slice report. Use when someone wants a woven, basket, lattice, crosshatch, knit, fabric, zigzag, wave, drooping, fringe, loop, curl, fur, two-colour halftone-picture, vase-mode pleat/flute/twist, voronoi, lithophane, fuzzy-skin or CMYK-picture tray, platter, dish, coaster, cup, lamp shade, bowl, vase, cachepot, liner sleeve, tealight lantern, pendant shade, LED puck lamp, amphora, basket, catch-all or tile; asks to "pick a pattern / pick a shape"; or wants to open or extend the text2print studio. Produces a Bambu Studio project (one object, one part per AMS colour, P2S settings for the chosen nozzle).
+description: '3D prints for a Bambu Lab P2S: textured pieces picked from a catalogue, and functional one-off parts (a bracket, sleeve, stand, clip, holder, a handed-over STL) delivered as a Bambu Studio project with the right PLA or PETG settings, a dimension drawing and a slice report. Use when someone wants a woven, basket, lattice, crosshatch, knit, fabric, zigzag, wave, drooping, fringe, loop, curl, fur, two-colour halftone-picture, vase-mode pleat/flute/twist, voronoi, lithophane, fuzzy-skin or CMYK-picture tray, platter, dish, coaster, cup, lamp shade, bowl, vase, cachepot, liner sleeve, tealight lantern, pendant shade, LED puck lamp, amphora, basket, catch-all or tile; asks to "pick a pattern / pick a shape"; or wants to open or extend the text2print studio. Produces a Bambu Studio project (one object, one part per AMS colour, P2S settings for the chosen nozzle).'
 ---
 
 # text2print — pick a shape, pick a texture
 
-Two kinds of job, two paths. Repo: ~/Dev/text2print (python package `text2print`, studio in `studio/`).
+Two kinds of job, two paths. "The repo" below is the text2print checkout this SKILL.md sits in (python package
+`text2print`, studio in `studio/`); if the skill is a symlink, resolve it to find the repo.
 
 - **A textured vessel or tile** (woven, knit, droop, halftone, vase-mode, litho...): a TEXTURE ON A SHAPE. Don't model
   it from scratch: pick from the catalogue, set sizes, build, hand over the project. -> "Use it from the command line".
@@ -15,12 +16,13 @@ Two kinds of job, two paths. Repo: ~/Dev/text2print (python package `text2print`
 ## Use it from the command line
 
 Everything the studio does is available without it. `t2p` (in the repo root) runs from any folder; it is
-`.venv/bin/python -m text2print` with the path set. Commands print JSON (`list`, `options` and `pictures` print text;
+`.venv/bin/python -m text2print` with the path set (the system `python3` when the repo has no `.venv`). After
+`pip install` the same command is on the PATH as plain `t2p`; the studio, `ask` and `taste` need the repo. Commands print JSON (`list`, `options` and `pictures` print text;
 `options --json` for JSON); a bad request exits 2 with
 `{"error": "..."}` that says what to fix; a failed slice exits 1.
 
 ```bash
-T=~/Dev/text2print/t2p
+T=<path to the repo>/t2p              # or T=t2p when it is pip-installed
 $T list                               # shapes, their sizes, the textures that fit each
 $T options jacquard                   # every option a texture takes, its choices and default (--json)
 $T catalogue                          # everything a design can use, as JSON: mixes, charts, lids, pictures, palette
@@ -82,7 +84,7 @@ panels=2|3; colourwork loops=tiers|shag|fringe|window|petals, loop_colour, loop_
 
 In Python: `from text2print import design; d, b = design.build_design({...}); b.write_3mf(path)`.
 
-Deliver to ~/Downloads/<project>/ (Collin's rule): the .3mf, the per-colour STLs, a render, and the numbers
+Deliver to ~/Downloads/<project>/ (the default): the .3mf, the per-colour STLs, a render, and the numbers
 from `--slice` plus the AMS change estimate in `stats`.
 
 ## Parts that are not in the catalogue
@@ -95,7 +97,7 @@ from text2print import part, extras, meshops
 
 body = meshops.manifold_to_trimesh(extras.revolve([(8.5, 0), (22.5, 0), (22.5, 0.6), (9.7, 29), (9.7, 30), (8.5, 30)]))
 r = part.deliver("pipe_sleeve", [("Sleeve", body, 1)], colours=["#FFFFFF"], material="petg", slice=True,
-                 check={"length": (30.0, "z"), "bell": (45.0, "x")},          # HIS numbers: it raises if the build misses
+                 check={"length": (30.0, "z"), "bell": (45.0, "x")},          # THEIR numbers: it raises if the build misses
                  dims=[("front", (-8.5, 15), (8.5, 15), "17.0 bore")])       # extra sizes for the drawing
 print(r["slice"], r["report"]["first_layer"], r["warnings"])
 ```
@@ -119,8 +121,30 @@ with `slice=True` the slicer's time, grams per filament, filament changes, its w
   pieces with only 10-20 mm between openings; not print-verified). Frame the outline and every hole with your own rods
   (`rods.line`, `rods.path`), then `lattice.support_audit(rods, frame=[...])` must report `loose_ends: 0` — a pattern
   clipped to a new outline can leave rod ends in mid-air (Selvedge did, 57 of them). Render every candidate pattern on
-  the real outline and let him pick; large-repeat weaves turn to noise in narrow lands.
-- **Before saying it is ready.** (1) The drawing: show it whenever a size is his, and say which numbers are his and
+  the real outline and let them pick; large-repeat weaves turn to noise in narrow lands.
+- **Several pieces.** Two halves, a lid and its base, two of the same: `deliver(name, {"Lid": [(...)], "Base": [(...)]},
+  ..., copies=1)` lays them on one plate (clear of the prime tower) and writes an STL and a drawing per piece.
+- **Sizes that must fit: say inside or outside.** `check={"length": (30.0, "z")}` is the OUTSIDE size;
+  `check={"bore": (17.0, "x", (0, 0, 15))}` measures through that point of the model: in an opening it is the inside
+  size (a bore, a slot, the gap between two legs), in material it is the wall. With several pieces add the piece name:
+  `(mm, axis, point_or_None, "Lid")`. Every check is drawn on the drawing. `assumed=["pocket 69 mm"]` prints the numbers
+  nobody measured on the drawing and in the warnings. `part.span(mesh, point, axis)` is the measurement on its own.
+- **Fits are untested until printed: print a coupon first.** `t2p coupon hole 16 --material petg` (or `slot 3`,
+  `dovetail`) is a ten-minute piece with the fit at 0.10-0.40 mm a side, tightest first; use the step that feels right.
+- **Helpers (`text2print.fits`).** `split_keyed(body, key_x)` cuts a body in two on y = 0 with dovetail keys that slide
+  together; `crush_ribs(bore_d, height)`, `bump(at, "+x")` (click bump for a thin wall), `sheet_slot(thickness, length,
+  depth)`; `grille(w, h, thickness)` -> (cutter, count) and refuses holes under 3 mm or lands under 2.5 mm on the plate.
+- **A mark or words in a second colour.** `art, info = fits.trace(photo, width_mm)` or `fits.words("TEXT", height)`
+  (features a nozzle cannot draw are removed; `info["kept"]` says how much survived), `body, plug = fits.inlay(body,
+  art)` (bottom face by default, mirrored for you), deliver both as slots 1 and 2 with `first_layer=20,
+  first_layer_order=(2, 1)`, then `fits.artwork_check(r["slice"]["sliced"], {2: art}, r["centres"][0][1:], mirror=True,
+  out_png=...)`: under about 0.9 printed means it is too fine. A clean render is not proof; this is.
+- **Plain things (`text2print.basics`, `t2p basic`).** `t2p basic can --set diameter=70 --set height=40 --lid thread`,
+  `t2p basic box --set width=90 --set depth=60 --set height=35`, `t2p basic plaque --text "NAME" --image mark.png`:
+  solid 2.4 mm walls, lids that seat (tested), the plaque sliced and artwork-checked for you with `--slice`.
+- **A catalogue shape from a picture.** `t2p plugin new shape NAME --image outline.png --width 120` traces a dark
+  silhouette into a shape that takes every wall texture and the woven ones.
+- **Before saying it is ready.** (1) The drawing: show it whenever a size is theirs, and say which numbers are theirs and
   which are yours. A measurement that sounds odd for the object is worth one question before building, not six
   rebuilds after. (2) `r["warnings"]` and `r["slice"]["warnings"]`. (3) `r["report"]`: first-layer speed, the fastest
   move, the changes. (4) Anything that has to fit: state the clearance and that it is untested until printed.
@@ -170,8 +194,8 @@ above (none if top band), range wall_loops=rod_lines over the band, woven speeds
 
 ## Laws (print-verified; tests enforce the geometric ones)
 
-- Woven: flat full-size first course; no course ever reaches past the one below (Collin rejected fringes,
-  lips and a river-stone bottom). Shrinking upward (the pillowed top edge) is fine.
+- Woven: flat full-size first course; no course ever reaches past the one below (fringes, lips and a river-stone bottom
+  were all rejected). Shrinking upward (the pillowed top edge) is fine.
 - Nothing square: rounded plan corners, round beads (octagon section, the printed tray's exact bead), round dishes.
 - One object, one part per colour. Separate objects per colour leave empty layers and Bambu refuses to slice.
 - Colour by direction = one AMS change per course. Over-under and tartan mix colours inside a course: about one
@@ -299,7 +323,7 @@ every object carries an object-level extruder = its first part's (a one-part obj
 The studio covers everything that needs no judgement. When someone asks for something it can't pick from a list,
 make it — then hand back a studio link. Four routes, cheapest first:
 
-1. **Words** ("put MOBI LABS on it", "her name in script"): no code. Studio link with
+1. **Words** ("put our studio name on it", "her name in script"): no code. Studio link with
    `picture=text&text=...&font=futura|helvetica|avenir|didot|georgia|rockwell|typewriter|impact|script|chalk&text_layout=center|repeat|stack`
    (+ `text_invert=1`). Works on halftone, wall lithophane (`litho`), `flatlitho`, `cmyk`. Text renders at the wall's
    true proportions; `repeat` tiles a whole number of times around so no word is cut at the seam.

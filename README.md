@@ -1,8 +1,9 @@
 <h1 align="center">text2print</h1>
 
-<p align="center"><strong>Textured, multicolour 3D prints for Bambu Lab, generated from a shape and a texture.</strong></p>
+<p align="center"><strong>Print-ready Bambu Studio projects for the Bambu Lab P2S: textured pieces from a catalogue, and functional parts with the right settings.</strong></p>
 
 <p align="center">
+  <a href="https://github.com/stilwellc/text2print/actions/workflows/tests.yml"><img src="https://github.com/stilwellc/text2print/actions/workflows/tests.yml/badge.svg" alt="tests"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-8a7248" alt="MIT License"></a>
   <img src="https://img.shields.io/badge/python-3.10–3.12-e8a33d" alt="Python 3.10–3.12">
   <img src="https://img.shields.io/badge/printer-Bambu%20Lab%20P2S-1c1915" alt="Bambu Lab P2S">
@@ -15,29 +16,102 @@
 
 <p align="center"><img src="docs/media/hero.gif" width="100%" alt="Six text2print pieces at true relative size, spinning: a woven grid cup, a halftone flames cup, a colour-knit vase hung with loops, a twist vase in spiral vase mode, a fringe cup and a woven rose-window dish"></p>
 
-<p align="center">
-Woven baskets, knit and loop vases, halftone pictures, vase-mode twists, droop fringe and lithophanes.<br>
-Pick a shape and a texture, and get a <b>print-ready Bambu Studio 3MF</b> with the AMS colours already mapped.
-</p>
+<table>
+  <tr>
+    <td width="50%" valign="top"><b>Textures on shapes</b><br>
+    Pick one of 25 shapes and 43 textures (woven rods, knit and loops, halftone pictures, droop fringe, vase-mode
+    twists, lithophanes) and get one object with a part per AMS colour.<br><br>
+    <code>t2p make cup twill --colours "#8B3A2F,#EDE3D1" --out ~/Downloads/cup</code></td>
+    <td width="50%" valign="top"><b>Functional parts</b><br>
+    A bracket, a sleeve, a stand, an STL you were handed: your mesh goes in, and out come PLA or PETG settings,
+    a dimension drawing and a slice report.<br><br>
+    <code>t2p part bracket.stl --material petg --slice</code></td>
+  </tr>
+</table>
 
 <p align="center">
-  <a href="#quick-start"><b>Quick start</b></a> ·
+  <a href="#install"><b>Install</b></a> ·
+  <a href="#functional-parts"><b>Functional parts</b></a> ·
+  <a href="#the-studio"><b>Studio</b></a> ·
   <a href="#textures"><b>All 43 textures</b></a> ·
   <a href="#use-it-as-a-claude-code-skill"><b>Claude Code skill</b></a> ·
   <a href="#faq"><b>FAQ</b></a>
 </p>
 
-## Quick start
+## Install
+
+```bash
+pip install git+https://github.com/stilwellc/text2print     # the library and the t2p command (Python 3.10–3.12)
+t2p list                                                    # shapes, sizes and the textures that fit each
+```
+
+For the studio, the tests and `t2p ask`, clone it (the studio is not in the pip package; here the command is `./t2p`):
 
 ```bash
 git clone https://github.com/stilwellc/text2print && cd text2print
 python3.12 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m text2print studio        # opens the studio at http://127.0.0.1:7384
+./t2p studio                                 # opens the studio at http://127.0.0.1:7384
 ```
 
-Pick a shape, texture, colours and nozzle; the preview rebuilds live. **Open in Bambu Studio** writes the
-project to `~/Downloads/text2print/`. **Get exact print time** slices it with the Bambu Studio CLI, including
-real AMS changes and purge. **Save design** keeps it under **Saved**, and every design is a shareable link.
+`--slice` drives the Bambu Studio CLI and looks for Bambu Studio in `/Applications` (macOS). Everything else,
+project files included, works without it.
+
+## Functional parts
+
+<table>
+  <tr>
+    <td align="center" width="50%"><img src="docs/part-render.png" width="380" alt="Render of a small trumpet-shaped pipe sleeve: a wide flat base tapering up to a narrow collar with a round bore"></td>
+    <td align="center" width="50%"><img src="docs/part-drawing.png" width="250" alt="Dimension drawing of the same sleeve: a top view 45.0 mm across and a front view 30.0 mm tall with a 17.0 mm bore marked"></td>
+  </tr>
+</table>
+<p align="center"><sub>The render and the dimension drawing <code>part.deliver</code> wrote for the sleeve below. Bambu Studio's CLI slices it at 39 min 39 s and 11.95 g of PETG.</sub></p>
+
+A bracket, a sleeve, a stand, an STL you were handed: model the mesh however you like (manifold3d, trimesh, CadQuery)
+and `part.deliver` does everything after it.
+
+```python
+from text2print import part, extras, meshops
+
+body = meshops.manifold_to_trimesh(extras.revolve([(8.5, 0), (22.5, 0), (22.5, 0.6), (9.7, 29), (9.7, 30), (8.5, 30)]))
+r = part.deliver("pipe_sleeve", [("Sleeve", body, 1)], colours=["#2E4E7E"], material="petg", slice=True,
+                 check={"length": (30.0, "z"), "bell": (45.0, "x")},      # raises if the part is not this size
+                 dims=[("front", (-8.5, 15), (8.5, 15), "17.0 bore")])    # an extra size for the drawing
+```
+
+```bash
+t2p part bracket.stl --material petg --slice     # a ready-made STL as a project; it is placed, never reshaped
+t2p check _slice/sliced.3mf                      # real first-layer and print speeds, changes, grams per filament
+```
+
+| It writes to `~/Downloads/<name>/` | |
+|---|---|
+| Bambu Studio project | one object, one part per colour; 3 walls and 20 % gyroid unless you override them |
+| Material settings | the PLA or PETG filament preset and that material's own speeds, one material per colour if you like |
+| Dimension drawing | top and front views with the overall sizes and any you add; `check` stops a part of the wrong size |
+| STL per colour and a render | |
+| Slice report (`slice=True`) | time, grams per filament, filament changes, the slicer's warnings, and the speeds read back from the G-code |
+
+<p align="center"><img src="docs/part-basics.png" width="720" alt="Render of a white screw-lid can with its lid beside it, a small plaque with black inlaid letters, and a bar of six test holes"></p>
+<p align="center"><sub><code>t2p basic can</code>, <code>t2p basic plaque --text</code> and <code>t2p coupon hole 16</code>, as rendered.</sub></p>
+
+| | |
+|---|---|
+| Several pieces | `deliver(name, {"Lid": [...], "Base": [...]}, copies=2)` lays them out on one plate, clear of the prime tower |
+| Inside sizes | `check={"bore": (17.0, "x", (0, 0, 15))}` measures through a point: a bore, a slot, the gap between two legs |
+| Fit coupons | `t2p coupon hole 16`, `slot 3`, `dovetail`: the fit at 0.10 to 0.40 mm a side, to print before the real part |
+| `fits` helpers | `split_keyed` (two halves on dovetail keys), `crush_ribs`, `bump`, `sheet_slot`, `grille` (refuses holes the plate cannot print) |
+| Two-colour marks | `fits.trace` / `fits.words` → `fits.inlay`, then `fits.artwork_check` compares the sliced first layer with the drawing |
+| Plain things | `t2p basic can`, `box`, `plaque`: solid walls, screw or slip lids, inlaid words or a traced picture |
+| Your own shape | `t2p plugin new shape NAME --image outline.png` turns a silhouette into a catalogue shape |
+
+`lattice.weave_region` puts any woven pattern on your own outline (holes included) and `lattice.support_audit` checks
+that no rod end is left in mid-air.
+
+## The studio
+
+`./t2p studio`, from a clone. Pick a shape, texture, colours and nozzle; the preview rebuilds live. **Open in
+Bambu Studio** writes the project to `~/Downloads/text2print/`. **Get exact print time** slices it with the Bambu
+Studio CLI, including real AMS changes and purge. **Save design** keeps it under **Saved**, and every design is a shareable link.
 
 <p align="center"><img src="docs/media/studio-demo.gif" width="920" alt="Screen recording of the text2print studio: picking the round dish shape, the rose window woven texture and a marine blue colour, the live 3D preview rebuilding, a spin, and the print card with time, filament, AMS changes and Open in Bambu Studio"></p>
 <p align="center"><sub>The studio: pick a shape, a pattern and colours; the preview rebuilds live and the print card shows time, filament and AMS changes.</sub></p>
@@ -106,25 +180,6 @@ A design is one JSON object:
 as JSON (what an agent reads first). `sampler` writes test plates, `verify TEXTURE NOZZLE ok|fail --material` records a
 real print, `design check|slice` builds a design file without writing a project, `picture` and `pictures` prepare and
 list pictures, `palette match` reads a photo's colours, and `plugin` manages your own textures and shapes.
-
-### Parts that are not in the catalogue
-
-A bracket, a sleeve, a stand, an STL you were handed: model the mesh however you like and let `part.deliver` write the
-project with the right settings for the material, an STL per colour, a render, a dimensioned drawing and the slice.
-
-```python
-from text2print import part
-r = part.deliver("pipe_sleeve", [("Sleeve", mesh, 1)], colours=["#FFFFFF"], material="petg", slice=True,
-                 check={"length": (30.0, "z")})          # raises if the part is not the size you asked for
-```
-
-```bash
-./t2p part bracket.stl --material petg --slice     # a ready-made STL as a project
-./t2p check _slice/sliced.3mf                      # real first-layer and print speeds, changes, grams per filament
-```
-
-`lattice.weave_region` puts any woven pattern on your own outline (holes included) and `lattice.support_audit` checks
-that no rod end is left in mid-air.
 
 ## Use it as a Claude Code skill
 
@@ -416,10 +471,11 @@ text2print/   build.py (pick -> project) · design.py (a design as data) · __ma
               halftone.py · colourwork.py (knit charts) · compose.py (mix) · spiral.py (vase mode)
               shell.py (voronoi, litho, fuzzy) · flat.py (tiles) · extras.py (zones, lids)
               fittings.py · floors.py · meshops.py · verify.py · sampler.py (test plates)
+              part.py (functional parts) · drawing.py (dimension drawing)
               bambu.py (3MF + CLI slice) · printer.py + data/ (P2S) · lan.py · store.py
 studio/       server.py + static/ (the picker)
 docs/         make_media.py · make_motion.py · make_hero.py (the README animations)
-t2p           the command line from any folder
+t2p           the command line from any folder (pip installs the same command)
 tests/        python -m pytest (fast) · python -m pytest -m "" (everything, incl. the real slicer)
 ```
 
