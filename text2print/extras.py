@@ -183,8 +183,9 @@ def _knob(rim_r):
     return _tm(cap + peg)
 
 
-def lid_set(style, rim_r, open_r, top_z, fit="slip", square=None, corner=0.0):
-    """-> dict(lid, knob, rim: [solids added to the piece], plug_d, clearance, notes). Lids print top-face down."""
+def lid_set(style, rim_r, open_r, top_z, fit="slip", square=None, corner=0.0, knob=True):
+    """-> dict(lid, knob, rim: [solids added to the piece], plug_d, clearance, notes). Lids print top-face down.
+    knob=False leaves the lid whole (no peg hole)."""
     import manifold3d as m3d
     clear = FITS.get(fit, 0.25); n = max(96, int(2 * math.pi * rim_r / 1.2)); notes = []
     hole = m3d.Manifold.cylinder(30, KNOB_HOLE / 2, KNOB_HOLE / 2, 48).translate([0, 0, -1])
@@ -229,7 +230,7 @@ def lid_set(style, rim_r, open_r, top_z, fit="slip", square=None, corner=0.0):
         ring = (ring - (m3d.Manifold.cylinder(0.8, r_p + 1, r_p + 1, n).translate([0, 0, LIP_H - 0.8]) - lead)).translate([0, 0, LID_T - 0.01])
         body = _plate(rim_r, LID_T, square, corner, n) + ring
         plug_d = 2 * r_p
-    lid_m = _tm(body - hole)
+    lid_m = _tm(body - hole if knob else body)
     return dict(lid=lid_m, knob=_knob(rim_r), rim=rim_parts, plug_d=round(plug_d, 1), clearance=clear, notes=notes)
 
 
@@ -302,7 +303,7 @@ def lid_from_region(region, fit="slip"):
     return _lid_from_polys(max(holes, key=lambda q: q.area), outer.convex_hull, clear)
 
 
-def _lid_from_polys(hole, outer, clear):
+def _lid_from_polys(hole, outer, clear, knob=True):
     import manifold3d as m3d
     plug_o = hole.buffer(-clear, join_style=1); plug_i = plug_o.buffer(-LIP_W, join_style=1)
     if plug_i.is_empty or plug_i.area < 100:
@@ -317,7 +318,7 @@ def _lid_from_polys(hole, outer, clear):
     hole_c = m3d.Manifold.cylinder(30, KNOB_HOLE / 2, KNOB_HOLE / 2, 48).translate([0, 0, -1])
     rim_r = float(np.sqrt(plate.area / math.pi))
     b = plug_o.bounds
-    return dict(lid=_tm(body - hole_c), knob=_knob(rim_r), rim=[], plug_d=round(min(b[2] - b[0], b[3] - b[1]), 1),
+    return dict(lid=_tm(body - hole_c if knob else body), knob=_knob(rim_r), rim=[], plug_d=round(min(b[2] - b[0], b[3] - b[1]), 1),
                 clearance=clear, notes=[f"The lid's plug follows the opening with {clear} mm a side."])
 
 

@@ -916,29 +916,39 @@ def weave_region(sdf, courses, nz, pattern="grid", extent=None, min_rod=None, **
     return rods
 
 
-def support_audit(rods, frame=(), max_free_end=2.0):
-    """Does every rod above the first course have something under it? rods: a Rods (its lines and paths, course =
-    z // rod height). frame: extra rods as (course, [(x, y), ...], width) — rims and rings laid by hand; an end that
-    reaches one of its own course's frame rods counts as held. -> {"rods", "longest_span", "loose_ends",
-    "longest_loose_end"}: longest_span is the longest stretch bridged between supports (compare with what the rod can
-    bridge: about 1.5 x its pitch); loose_ends are ends hanging more than max_free_end with nothing under or beside
-    them. A catalogue pattern on a catalogue shape passes; a pattern clipped to your own outline may not."""
-    from shapely.geometry import LineString
+def support_audit(rods, frame=(), max_free_end=2.0, z0=None):
+    """Does every rod above the first course have something under it? rods: a Rods (its lines and paths). Courses
+    are counted from the lowest rod (course 0), or from z0 when given, one rod height each. frame: extra rods as
+    (course, [(x, y), ...], width) — rims and rings laid by hand, numbered the same way; an end that reaches one of
+    its own course's frame rods counts as held. -> {"rods", "courses", "longest_span", "loose_ends",
+    "longest_loose_end", "unsupported_courses"}: longest_span is the longest stretch bridged between supports
+    (compare with what the rod can bridge: about 1.5 x its pitch); loose_ends are ends hanging more than max_free_end
+    with nothing under or beside them; unsupported_courses have no course at all under them (every rod in one counts
+    as loose). A catalogue pattern on a catalogue shape passes; a pattern clipped to your own outline may not."""
+    from shapely.geometry import LineString, Polygon
     from shapely.ops import unary_union
-    nz = rods.nz; rh = nz.rod_h; plan = {}
+    nz = rods.nz; rh = nz.rod_h; segs = []
     for ls in rods.lines.values():
         for a, b in ls:
-            plan.setdefault(int(a[2] / rh), []).append((np.array([a[:2], b[:2]], float), nz.rod_w, False))
+            segs.append((float(a[2]), np.array([a[:2], b[:2]], float)))
     for ps in rods.paths.values():
         for p in ps:
-            plan.setdefault(int(p[0, 2] / rh), []).append((np.asarray(p)[:, :2], nz.rod_w, False))
+            segs.append((float(p[0, 2]), np.asarray(p)[:, :2]))
+    if not segs:
+        return {"rods": 0, "courses": 0, "longest_span": 0.0, "loose_ends": 0, "longest_loose_end": 0.0, "unsupported_courses": []}
+    base = min(z for z, _ in segs) if z0 is None else float(z0) + (min(z for z, _ in segs) - float(z0)) % rh
+    plan = {}
+    for z, pts in segs:
+        plan.setdefault(int(round((z - base) / rh)), []).append((pts, nz.rod_w, False))
     for course, pts, width in frame:
         plan.setdefault(int(course), []).append((np.asarray(pts, float), float(width), True))
-    worst = worst_end = 0.0; loose = n = 0
+    first = min(plan); worst = worst_end = 0.0; loose = n = 0; bare = []
     for i in sorted(plan):
-        if i == 0 or i - 1 not in plan:
+        if i == first:
             continue
-        below = unary_union([LineString(p).buffer(w / 2) for p, w, _ in plan[i - 1]])
+        if i - 1 not in plan:
+            bare.append(i)
+        below = unary_union([LineString(p).buffer(w / 2) for p, w, _ in plan[i - 1]]) if i - 1 in plan else Polygon()
         held = unary_union([LineString(p).buffer(w / 2) for p, w, f in plan[i] if f]) if any(f for _, _, f in plan[i]) else None
         for p, w, is_frame in plan[i]:
             if is_frame:
@@ -952,4 +962,5 @@ def support_audit(rods, frame=(), max_free_end=2.0):
                     loose += g.length > max_free_end; worst_end = max(worst_end, g.length)
                 else:
                     worst = max(worst, g.length)
-    return {"rods": n, "longest_span": round(worst, 2), "loose_ends": int(loose), "longest_loose_end": round(worst_end, 2)}
+    return {"rods": n, "courses": len(plan), "longest_span": round(worst, 2), "loose_ends": int(loose),
+            "longest_loose_end": round(worst_end, 2), "unsupported_courses": bare}

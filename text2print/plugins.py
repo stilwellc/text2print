@@ -287,8 +287,48 @@ def displace(u, layer, band_layers, band, z_frac):
 }
 
 
-def new(kind, name):
-    """Write a starter plugin into the plugin folder; returns its path."""
+OUTLINE_TEMPLATE = '''"""Shape plugin: {name} — an outline traced from a picture ({source})."""
+import numpy as np
+from text2print.shapes import polygon_sdf
+
+SHAPE = dict(name="{title}", blurb="A shape traced from a picture", kind="outline",
+             params=[("width", "Width", 40, 200, 1, {width}), ("height", "Height", 10, 200, 1, 40)])
+ASPECT = {aspect}          # depth / width of the traced outline
+POINTS = {points}          # the outline at width 1, centred
+
+
+def outline(v):
+    return polygon_sdf(np.array(POINTS) * v["width"])
+
+
+def extent(v):
+    return v["width"] * max(1.0, ASPECT) / 2 + 2
+'''
+
+
+def new(kind, name, image=None, width=120.0):
+    """Write a starter plugin into the plugin folder; returns its path. A shape with image= is traced from that
+    picture's dark silhouette (its largest outline, smoothed), `width` mm wide by default: it then takes every wall
+    texture and the woven ones like any other shape."""
+    if kind == "shape" and image:
+        import numpy as np
+        from . import fits
+        art, _ = fits.trace(image, 1000.0, min_feature=6.0)
+        big = max((art.geoms if hasattr(art, "geoms") else [art]), key=lambda q: q.area)
+        ring = big.exterior.simplify(1.5); pts = np.asarray(ring.coords)[:-1]
+        if len(pts) < 3:
+            raise ValueError("no outline found in that picture: it wants one dark shape on a light ground")
+        b = big.bounds; w, d = b[2] - b[0], b[3] - b[1]; c = ((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)
+        pts = (pts - c) / w
+        DIR.mkdir(parents=True, exist_ok=True)
+        stem = "".join(ch if ch.isalnum() else "_" for ch in name.lower()).strip("_") or kind
+        path = DIR / f"{stem}.py"
+        if path.exists():
+            raise FileExistsError(path)
+        path.write_text(OUTLINE_TEMPLATE.format(name=name, title=name.replace("_", " ").title(), source=pathlib.Path(str(image)).name,
+                                                width=int(round(float(width))), aspect=round(d / w, 4),
+                                                points=[[round(float(x), 4), round(float(y), 4)] for x, y in pts]))
+        return path
     if kind not in TEMPLATES:
         raise ValueError("kind is picture, woven, stitch, chart or shape")
     DIR.mkdir(parents=True, exist_ok=True)

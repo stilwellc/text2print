@@ -547,6 +547,22 @@ SHAPES["tile"] = Tile("tile", "Photo tile", "A flat lithophane panel — one col
     Param("width", "Width", 60, 200, 1, 150), Param("depth", "Height", 60, 200, 1, 100)])
 
 
+def polygon_sdf(points):
+    """A closed outline as points [(x, y), ...] in mm -> sdf(x, y), negative inside (what an outline shape wants)."""
+    from matplotlib.path import Path
+    from scipy.spatial import cKDTree
+    P = np.asarray(points, float); Q = np.vstack([P, P[:1]])
+    seg = np.hypot(*np.diff(Q, axis=0).T); s_ = np.concatenate([[0], np.cumsum(seg)])
+    t = np.arange(0, s_[-1], 0.2)
+    tree = cKDTree(np.column_stack([np.interp(t, s_, Q[:, 0]), np.interp(t, s_, Q[:, 1])])); path = Path(Q)
+
+    def sdf(x, y):
+        x, y = np.broadcast_arrays(np.asarray(x, float), np.asarray(y, float)); pts = np.column_stack([x.ravel(), y.ravel()])
+        d = tree.query(pts)[0]
+        return np.where(path.contains_points(pts), -d, d).reshape(x.shape)
+    return sdf
+
+
 # ── shapes written as plugins (see plugins.py): a round silhouette or a plan outline ───────────────────────
 class PluginRound(Profiled):
     """SHAPE kind "round": the plugin's radius(v, z) -> mm, clamped to the overhang law (0.9 mm per mm out)."""
