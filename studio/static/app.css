@@ -25,7 +25,7 @@ h2 { font-size: 15px; margin-bottom: 12px; }
 .top { height: 56px; display: flex; align-items: center; gap: 20px; padding: 0 20px;
   border-bottom: 1px solid var(--line); background: var(--panel); }
 .brand { font-weight: 650; font-size: 17px; letter-spacing: -0.02em; display: flex; align-items: center; gap: 9px; }
-.brand img { display: block; border-radius: 6px; }
+.brand img { display: block; }
 .printer { display: flex; align-items: center; gap: 8px; color: var(--muted); padding: 6px 12px;
   border-radius: 999px; background: var(--card); border: 1px solid var(--line); }
 .printer .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
